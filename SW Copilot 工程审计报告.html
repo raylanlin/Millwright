@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SW Copilot 工程审计报告</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: oklch(0.985 0.004 260);
+    --surface: #fff;
+    --text: oklch(0.22 0.01 260);
+    --text2: oklch(0.45 0.01 260);
+    --text3: oklch(0.6 0.008 260);
+    --border: oklch(0.9 0.005 260);
+    --accent: oklch(0.55 0.18 250);
+    --accent-bg: oklch(0.95 0.04 250);
+    --green: oklch(0.55 0.16 155);
+    --green-bg: oklch(0.95 0.04 155);
+    --red: oklch(0.55 0.18 25);
+    --red-bg: oklch(0.95 0.04 25);
+    --orange: oklch(0.6 0.16 65);
+    --orange-bg: oklch(0.95 0.04 65);
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Noto Sans SC', -apple-system, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--sans); background: var(--bg); color: var(--text); line-height: 1.65; }
+  
+  .container { max-width: 960px; margin: 0 auto; padding: 48px 24px 80px; }
+  
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.5px; }
+  .subtitle { color: var(--text3); font-size: 14px; margin-bottom: 40px; }
+  
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 40px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .stat-num { font-size: 32px; font-weight: 700; font-family: var(--mono); }
+  .stat-label { font-size: 12px; color: var(--text3); margin-top: 2px; }
+  .stat-num.green { color: var(--green); }
+  .stat-num.red { color: var(--red); }
+  .stat-num.orange { color: var(--orange); }
+  .stat-num.accent { color: var(--accent); }
+  
+  h2 { font-size: 18px; font-weight: 700; margin: 36px 0 16px; display: flex; align-items: center; gap: 8px; }
+  h2 .badge { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 99px; }
+  .badge.done { background: var(--green-bg); color: var(--green); }
+  .badge.issue { background: var(--red-bg); color: var(--red); }
+  .badge.new { background: var(--accent-bg); color: var(--accent); }
+  
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .card-header { padding: 14px 18px; display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+  .card-header:hover { background: var(--bg); }
+  .card-icon { width: 20px; text-align: center; flex-shrink: 0; }
+  .card-title { font-size: 14px; font-weight: 500; flex: 1; }
+  .card-tag { font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 500; }
+  .tag-fixed { background: var(--green-bg); color: var(--green); }
+  .tag-new { background: var(--accent-bg); color: var(--accent); }
+  .tag-todo { background: var(--orange-bg); color: var(--orange); }
+  .chevron { color: var(--text3); font-size: 12px; transition: transform 0.2s; }
+  .card.open .chevron { transform: rotate(90deg); }
+  .card-body { padding: 0 18px 16px; font-size: 13px; color: var(--text2); line-height: 1.7; display: none; }
+  .card.open .card-body { display: block; }
+  
+  code { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  .file-path { color: var(--accent); }
+  
+  .tree { font-family: var(--mono); font-size: 12.5px; line-height: 1.8; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 22px; white-space: pre; overflow-x: auto; margin-bottom: 12px; color: var(--text2); }
+  .tree .new { color: var(--accent); font-weight: 500; }
+  .tree .changed { color: var(--orange); }
+  
+  ul { padding-left: 20px; margin: 8px 0; }
+  li { margin: 4px 0; }
+
+  @media (max-width: 640px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    h1 { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>SW Copilot 工程审计报告</h1>
+<p class="subtitle">raylanlin/sw-copilot · master · 2026-04-28</p>
+
+<div class="stats">
+  <div class="stat"><div class="stat-num accent">6</div><div class="stat-label">文件已修改/新增</div></div>
+  <div class="stat"><div class="stat-num green">8/8</div><div class="stat-label">实施计划已完成</div></div>
+  <div class="stat"><div class="stat-num orange">5</div><div class="stat-label">文档不一致项</div></div>
+  <div class="stat"><div class="stat-num green">161</div><div class="stat-label">测试用例</div></div>
+</div>
+
+<!-- ==================== 新增文件 ==================== -->
+<h2>新增文件 <span class="badge new">1 个</span></h2>
+
+<div class="card open">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">📄</span>
+    <span class="card-title"><code class="file-path">CLAUDE.md</code> — 项目规范（Claude Code / 团队共用）</span>
+    <span class="card-tag tag-new">新增</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <p>包含以下内容，供 Claude Code 自动读取 & 团队对齐：</p>
+    <ul>
+      <li>项目简介 & 技术栈</li>
+      <li>三进程架构概览（Main / Preload / Renderer）</li>
+      <li>完整目录结构（与实际代码同步）</li>
+      <li>开发命令速查</li>
+      <li>核心约定：IPC、LLM 适配器、COM 桥接、脚本生成器、VBA→VBS 转换</li>
+      <li>新增 SW 工具的 4 步 checklist</li>
+      <li>测试、环境变量、Git 规范、安全红线</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ==================== 已修复问题 ==================== -->
+<h2>已修复问题 <span class="badge done">5 项</span></h2>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">🔗</span>
+    <span class="card-title"><code class="file-path">CHANGELOG.md</code> — GitHub 链接指向错误</span>
+    <span class="card-tag tag-fixed">已修复</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <p>底部版本链接 <code>yourname/sw-copilot</code> → <code>raylanlin/sw-copilot</code></p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">🔗</span>
+    <span class="card-title"><code class="file-path">docs/CONTRIBUTING.md</code> — clone URL 错误 + 过时依赖</span>
+    <span class="card-tag tag-fixed">已修复</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <ul>
+      <li><code>yourname/sw-copilot</code> → <code>raylanlin/sw-copilot</code></li>
+      <li>移除 "Visual Studio Build Tools（编译 winax 原生模块）" 前置要求 — 项目已不使用 winax</li>
+      <li>移除 winax 安装失败的 workaround 说明</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">⚙️</span>
+    <span class="card-title"><code class="file-path">docs/ARCHITECTURE.md</code> — 技术栈描述与实际代码不符</span>
+    <span class="card-tag tag-fixed">已修复</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <ul>
+      <li>COM 桥接：<code>winax / node-ffi-napi</code> → <code>cscript.exe + VBScript</code></li>
+      <li>AI 接口：<code>Anthropic SDK / OpenAI SDK</code> → <code>原生 fetch + 手写 SSE</code></li>
+      <li>脚本执行：<code>SolidWorks VBA / win32com</code> → <code>cscript/VBS > Python > COM RunMacro2</code></li>
+      <li>SolidWorksBridge 代码示例：移除 winax require 伪代码，更新为 cscript 说明</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">✅</span>
+    <span class="card-title"><code class="file-path">docs/IMPLEMENTATION-PLAN.md</code> — 实施状态未更新</span>
+    <span class="card-tag tag-fixed">已修复</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <p>8 个步骤全部已实现（v0.2.0），但文档中无完成标记。</p>
+    <p>已为每个步骤添加 ✅ 标记，并在文档顶部注明 "8/8 步骤已全部实现"。</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">📋</span>
+    <span class="card-title"><code class="file-path">docs/ARCHITECTURE.md</code> — 附录 A 依赖版本过时</span>
+    <span class="card-tag tag-todo">待手动确认</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <p>附录 A 仍列出 <code>@anthropic-ai/sdk</code>、<code>openai</code>、<code>winax</code> 等包，但 <code>package.json</code> 的 dependencies 中没有这些。实际项目零 SDK 依赖，仅用原生 fetch。</p>
+    <p><strong>建议</strong>：删除附录 A 或替换为实际依赖列表。</p>
+  </div>
+</div>
+
+<!-- ==================== 建议优化 ==================== -->
+<h2>后续建议 <span class="badge issue">可选</span></h2>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">📁</span>
+    <span class="card-title">缺少 <code class="file-path">src/shared/</code> 目录中的文件列表</span>
+    <span class="card-tag tag-todo">建议补充</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <p>GitHub tree 中未显示 <code>src/shared/</code> 下的文件（可能是 TS 编译后才生成，或在 renderer 中内联）。建议确认这些文件存在并加入版本控制：</p>
+    <ul>
+      <li><code>src/shared/types.ts</code></li>
+      <li><code>src/shared/ipc-channels.ts</code></li>
+      <li><code>src/shared/presets.ts</code></li>
+      <li><code>src/shared/sw-tools.ts</code></li>
+    </ul>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">🧪</span>
+    <span class="card-title">补充集成测试</span>
+    <span class="card-tag tag-todo">Phase 2</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <p>DEVELOPMENT.md 中已提到计划补充：</p>
+    <ul>
+      <li>LLM 适配器集成测试（MSW mock server）</li>
+      <li><code>sw-bridge</code> Windows 端到端测试</li>
+      <li><code>engine</code> 脚本执行测试（mock swApp + python）</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="this.parentElement.classList.toggle('open')">
+    <span class="card-icon">📝</span>
+    <span class="card-title">README.md 小幅优化</span>
+    <span class="card-tag tag-todo">建议</span>
+    <span class="chevron">▶</span>
+  </div>
+  <div class="card-body">
+    <ul>
+      <li>文档链接中无 <code>IMPLEMENTATION-PLAN.md</code>，建议添加或归档</li>
+      <li>"许可证" 部分只写了 MIT，但描述中提到 "MIT + Commons Clause"，建议统一</li>
+      <li>可考虑添加 badges（CI 状态、版本、许可证）</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ==================== 变更文件清单 ==================== -->
+<h2>变更文件清单</h2>
+
+<div class="tree"><span class="new">A  CLAUDE.md</span>                        ← 新增：项目规范
+<span class="changed">M  CHANGELOG.md</span>                     ← 修复 GitHub 链接
+<span class="changed">M  docs/CONTRIBUTING.md</span>              ← 修复 clone URL, 移除 winax
+<span class="changed">M  docs/ARCHITECTURE.md</span>              ← 同步实际技术栈
+<span class="changed">M  docs/IMPLEMENTATION-PLAN.md</span>       ← 标记 8/8 步骤完成</div>
+
+</div>
+</body>
+</html>

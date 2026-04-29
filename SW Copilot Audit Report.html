@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SW Copilot — 工程审查报告 Project Audit</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{font-family:'DM Sans',-apple-system,sans-serif;background:#0c0e13;color:#c8cad0}
+  body{min-height:100vh}
+  ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#2a2d36;border-radius:3px}
+  code,.mono{font-family:'JetBrains Mono',monospace}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState } = React;
+
+const C = {
+  bg:'#0c0e13', sf:'#14161d', sfA:'#1a1d26', bd:'#232730',
+  tx:'#e2e4e9', ts:'#8b8f9e', tm:'#555969',
+  blue:'#4d7cff', green:'#34d399', amber:'#fbbf24', red:'#f87171', purple:'#a78bfa', cyan:'#22d3ee',
+};
+
+const SEV = {
+  critical: { bg:'rgba(248,113,113,0.10)', color:C.red, label:'🔴 严重 Critical' },
+  warning:  { bg:'rgba(251,191,36,0.10)', color:C.amber, label:'🟡 建议 Recommended' },
+  info:     { bg:'rgba(77,124,255,0.10)', color:C.blue, label:'🔵 信息 Info' },
+  good:     { bg:'rgba(52,211,153,0.10)', color:C.green, label:'🟢 良好 Good' },
+};
+
+const FINDINGS = [
+  {
+    cat: '📄 README.md',
+    items: [
+      { sev:'critical', title:'缺少英文内容', titleEn:'No English content', desc:'README 纯中文，对国际贡献者不友好。开源项目应中英双语。', fix:'已重写为中英双语版本，添加 badges、对比表格、折叠式服务商列表。', file:'optimized/README.md' },
+      { sev:'warning', title:'缺少项目 badges', titleEn:'No badges', desc:'缺少版本号、测试状态、license 等标识，降低第一印象专业度。', fix:'已添加 version / electron / react / typescript / tests / license 六个 badge。', file:'optimized/README.md' },
+      { sev:'warning', title:'缺少架构图', titleEn:'No architecture diagram', desc:'README 中无架构概览图，新人难以快速理解项目。', fix:'已添加架构一行图 + 技术亮点说明。', file:'optimized/README.md' },
+    ]
+  },
+  {
+    cat: '📋 文档体系 Documentation',
+    items: [
+      { sev:'critical', title:'ARCHITECTURE.md 过时引用', titleEn:'Outdated references in ARCHITECTURE.md', desc:'文档提到 winax、@anthropic-ai/sdk、openai SDK，但实际代码使用 cscript.exe + 原生 fetch，无任何 SDK。附录 A 的依赖版本表也是错的。', fix:'需更新：移除 winax/SDK 引用，修正依赖表为 electron-store + uuid。', file:'docs/ARCHITECTURE.md' },
+      { sev:'warning', title:'USER-GUIDE.md 版本号错误', titleEn:'Wrong version in USER-GUIDE.md', desc:'头部标注"版本 1.0"，但项目实际版本为 v0.2.0。', fix:'应改为"版本 0.2"。', file:'docs/USER-GUIDE.md' },
+      { sev:'warning', title:'DEVELOPMENT.md 提到 winax', titleEn:'DEVELOPMENT.md mentions winax', desc:'"winax 延迟 require" 等描述已过时，应改为 cscript 方案。', fix:'更新 COM Bridge 章节描述。', file:'docs/DEVELOPMENT.md' },
+      { sev:'info', title:'IMPLEMENTATION-PLAN.md 可归档', titleEn:'IMPLEMENTATION-PLAN.md can be archived', desc:'8/8 步骤全部完成，已无参考价值，建议移至 docs/archive/ 或删除。', fix:'建议归档。', file:'docs/IMPLEMENTATION-PLAN.md' },
+    ]
+  },
+  {
+    cat: '🔒 安全与治理 Security & Governance',
+    items: [
+      { sev:'critical', title:'缺少 SECURITY.md', titleEn:'No SECURITY.md', desc:'开源项目应有漏洞报告渠道，GitHub 会在仓库首页提示缺少安全策略。', fix:'已创建 SECURITY.md，包含安全设计说明和漏洞报告流程。', file:'optimized/SECURITY.md' },
+      { sev:'warning', title:'缺少 Issue / PR 模板', titleEn:'No Issue/PR templates', desc:'无模板导致 Issue 质量参差不齐，PR 审查无标准检查清单。', fix:'已创建 bug_report.md / feature_request.md / PULL_REQUEST_TEMPLATE.md。', file:'optimized/.github/' },
+      { sev:'info', title:'LICENSE 声明不一致', titleEn:'LICENSE inconsistency', desc:'README 提到"MIT + Commons Clause 非商用许可"，但 LICENSE 文件为纯 MIT。建议统一。', fix:'确认许可策略后统一。', file:'LICENSE' },
+    ]
+  },
+  {
+    cat: '🤝 贡献者体验 Contributor Experience',
+    items: [
+      { sev:'warning', title:'CONTRIBUTING.md 过于简略', titleEn:'CONTRIBUTING.md too brief', desc:'缺少难度分级、贡献方向表、快速上手命令，对新贡献者不友好。', fix:'已重写，包含难度星级、贡献方向表、新增工具完整步骤、代码规范速查。', file:'optimized/docs/CONTRIBUTING.md' },
+      { sev:'info', title:'缺少 CODE_OF_CONDUCT', titleEn:'No Code of Conduct', desc:'大型开源项目通常需要行为准则。v0.2 阶段可后补。', fix:'建议 v0.3 前补充。', file:'' },
+    ]
+  },
+  {
+    cat: '⚙️ 工程配置 Engineering',
+    items: [
+      { sev:'good', title:'测试覆盖良好', titleEn:'Good test coverage', desc:'161 个用例覆盖核心模块（SSE / code-extract / sanitizer / generators / vba-macro-writer / env-fallback）。', fix:'—', file:'tests/' },
+      { sev:'good', title:'CI/CD 基本完备', titleEn:'CI/CD functional', desc:'GitHub Actions 构建 Windows 安装包 + tag 触发 Release，基本可用。', fix:'建议增加 lint + test 步骤。', file:'.github/workflows/build.yml' },
+      { sev:'warning', title:'.gitignore 不完整', titleEn:'Incomplete .gitignore', desc:'缺少 *.tsbuildinfo、Thumbs.db、.env.*.local 等常见模式。', fix:'已补充。', file:'optimized/.gitignore' },
+      { sev:'info', title:'CI 未运行测试', titleEn:'CI skips tests', desc:'build.yml 只 build + dist，未运行 npm test 和 npm run lint。', fix:'建议在 Package 步骤前加 test + lint。', file:'.github/workflows/build.yml' },
+    ]
+  },
+  {
+    cat: '🎨 UI / 代码质量',
+    items: [
+      { sev:'good', title:'主题系统完整', titleEn:'Theme system complete', desc:'完整的 light/dark token 体系，所有颜色通过主题对象引用。', fix:'—', file:'src/renderer/themes/' },
+      { sev:'good', title:'IPC 类型安全', titleEn:'Type-safe IPC', desc:'频道名集中管理于 ipc-channels.ts，preload 层干净隔离。', fix:'—', file:'src/shared/ipc-channels.ts' },
+      { sev:'good', title:'零 SDK 依赖设计', titleEn:'Zero SDK design', desc:'原生 fetch + 手写 SSE，运行时仅 2 个 npm 依赖（electron-store + uuid），攻击面极小。', fix:'—', file:'package.json' },
+      { sev:'info', title:'UI 原型可升级', titleEn:'UI can be improved', desc:'当前 UI 功能完整但视觉偏基础灰调，品牌感不强。', fix:'已产出新 UI 原型方案（蓝色品牌色 + 更精致的交互）。', file:'SW Copilot UI Prototype.html' },
+    ]
+  },
+];
+
+function Badge({ sev }) {
+  const s = SEV[sev];
+  return <span style={{ display:'inline-flex', alignItems:'center', gap:4, padding:'3px 10px', borderRadius:20, background:s.bg, color:s.color, fontSize:11, fontWeight:600 }}>{s.label}</span>;
+}
+
+function Finding({ item }) {
+  const s = SEV[item.sev];
+  return (
+    <div style={{ background:C.sf, border:`1px solid ${C.bd}`, borderRadius:10, padding:'16px 20px', borderLeft:`3px solid ${s.color}` }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8, flexWrap:'wrap' }}>
+        <Badge sev={item.sev} />
+        <span style={{ fontSize:14, fontWeight:600, color:C.tx }}>{item.title}</span>
+        <span style={{ fontSize:12, color:C.tm }}>{item.titleEn}</span>
+      </div>
+      <p style={{ fontSize:13, color:C.ts, lineHeight:1.7, marginBottom: item.fix && item.fix !== '—' ? 10 : 0 }}>{item.desc}</p>
+      {item.fix && item.fix !== '—' && (
+        <div style={{ fontSize:12, color:C.green, display:'flex', alignItems:'flex-start', gap:6 }}>
+          <span>✓</span>
+          <span>{item.fix} {item.file && <code style={{ fontSize:11, color:C.tm, background:C.sfA, padding:'1px 6px', borderRadius:4 }}>{item.file}</code>}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const allItems = FINDINGS.flatMap(f => f.items);
+  const counts = { critical: allItems.filter(i=>i.sev==='critical').length, warning: allItems.filter(i=>i.sev==='warning').length, info: allItems.filter(i=>i.sev==='info').length, good: allItems.filter(i=>i.sev==='good').length };
+  const [filter, setFilter] = useState('all');
+
+  return (
+    <div style={{ maxWidth:880, margin:'0 auto', padding:'40px 28px 80px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:8 }}>
+        <img src="assets/icon-256.png" alt="" style={{ width:44, height:44, borderRadius:10 }} />
+        <div>
+          <h1 style={{ fontSize:24, fontWeight:700, color:C.tx }}>工程审查报告 Project Audit</h1>
+          <p style={{ fontSize:12, color:C.tm }}>SW Copilot v0.2.0 · {new Date().toISOString().slice(0,10)}</p>
+        </div>
+      </div>
+      <p style={{ fontSize:13, color:C.ts, lineHeight:1.7, margin:'16px 0 28px', maxWidth:700 }}>
+        对仓库的 README、文档体系、安全策略、贡献者体验、工程配置和代码质量进行全面审查。
+        每个发现标注严重级别，已修复项标注 ✓ 及产出文件。
+      </p>
+
+      {/* Summary */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10, marginBottom:32 }}>
+        {[
+          { k:'critical', label:'严重', n:counts.critical },
+          { k:'warning', label:'建议', n:counts.warning },
+          { k:'info', label:'信息', n:counts.info },
+          { k:'good', label:'良好', n:counts.good },
+        ].map(s => (
+          <button key={s.k} onClick={() => setFilter(filter === s.k ? 'all' : s.k)} style={{
+            background: filter === s.k ? SEV[s.k].bg : C.sf, border:`1px solid ${filter === s.k ? SEV[s.k].color+'44' : C.bd}`,
+            borderRadius:10, padding:'16px', cursor:'pointer', textAlign:'left', fontFamily:'inherit', transition:'all 0.15s',
+          }}>
+            <div style={{ fontSize:28, fontWeight:700, color:SEV[s.k].color, fontFamily:"'JetBrains Mono',monospace" }}>{s.n}</div>
+            <div style={{ fontSize:12, color:C.ts, marginTop:4 }}>{s.label} {s.k}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* Deliverables */}
+      <div style={{ background:C.sf, border:`1px solid ${C.bd}`, borderRadius:10, padding:'20px 24px', marginBottom:32 }}>
+        <h3 style={{ fontSize:14, fontWeight:700, color:C.tx, marginBottom:12 }}>📦 产出文件 Deliverables</h3>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          {[
+            { f:'optimized/README.md', d:'中英双语 README（重写）' },
+            { f:'optimized/SECURITY.md', d:'安全策略（新增）' },
+            { f:'optimized/docs/CONTRIBUTING.md', d:'贡献指南（重写）' },
+            { f:'optimized/.github/ISSUE_TEMPLATE/', d:'Issue 模板 ×2（新增）' },
+            { f:'optimized/.github/PULL_REQUEST_TEMPLATE.md', d:'PR 模板（新增）' },
+            { f:'optimized/.gitignore', d:'.gitignore（完善）' },
+            { f:'SW Copilot Roadmap.html', d:'项目路线图看板' },
+            { f:'SW Copilot UI Prototype.html', d:'UI 原型 v2（暗色/亮色）' },
+          ].map((d,i) => (
+            <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0' }}>
+              <span style={{ color:C.green, fontSize:12 }}>✓</span>
+              <code style={{ fontSize:11, color:C.blue, background:C.sfA, padding:'2px 8px', borderRadius:4 }}>{d.f}</code>
+              <span style={{ fontSize:11, color:C.tm }}>{d.d}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Pending actions */}
+      <div style={{ background:C.sf, border:`1px solid ${C.bd}`, borderRadius:10, padding:'20px 24px', marginBottom:32 }}>
+        <h3 style={{ fontSize:14, fontWeight:700, color:C.tx, marginBottom:12 }}>⏳ 待人工确认 Pending Manual Actions</h3>
+        {[
+          'ARCHITECTURE.md：移除 winax / @anthropic-ai/sdk / openai SDK 引用，修正附录 A 依赖表',
+          'USER-GUIDE.md：头部版本号 "1.0" → "0.2"',
+          'DEVELOPMENT.md：COM Bridge 章节 "winax 延迟 require" → "cscript.exe 执行 VBScript"',
+          'IMPLEMENTATION-PLAN.md：归档至 docs/archive/ 或删除',
+          'LICENSE：确认 MIT 或 MIT + Commons Clause，与 README 统一',
+          'build.yml：Package 步骤前增加 npm test + npm run lint',
+          'UI-PROTOTYPE.jsx：头部加注释标注为 "v0.1 historical reference"',
+        ].map((a,i) => (
+          <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'6px 0', fontSize:12, color:C.ts }}>
+            <span style={{ color:C.amber, flexShrink:0 }}>○</span>
+            <span>{a}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Findings */}
+      {FINDINGS.map((cat, ci) => {
+        const items = filter === 'all' ? cat.items : cat.items.filter(i => i.sev === filter);
+        if (items.length === 0) return null;
+        return (
+          <div key={ci} style={{ marginBottom:28 }}>
+            <h2 style={{ fontSize:16, fontWeight:700, color:C.tx, marginBottom:12 }}>{cat.cat}</h2>
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {items.map((item, ii) => <Finding key={ii} item={item} />)}
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{ marginTop:48, paddingTop:20, borderTop:`1px solid ${C.bd}`, textAlign:'center', fontSize:12, color:C.tm }}>
+        SW Copilot Project Audit · Generated by Claude Design
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
