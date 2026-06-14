@@ -88,7 +88,9 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
         const response = await adapter.chat(truncated, controller.signal);
         return { ok: true, response, requestId: reqId };
       } catch (err) {
-        return { ok: false, error: err, requestId: reqId };
+        // 必须归一化:原始 Error 过 IPC structured-clone 会丢失 message/code,
+        // 渲染层 ErrorBanner 依赖 error.code 判断展示。
+        return { ok: false, error: toLLMError(err, '请求失败'), requestId: reqId };
       } finally {
         activeRequests.delete(reqId);
       }
@@ -166,7 +168,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       await adapter.test();
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: err };
+      // 同上:归一化错误,保证渲染层拿到 { code, message }
+      return { ok: false, error: toLLMError(err, '连接测试失败') };
     }
   });
 

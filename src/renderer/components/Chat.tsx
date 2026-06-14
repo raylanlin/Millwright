@@ -28,16 +28,17 @@ export function Chat({
   onRunScript,
   onCopyCode,
 }: Props) {
-  const endRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // 消息变化时自动滚到底。
-  // 用 `messages.length` + 最后一条 content 长度做依赖,避免 "同一个引用不触发" 问题。
+  // 消息变化时自动滚到底:直接设容器 scrollTop = scrollHeight,
+  // 避免流式输出时逐 token 触发页面整体滚动抖动。
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = containerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length, messages[messages.length - 1]?.content]);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
+    <div ref={containerRef} style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
       {messages.map((msg, i) => (
         <ChatMessage
           key={i}
@@ -75,7 +76,6 @@ export function Chat({
           正在生成…
         </div>
       )}
-      <div ref={endRef} />
     </div>
   );
 }

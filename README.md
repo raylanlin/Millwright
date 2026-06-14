@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.1-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.2-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
@@ -152,7 +152,8 @@ Renderer (React UI)  ←IPC→  Main Process (Node.js)  ←COM/cscript→  Solid
 
 - [x] **v0.1.0** — MVP 基础架构（Electron + LLM + COM + 26 Tools）
 - [x] **v0.2.0** — 稳定版（Bug 修复 + CI/CD + .env fallback + 文档完善）
-- [x] **v0.2.1** — 假成功问题彻底修复（移除 CreateObject fallback + vbaToVbs 重写）← *当前*
+- [x] **v0.2.1** — 假成功问题彻底修复（移除 CreateObject fallback + vbaToVbs 重写）
+- [x] **v0.2.2** — 渲染层修复（IPC 错误归一化 + 主题色 token + 滚动行为）← *当前*
 - [ ] **v0.3.0** — 高级特性（视觉感知 + 小步快跑 Agent + Function Calling）
 - [ ] **v1.0.0** — 生态建设（MCP Server + 多 CAD + 商业授权）
 

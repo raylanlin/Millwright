@@ -155,8 +155,8 @@ export function ChatMessage({
               <div
                 style={{
                   marginTop: 7, padding: '6px 10px', borderRadius: 5, fontSize: 11.5,
-                  background: execResult.success ? '#e8f5ec' : '#fceaea',
-                  color: execResult.success ? '#2d7a4a' : '#c44040',
+                  background: execResult.success ? t.successBg : t.dangerBg,
+                  color: execResult.success ? t.successText : t.dangerText,
                   fontFamily: 'inherit',
                 }}
               >

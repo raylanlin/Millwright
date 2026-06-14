@@ -63,9 +63,9 @@ function Banner({
   type: 'warning' | 'error';
   children: React.ReactNode;
 }) {
-  const bg = type === 'warning' ? '#fef3c7' : '#fce4ec';
-  const border = type === 'warning' ? '#f59e0b' : '#e57373';
-  const color = type === 'warning' ? '#92400e' : '#c62828';
+  const bg = type === 'warning' ? t.warnBg : t.dangerBg;
+  const border = type === 'warning' ? t.warnBorder : t.dangerBorder;
+  const color = type === 'warning' ? t.warnText : t.dangerText;
 
   return (
     <div

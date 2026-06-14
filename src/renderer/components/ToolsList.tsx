@@ -245,8 +245,8 @@ function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps
             <div
               style={{
                 marginTop: 10, padding: '8px 12px', borderRadius: 5, fontSize: 12,
-                background: result.success ? '#e8f5ec' : '#fceaea',
-                color: result.success ? '#2d7a4a' : '#c44040',
+                background: result.success ? t.successBg : t.dangerBg,
+                color: result.success ? t.successText : t.dangerText,
               }}
             >
               {result.success ? '✓ 执行完成' : '✕ 执行失败'}

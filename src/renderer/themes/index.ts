@@ -43,6 +43,15 @@ export interface ThemeTokens {
   selectBg: string;
   placeholder: string;
   dot: string;
+  // 语义状态色(执行结果 / 错误横幅),随主题切换避免深色模式下的浅色碎片
+  successBg: string;
+  successText: string;
+  dangerBg: string;
+  dangerText: string;
+  dangerBorder: string;
+  warnBg: string;
+  warnText: string;
+  warnBorder: string;
 }
 
 export const THEMES: Record<ThemeName, ThemeTokens> = {
@@ -63,6 +72,9 @@ export const THEMES: Record<ThemeName, ThemeTokens> = {
     scrollThumb: '#c8c9ce', scrollHover: '#a8a9ae',
     selectBg: '#ffffff', placeholder: '#aeb2ba',
     dot: '#8b4545',
+    successBg: '#e8f5ec', successText: '#2d7a4a',
+    dangerBg: '#fceaea', dangerText: '#c44040', dangerBorder: '#e57373',
+    warnBg: '#fef3c7', warnText: '#92400e', warnBorder: '#f59e0b',
   },
   dark: {
     bg: '#1b1c20', sidebar: '#232428', sidebarBorder: '#313238',
@@ -81,5 +93,8 @@ export const THEMES: Record<ThemeName, ThemeTokens> = {
     scrollThumb: '#3a3b42', scrollHover: '#4a4b52',
     selectBg: '#1e1f24', placeholder: '#4e5058',
     dot: '#a05555',
+    successBg: '#1c2e24', successText: '#7ec8a0',
+    dangerBg: '#2e1c1c', dangerText: '#e08a8a', dangerBorder: '#5a3a3a',
+    warnBg: '#2e2818', warnText: '#d8b878', warnBorder: '#6a5a2a',
   },
 };

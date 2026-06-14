@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-14
+
+### Fixed
+- **错误提示丢失**: 非流式 `LLM_CHAT` 和 `LLM_TEST` 的 catch 分支直接返回原始
+  `Error` 对象,过 IPC structured-clone 后 message/code 丢失,导致 ErrorBanner
+  (依赖 `error.code`)无法正确展示认证/限流/网络类错误。现统一经 `toLLMError()` 归一化
+  (流式路径本已正确处理)
+
+### Changed
+- 执行结果框 / 错误横幅的颜色改为主题 token(新增 successBg/dangerBg/warnBg 等),
+  修复深色模式下出现浅绿/浅粉碎片的问题
+- Chat 消息列表自动滚动改用容器 scrollTop(代替 scrollIntoView),消除流式输出时
+  逐 token 触发的页面整体滚动抖动
+
 ## [0.2.1] - 2026-06-13
 
 > 主题:彻底修复「显示执行完成 ✓ 但 SolidWorks 里什么都没发生」的假成功问题。
@@ -95,6 +109,7 @@
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/sw-copilot/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/raylanlin/sw-copilot/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/raylanlin/sw-copilot/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/raylanlin/sw-copilot/compare/v0.1.0...v0.2.1
 [0.1.0]: https://github.com/raylanlin/sw-copilot/releases/tag/v0.1.0

@@ -2,6 +2,7 @@
 
 > SolidWorks AI 自动化助手 · 技术方案 v0.2 · 2026-04-29
 
+
 ---
 
 ## 1. 项目概述
@@ -255,10 +256,30 @@ class SolidWorksBridge {
     return this.swApp?.ActiveDoc;
   }
 
-  async getContext(): Promise<SWDocumentContext> {
-    // context-collector.ts:采集文件名、类型、特征树、尺寸等
-    // 注入到每次 AI 请求的 system prompt
-    return contextCollector.collect();
+  async runVBAMacro(code: string): Promise<{ success: boolean; output: string }> {
+    // 写入临时 .swp 文件并执行
+    const tempPath = path.join(os.tmpdir(), `sw_macro_${Date.now()}.swp`);
+    fs.writeFileSync(tempPath, code);
+    try {
+      const result = this.swApp.RunMacro2(tempPath, '', 'main', 1, 0);
+      return { success: result === 0, output: '' };
+    } finally {
+      fs.unlinkSync(tempPath);
+    }
+  }
+
+  async runPythonScript(code: string): Promise<{ success: boolean; output: string }> {
+    const tempPath = path.join(os.tmpdir(), `sw_script_${Date.now()}.py`);
+    fs.writeFileSync(tempPath, code);
+    return new Promise((resolve) => {
+      exec(`python "${tempPath}"`, (error, stdout, stderr) => {
+        fs.unlinkSync(tempPath);
+        resolve({
+          success: !error,
+          output: stdout || stderr,
+        });
+      });
+    });
   }
 }
 ```
@@ -360,92 +381,57 @@ class ScriptSanitizer {
 ```
 sw-copilot/
 ├── package.json
-├── electron-builder.yml
-├── tsconfig.json / tsconfig.main.json / tsconfig.renderer.json / tsconfig.preload.json
-├── vite.config.ts
-├── .env.example
-├── CLAUDE.md                         # AI 开发规范
-├── SECURITY.md                       # 安全策略
-├── AUTHORS.md                        # 作者信息
+├── electron-builder.yml          # 打包配置
+├── tsconfig.json
 ├── src/
-│   ├── shared/
-│   │   ├── types.ts                  # 所有接口 & 类型
-│   │   ├── ipc-channels.ts           # IPC 频道常量（唯一来源）
-│   │   ├── presets.ts                # 模型预设 & DEFAULT_CONFIG
-│   │   └── sw-tools.ts              # 26 个 SW 工具定义（元数据）
-│   ├── main/
-│   │   ├── index.ts                  # 应用入口、窗口管理
-│   │   ├── ipc/
-│   │   │   └── handlers.ts           # IPC 处理器集中注册
+│   ├── main/                     # Electron 主进程
+│   │   ├── index.ts              # 应用入口
+│   │   ├── ipc.ts                # IPC 通信处理
 │   │   ├── llm/
-│   │   │   ├── adapter.ts            # BaseLLMAdapter 抽象基类
-│   │   │   ├── anthropic.ts          # Anthropic 协议（原生 fetch + SSE）
-│   │   │   ├── openai.ts             # OpenAI 兼容协议
-│   │   │   ├── sse.ts                # 手写 SSE 流式解析器
-│   │   │   ├── factory.ts            # createAdapter() 工厂
-│   │   │   ├── code-extract.ts       # 代码块提取
-│   │   │   ├── context-window.ts     # token 估算 & 消息截断
-│   │   │   ├── errors.ts             # 错误归一化 → LLMErrorInfo
-│   │   │   └── prompts.ts            # 系统提示词（支持动态上下文拼接）
+│   │   │   ├── adapter.ts        # LLM 双协议适配器
+│   │   │   ├── anthropic.ts      # Anthropic 客户端
+│   │   │   ├── openai.ts         # OpenAI 兼容客户端
+│   │   │   └── prompts.ts        # 系统提示词
 │   │   ├── com/
-│   │   │   ├── sw-bridge.ts          # cscript/VBS 连接管理（非 winax）
-│   │   │   ├── health.ts             # 心跳监控
-│   │   │   ├── context-collector.ts  # 文档上下文采集
-│   │   │   ├── tools.ts              # 工具元数据导出
-│   │   │   └── vbs-writer.ts         # VBS 文件写入（UTF-16LE+BOM）
+│   │   │   ├── sw-bridge.ts      # SolidWorks COM 桥接
+│   │   │   ├── tools.ts          # 工具函数注册
+│   │   │   └── health.ts         # 连接心跳检测
 │   │   ├── scripts/
-│   │   │   ├── engine.ts             # 脚本执行引擎（cscript > python > com）
-│   │   │   ├── sanitizer.ts          # 安全校验（VBA/Python 分语言黑名单）
-│   │   │   ├── backup.ts             # 执行前自动备份
-│   │   │   ├── vba-macro-writer.ts   # VBA → VBS 10 步转换
-│   │   │   ├── generators/
-│   │   │   │   ├── index.ts          # 注册表 + generateScript() + checkCoverage()
-│   │   │   │   ├── vba-helpers.ts    # mmToM / degToRad / vbaString / wrapMain
-│   │   │   │   ├── sketch.ts         # 草图
-│   │   │   │   ├── feature.ts        # 特征（拉伸/切除/旋转/倒角/阵列/镜像/尺寸）
-│   │   │   │   ├── document.ts       # 文档操作
-│   │   │   │   ├── assembly.ts       # 装配体
-│   │   │   │   ├── export.ts         # 导出
-│   │   │   │   └── batch-query.ts    # 批量查询
-│   │   │   └── templates/
-│   │   │       ├── export-pdf.py     # 预置脚本模板
-│   │   │       └── batch-fillet.vba  # 预置脚本模板（批量倒角）
+│   │   │   ├── engine.ts         # 脚本执行引擎
+│   │   │   ├── sanitizer.ts      # 安全校验
+│   │   │   └── templates/        # 预置自动化模板
+│   │   │       ├── batch-fillet.vba
+│   │   │       ├── export-pdf.py
+│   │   │       ├── batch-rename.vba
+│   │   │       └── bom-export.py
 │   │   └── store/
-│   │       ├── config.ts             # 配置持久化（safeStorage 加密 API Key）
-│   │       ├── chat-store.ts         # 对话历史 CRUD
-│   │       └── env-fallback.ts       # .env 文件解析 + 协议映射
-│   ├── preload/
-│   │   └── index.ts                  # contextBridge 暴露 window.api
-│   └── renderer/
-│       ├── index.html / main.tsx
-│       ├── App.tsx                   # 纯编排层
-│       ├── components/
-│       │   ├── Sidebar.tsx           # 侧边栏（含对话历史列表）
-│       │   ├── StatusDot.tsx
-│       │   ├── Chat.tsx / ChatMessage.tsx / ChatInput.tsx
-│       │   ├── SettingsModal.tsx
-│       │   ├── Automations.tsx / automations-data.ts
-│       │   ├── ToolsList.tsx
-│       │   └── ErrorBanner.tsx
-│       ├── hooks/
-│       │   ├── useLLM.ts / useSWStatus.ts / useTheme.ts
-│       │   └── useChatSessions.ts    # 对话历史持久化
-│       ├── themes/index.ts
-│       └── styles/global.css
-├── tests/                            # node:test 单元测试（11 个文件）
-├── docs/
-│   ├── ARCHITECTURE.md               # 本文档
-│   ├── DEVELOPMENT.md                # 开发者指南
-│   ├── USER-GUIDE.md                 # 用户手册
-│   ├── API-REFERENCE.md              # API 参考
-│   ├── CONTRIBUTING.md               # 贡献指南
-│   ├── IMPLEMENTATION-PLAN.md        # 实施计划（v0.1 历史）
-│   └── UI-PROTOTYPE.jsx              # v0.1 历史参考原型
+│   │       └── config.ts         # 持久化配置（加密）
+│   ├── renderer/                 # Electron 渲染进程
+│   │   ├── App.tsx               # 应用根组件
+│   │   ├── components/
+│   │   │   ├── Chat.tsx          # 聊天界面
+│   │   │   ├── Settings.tsx      # 设置面板
+│   │   │   ├── Automations.tsx   # 自动化模板
+│   │   │   ├── ToolsList.tsx     # 工具列表
+│   │   │   └── StatusBar.tsx     # 状态栏
+│   │   ├── hooks/
+│   │   │   ├── useTheme.ts       # 主题管理
+│   │   │   └── useLLM.ts         # AI 调用 hook
+│   │   └── themes/
+│   │       ├── light.ts          # 浅色主题
+│   │       └── dark.ts           # 深色主题
+│   └── shared/
+│       └── types.ts              # 共享类型定义
+├── assets/
+│   ├── icon.ico                  # 应用图标
+│   └── icon.png
 ├── scripts/
-│   └── fix_vbs_encoding_bridge.py    # 一次性迁移脚本（v0.2.0 遗留）
-└── assets/
-    ├── icon.ico / icon-256.png
-    └── banner-hero.png               # README hero 图
+│   └── notarize.js               # macOS 公证（如需）
+└── docs/
+    ├── ARCHITECTURE.md           # 本文档
+    ├── USER-GUIDE.md             # 用户手册
+    ├── API-REFERENCE.md          # API 参考
+    └── CONTRIBUTING.md           # 贡献指南
 ```
 
 ---
@@ -513,6 +499,7 @@ npm run dist          # 生成安装包 + 自动更新文件
 - [x] **v0.1.0** — MVP 基础架构（Electron + LLM + COM + 26 Tools）
 - [x] **v0.2.0** — 稳定版（Bug 修复 + CI/CD + .env fallback + 文档完善）
 - [x] **v0.2.1** — 假成功问题彻底修复（移除 CreateObject fallback + vbaToVbs 重写）
+- [x] **v0.2.2** — 渲染层修复（IPC 错误归一化 + 主题色 token + 滚动行为）
 - [ ] **v0.3.0** — 高级特性（视觉感知 + Agent Loop + Function Calling）
 - [ ] **v1.0.0** — 生态建设（MCP Server + 多 CAD + 商业授权）
 
