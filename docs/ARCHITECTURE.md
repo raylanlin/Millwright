@@ -2,7 +2,6 @@
 
 > SolidWorks AI 自动化助手 · 技术方案 v0.2 · 2026-04-29
 
-
 ---
 
 ## 1. 项目概述
@@ -500,6 +499,7 @@ npm run dist          # 生成安装包 + 自动更新文件
 - [x] **v0.2.0** — 稳定版（Bug 修复 + CI/CD + .env fallback + 文档完善）
 - [x] **v0.2.1** — 假成功问题彻底修复（移除 CreateObject fallback + vbaToVbs 重写）
 - [x] **v0.2.2** — 渲染层修复（IPC 错误归一化 + 主题色 token + 滚动行为）
+- [x] **v0.2.3** — 新增 CI 质量门（PR/push 跑 typecheck + lint + test）← *当前*
 - [ ] **v0.3.0** — 高级特性（视觉感知 + Agent Loop + Function Calling）
 - [ ] **v1.0.0** — 生态建设（MCP Server + 多 CAD + 商业授权）
 

@@ -1,0 +1,50 @@
+name: CI
+
+# 快速质量门:每次 PR 和 push 到主分支都跑 typecheck + lint + test。
+# 与 build.yml 分工:
+#   - ci.yml   → 轻量、快(ubuntu)、真失败就拦,给 PR 即时反馈
+#   - build.yml → 重(windows + NSIS 打包),只负责出安装包 / 发版
+# 注:tag 推送不在此触发(交给 build.yml 出 Release),避免重复跑。
+
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+# 同一分支的旧运行在新提交到来时自动取消,省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck · Lint · Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 仓库未提交 package-lock.json,用 npm install(与 build.yml 保持一致)
+      - name: Install dependencies
+        run: npm install
+
+      # 三个 tsconfig 全量类型检查(main / preload / renderer),这是最有价值的门
+      - name: Typecheck
+        run: npm run typecheck
+
+      # ESLint:warning 不拦,error 拦
+      - name: Lint
+        run: npm run lint
+
+      # test 脚本内部已含 build:main,会编译主进程再跑 node --test
+      - name: Test
+        run: npm test

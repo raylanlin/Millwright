@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-14
+
+### Added
+- 新增 `.github/workflows/ci.yml`: 快速质量门(PR / push 到主分支时跑
+  `typecheck` + `lint` + `test` on ubuntu-latest)。与 `build.yml` 分工:
+  `ci.yml` 轻量即时反馈,`build.yml` 仍负责 windows + NSIS 打包发版
+  (tag 推送不触发 ci.yml,避免重复跑)
+
 ## [0.2.2] - 2026-06-14
 
 ### Fixed
@@ -109,7 +117,8 @@
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/sw-copilot/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/raylanlin/sw-copilot/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/raylanlin/sw-copilot/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/raylanlin/sw-copilot/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/raylanlin/sw-copilot/compare/v0.1.0...v0.2.1
 [0.1.0]: https://github.com/raylanlin/sw-copilot/releases/tag/v0.1.0
