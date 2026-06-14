@@ -136,11 +136,16 @@ export class SolidWorksBridge {
   // ===== 私有方法 =====
 
   private async checkConnection(): Promise<boolean> {
+    // 只用 GetObject 连接已运行实例。
+    // 绝不 CreateObject —— 那会启动一个隐形的新 SolidWorks 进程,
+    // 后续所有脚本都会连到看不见的实例里“成功”执行。
+    // 注意: GetObject 失败时 swApp 是 Empty 而非 Nothing,
+    // 必须用 Err.Number + IsObject 判断,不能用 Is Nothing。
     const vbs = `
 On Error Resume Next
+Dim swApp
 Set swApp = GetObject(, "SldWorks.Application")
-If swApp Is Nothing Then Set swApp = CreateObject("SldWorks.Application")
-If Not swApp Is Nothing Then
+If Err.Number = 0 And IsObject(swApp) Then
     WScript.Echo "OK"
 Else
     WScript.Echo "FAIL"
@@ -156,12 +161,13 @@ End If`;
   private async fetchStatus(): Promise<SWStatus> {
     const vbs = `
 On Error Resume Next
+Dim swApp
 Set swApp = GetObject(, "SldWorks.Application")
-If swApp Is Nothing Then Set swApp = CreateObject("SldWorks.Application")
-If swApp Is Nothing Then
+If Err.Number <> 0 Or Not IsObject(swApp) Then
     WScript.Echo "{""connected"":false}"
     WScript.Quit 0
 End If
+Err.Clear
 
 Dim doc, docType, docPath, docTypeStr, ver
 Set doc = swApp.ActiveDoc
@@ -238,12 +244,13 @@ function emptyFeatures(): DocumentFeatures {
 function buildCollectFeaturesVBS(): string {
   return `
 On Error Resume Next
+Dim swApp
 Set swApp = GetObject(, "SldWorks.Application")
-If swApp Is Nothing Then Set swApp = CreateObject("SldWorks.Application")
-If swApp Is Nothing Then
+If Err.Number <> 0 Or Not IsObject(swApp) Then
     WScript.Echo "{}"
     WScript.Quit 0
 End If
+Err.Clear
 
 Set doc = swApp.ActiveDoc
 If doc Is Nothing Then
@@ -424,19 +431,20 @@ End Function`;
 }
 
 function buildBackupVBS(backupPath: string, originalPath?: string): string {
-  const escBackup = backupPath.replace(/\\/g, '\\\\');
+  // VBS 字符串没有反斜杠转义,路径直接嵌入即可(旧版的 \\\\ 双写是多余的)
   const restore = originalPath
-    ? `\n' 恢复原文档（SaveAs3 会改变活动文档路径）\nswApp.OpenDoc7 \"${originalPath.replace(/\\/g, '\\\\')}\", \"\", 1, \"\"`
+    ? `\n' 恢复原文档（SaveAs3 会改变活动文档路径）\nswApp.OpenDoc7 "${originalPath}", "", 1, ""`
     : '';
   return `
 On Error Resume Next
+Dim swApp
 Set swApp = GetObject(, "SldWorks.Application")
-If swApp Is Nothing Then Set swApp = CreateObject("SldWorks.Application")
-If swApp Is Nothing Then WScript.Quit 1
+If Err.Number <> 0 Or Not IsObject(swApp) Then WScript.Quit 1
+Err.Clear
 Set doc = swApp.ActiveDoc
 If doc Is Nothing Then WScript.Quit 1
 
-doc.Extension.SaveAs3 "${escBackup}", 0, 1, "", "", 0, 0
+doc.Extension.SaveAs3 "${backupPath}", 0, 1, "", "", 0, 0
 If Err.Number <> 0 Then WScript.Quit 1${restore}
 WScript.Quit 0`;
 }

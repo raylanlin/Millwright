@@ -9,6 +9,7 @@ import { DEFAULT_CONFIG } from '../shared/presets';
 import { useTheme } from './hooks/useTheme';
 import { useLLM } from './hooks/useLLM';
 import { useSWStatus } from './hooks/useSWStatus';
+import { useChatSessions } from './hooks/useChatSessions';
 import { Sidebar, type TabKey } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ChatInput, type ChatInputHandle } from './components/ChatInput';
@@ -43,6 +44,16 @@ export default function App() {
     initial: INITIAL_MESSAGES,
   });
 
+  // —— 对话历史持久化 ——
+  const {
+    sessions,
+    currentId: currentSessionId,
+    save: persistSession,
+    select: loadSession,
+    startNew: startNewSession,
+    remove: removeSession,
+  } = useChatSessions();
+
   // 错误横幅状态
   const [dismissedError, setDismissedError] = useState(false);
   // 新错误出现时重新显示
@@ -63,6 +74,16 @@ export default function App() {
   const [execResults, setExecResults] = useState<Record<number, ScriptResult>>({});
   const [executingIndex, setExecutingIndex] = useState<number | null>(null);
 
+  // 对话变化后自动持久化(仅在生成结束后、且有真实对话时)
+  useEffect(() => {
+    if (isGenerating) return;
+    if (messages.length <= INITIAL_MESSAGES.length) return;
+    const tid = setTimeout(() => {
+      void persistSession(messages);
+    }, 600);
+    return () => clearTimeout(tid);
+  }, [messages, isGenerating, persistSession]);
+
   const handleSend = useCallback(() => {
     const value = input.trim();
     if (!value || isGenerating) return;
@@ -71,10 +92,47 @@ export default function App() {
   }, [input, isGenerating, send]);
 
   const handleClear = useCallback(() => {
+    startNewSession();
     reset(true);
     setExecResults({});
     setExecutingIndex(null);
-  }, [reset]);
+  }, [reset, startNewSession]);
+
+  // 新建对话:开新会话 + 重置到欢迎语
+  const handleNewChat = useCallback(() => {
+    startNewSession();
+    setMessages(INITIAL_MESSAGES);
+    setExecResults({});
+    setExecutingIndex(null);
+    setActiveTab('chat');
+  }, [startNewSession, setMessages]);
+
+  // 选中历史会话:加载其完整消息
+  const handleSelectSession = useCallback(
+    async (id: string) => {
+      const s = await loadSession(id);
+      if (s) {
+        setMessages(s.messages.length ? s.messages : INITIAL_MESSAGES);
+        setExecResults({});
+        setExecutingIndex(null);
+        setActiveTab('chat');
+      }
+    },
+    [loadSession, setMessages],
+  );
+
+  // 删除历史会话:若删的是当前会话,重置视图
+  const handleDeleteSession = useCallback(
+    async (id: string) => {
+      await removeSession(id);
+      if (id === currentSessionId) {
+        setMessages(INITIAL_MESSAGES);
+        setExecResults({});
+        setExecutingIndex(null);
+      }
+    },
+    [removeSession, currentSessionId, setMessages],
+  );
 
   // 用户点了自动化模板:切回 chat 标签,填入输入框并聚焦
   const handlePickAutomation = useCallback((prompt: string) => {
@@ -149,6 +207,11 @@ export default function App() {
         swStatus={swStatus}
         onReconnectSW={reconnect}
         swLoading={swLoading}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
+        onNewChat={handleNewChat}
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

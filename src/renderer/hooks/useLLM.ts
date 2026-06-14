@@ -114,23 +114,12 @@ export function useLLM({ config, initial }: UseLLMOptions) {
       // 发给主进程的消息序列 = 全历史 + 本次用户输入(不含占位)
       const payloadMessages = [...messages, userMsg];
 
-      // ---- 自动采集文档上下文并注入 system prompt ----
-      let enrichedConfig = config;
-      try {
-        const ctxResult = await window.api.sw.getContext();
-        if (ctxResult.ok && ctxResult.formatted) {
-          const base = config.systemPrompt || '';
-          enrichedConfig = {
-            ...config,
-            systemPrompt: base + '\n\n' + ctxResult.formatted,
-          };
-        }
-      } catch {
-        // 上下文采集失败不阻塞对话
-      }
+      // 注:SolidWorks 文档上下文由主进程统一采集并注入 system prompt
+      // (见 ipc/handlers.ts)。渲染层不再重复采集,避免每条消息触发两次
+      // 昂贵的 cscript 文档特征采集。
 
       if (config.stream !== false) {
-        const res = await window.api.llm.chatStream(enrichedConfig, payloadMessages);
+        const res = await window.api.llm.chatStream(config, payloadMessages);
         if (!res.ok) {
           setError(res.error);
           setIsGenerating(false);
@@ -146,7 +135,7 @@ export function useLLM({ config, initial }: UseLLMOptions) {
         }
         currentRequestId.current = res.requestId;
       } else {
-        const res = await window.api.llm.chat(enrichedConfig, payloadMessages);
+        const res = await window.api.llm.chat(config, payloadMessages);
         if (!res.ok) {
           const errInfo =
             'error' in res

@@ -76,10 +76,14 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       const reqId = uuid();
       activeRequests.set(reqId, controller);
       try {
-        const adapter = createAdapter(payload.config);
-        const systemPrompt = resolveSystemPrompt(payload.config.systemPrompt);
+        // SolidWorks 文档上下文:在主进程统一采集并注入 system prompt,
+        // 真正发送给模型(adapter 用 config.systemPrompt 构造请求)。
         const swContext = await formatContextForPromptAsync(bridge);
-        const fullPrompt = swContext ? `${systemPrompt}\n\n${swContext}` : systemPrompt;
+        const enrichedConfig = swContext
+          ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
+          : payload.config;
+        const adapter = createAdapter(enrichedConfig);
+        const fullPrompt = resolveSystemPrompt(enrichedConfig.systemPrompt);
         const truncated = truncateMessages(payload.messages, fullPrompt, payload.config.model);
         const response = await adapter.chat(truncated, controller.signal);
         return { ok: true, response, requestId: reqId };
@@ -107,10 +111,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       // 异步运行,不 await(立即把 requestId 返回给 renderer)
       (async () => {
         try {
-          const adapter = createAdapter(payload.config);
-          const systemPrompt = resolveSystemPrompt(payload.config.systemPrompt);
+          // SolidWorks 文档上下文:主进程统一采集并注入(发送给模型)
           const swContext = await formatContextForPromptAsync(bridge);
-          const fullPrompt = swContext ? `${systemPrompt}\n\n${swContext}` : systemPrompt;
+          const enrichedConfig = swContext
+            ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
+            : payload.config;
+          const adapter = createAdapter(enrichedConfig);
+          const fullPrompt = resolveSystemPrompt(enrichedConfig.systemPrompt);
           const truncated = truncateMessages(payload.messages, fullPrompt, payload.config.model);
           const stream = adapter.chatStream(truncated, reqId, controller.signal);
           for await (const ev of stream) {

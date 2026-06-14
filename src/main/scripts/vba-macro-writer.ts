@@ -2,130 +2,265 @@
 //
 // 将 VBA 宏代码转换为可通过 cscript.exe 执行的 VBScript (.vbs)。
 //
-// 背景:
-// SolidWorks 的 .swp 宏文件是 OLE 复合文档格式，不是纯文本。
-// 直接 fs.writeFileSync 写纯文本 .swp 在大多数 SW 版本上无法被 RunMacro2 执行。
+// v0.2.1 重写 —— 修复「假成功」问题。
 //
-// 解决方案:
-// 1. 主路径: 转成 VBScript (.vbs)，通过 cscript.exe 执行
-//    VBScript 可以通过 CreateObject("SldWorks.Application") 连接 SW 并操作
-// 2. 备用路径: 用 Python + win32com 执行（engine.ts 已支持）
+// 旧版的三个致命缺陷:
+// 1. GetObject 失败时 fallback 到 CreateObject("SldWorks.Application"),
+//    会启动一个全新的【隐形】SolidWorks 实例 —— 脚本在看不见的实例里
+//    "成功"执行,用户的可见窗口毫无变化,UI 却显示执行完成。
+// 2. 把 Sub main() 展开为顶层代码,导致 Exit Sub 非法,只能替换成
+//    WScript.Quit 0 —— 前置条件不满足(无活动文档/不在草图中)时以
+//    成功码退出且不写结果文件,engine 误判为成功。
+// 3. MsgBox 在 cscript 下是真实弹窗,会阻塞直到超时。
 //
-// VBA → VBS 的关键差异:
-// - VBA: Set swApp = Application.SldWorks (在 SW 宏环境内部)
-// - VBS: Set swApp = CreateObject("SldWorks.Application") 或 GetObject(, "SldWorks.Application")
-// - VBA: Dim x As Integer → VBS: Dim x (VBS 不支持 As Type)
-// - VBA: On Error GoTo label → VBS: On Error Resume Next (VBS 不支持 GoTo)
+// 新版设计原则:
+// A. 保留 Sub main() 结构,在顶层调用 —— VBS 完全支持 Sub/Exit Sub,
+//    不再需要任何展开 hack。main 内未处理的错误会传播到顶层调用点,
+//    由 runner 统一捕获并写入结果文件(fail-fast)。
+// B. 连接 SolidWorks 只用 GetObject(连接已运行实例)。连不上就写失败
+//    结果并退出 —— 绝不 CreateObject 启动新实例。
+// C. 所有退出路径(成功/失败/前置条件不满足)都必须写结果文件。
+//    engine 把「没有结果文件」视为失败。
+// D. MsgBox 一律转换:失败类(vbExclamation/vbCritical)→ SWCP_Fail,
+//    其余 → WScript.Echo。cscript 环境下永远不弹窗。
+// E. 结果文件以 UTF-16(Unicode) 写入,engine 按 BOM 解码,中文不乱码。
+
+/** 移除一行中引号外的 "As <Type>" 声明(VBS 不支持类型声明) */
+function stripAsTypesLine(line: string): string {
+  // 按双引号切分:偶数段在字符串外,奇数段在字符串内
+  const parts = line.split('"');
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(/\s+As\s+[\w.]+/g, '');
+  }
+  return parts.join('"');
+}
 
 /**
- * 把生成器输出的 VBA 宏代码转换为可独立执行的 VBScript。
+ * 把生成器输出(或 AI 生成)的 VBA 宏代码转换为可独立执行的 VBScript。
  *
  * 转换规则:
- * 1. 移除 Option Explicit（VBS 中可选，移除避免未声明变量报错）
- * 2. 移除所有 As <Type> 声明（VBS 弱类型）
- * 3. 替换 Application.SldWorks → GetObject(, "SldWorks.Application")
- * 4. 替换 On Error GoTo xxx → On Error Resume Next
- * 5. 移除 wrapMain 注入的 ErrorHandler 块(含它前面那一个 Exit Sub)
- * 6. 把剩余的 Exit Sub 转成 WScript.Quit 0(VBS 顶层非法,必须替换)
- * 7. 把 Sub main() ... End Sub 展开为顶层执行代码
- * 8. 清理多余空行
- * 9. 添加 header(顶层 On Error Resume Next,保护 footer 能跑)
- * 10. 如果给了 resultFilePath,追加 footer 把执行结果写成 JSON 文件
+ *  1. 移除 Option Explicit
+ *  2. 移除 wrapMain/AI 注入的错误处理块(Exit Sub + <label>: ... End Sub 之前)
+ *  3. 移除 On Error GoTo <label>(保留 On Error GoTo 0 / Resume Next)
+ *  4. 移除残留的孤立 label 行(VBS 顶层 label 非法)
+ *  5. 统一 SolidWorks 连接方式 → SWCP_ConnectSW()(只 GetObject,绝不新建实例)
+ *  6. MsgBox 转换(见上文 D)
+ *  7. 移除 As <Type>(仅引号外)
+ *  8. 保留 Sub 结构,确定入口(main > 第一个 Sub > 自动包裹)
+ *  9. 组装: banner + 主体 + runner + SWCP 运行时支持函数
  */
 export function vbaToVbs(vbaCode: string, opts?: { resultFilePath?: string }): string {
-  let code = vbaCode;
+  let code = vbaCode.replace(/\r\n/g, '\n');
 
-  // 1. 移除 Option Explicit
+  // 1. 移除 Option Explicit(转换会注入 SWCP_* 变量,保留会误报)
   code = code.replace(/^\s*Option\s+Explicit\s*$/gim, '');
 
-  // 2. 移除 As <Type> 声明
-  // 匹配 "As SldWorks.SldWorks", "As ModelDoc2", "As Long", "As String" 等
-  code = code.replace(/\bAs\s+[\w.]+/g, '');
-
-  // 3. 替换 SW 连接方式
-  // VBA 宏环境内: Set swApp = Application.SldWorks
-  // VBS 独立环境: Set swApp = GetObject(, "SldWorks.Application")
+  // 2. 移除错误处理块。wrapMain 产物形如:
+  //        Exit Sub
+  //    ErrorHandler:
+  //        MsgBox "脚本执行出错: " & Err.Description, vbCritical, "SW Copilot"
+  //    End Sub
+  //    AI 生成的代码可能用其他 label 名,统一按结构匹配。
   code = code.replace(
-    /Set\s+swApp\s*=\s*Application\.SldWorks/gi,
-    'Set swApp = GetObject(, "SldWorks.Application")\nIf swApp Is Nothing Then Set swApp = CreateObject("SldWorks.Application")',
-  );
-
-  // 4. 替换错误处理
-  code = code.replace(/On\s+Error\s+GoTo\s+\w+/gi, 'On Error Resume Next');
-
-  // 5. 移除 wrapMain 注入的 ErrorHandler 块
-  //    精确匹配 wrapMain 产物: 紧挨 "Exit Sub" 下一行是 "ErrorHandler:",
-  //    然后是 MsgBox 行,最后跟 "End Sub"。一起删掉,避免误伤其他 Exit Sub。
-  code = code.replace(
-    /^\s*Exit\s+Sub\s*\n\s*ErrorHandler:\s*\n[\s\S]*?(?=End\s+Sub)/gim,
+    /^[ \t]*Exit\s+Sub\s*\n[ \t]*[A-Za-z_]\w*:[ \t]*\n[\s\S]*?(?=^[ \t]*End\s+Sub)/gim,
     '',
   );
 
-  // 6. 把剩余的 Exit Sub 转成 WScript.Quit 0。
-  //    PRELUDE_ACTIVE_DOC 和各 generator 的防御性分支(如"没有活动草图就退出")
-  //    都会用 Exit Sub。在 VBS 顶层代码里 Exit Sub 非法,cscript 会报 "Expected statement"。
-  //    WScript.Quit 0 是语义等价的合法终止,且保留了"正常退出"的语义(不改 Err.Number)。
-  //    ⚠️ 仅在原始代码有 Sub main() 时才替换,避免误伤嵌套 Sub 中的 Exit Sub。
-  const hadSubMain = /^\s*Sub\s+main\s*\(\s*\)/im.test(vbaCode);
-  if (hadSubMain) {
-    code = code.replace(/\bExit\s+Sub\b/gi, 'WScript.Quit 0');
-  }
+  // 3. 移除 On Error GoTo <label>。错误改为传播到顶层 runner 统一捕获。
+  //    保留 On Error GoTo 0(合法 VBS)和 On Error Resume Next。
+  code = code.replace(/^[ \t]*On\s+Error\s+GoTo\s+(?!0\b)\w+[ \t]*$/gim, '');
 
-  // 7. 展开 Sub main() ... End Sub 为顶层代码。
-  //    ⚠️ 只有在 hadSubMain 为 true 时才替换 End Sub，
-  //    否则会把非 main 子程序的 End Sub 也删掉，导致 "Missing End" 编译错误。
-  code = code.replace(/^\s*Sub\s+main\s*\(\s*\)\s*$/gim, "' --- 脚本开始 ---");
-  if (hadSubMain) {
-    code = code.replace(/^\s*End\s+Sub\s*$/gim, "' --- 脚本结束 ---");
-  }
+  // 4. 删除残留的孤立 label 行 —— VBS 不支持 label,残留会编译错误。
+  //    只匹配整行仅为 "<identifier>:" 的行,并排除常见关键字。
+  code = code.replace(
+    /^[ \t]*(?!(?:Else|End|Exit|Case|Next|Loop|Wend|Sub|Function|If|Then|Do|While|For|Dim|Set|Const|Public|Private|ReDim)\b)[A-Za-z_]\w*:[ \t]*$/gim,
+    '',
+  );
 
-  // 7a. 如果代码中有非 main 的 Sub 但没有被展开，
-  //     在末尾添加调用语句，确保子程序会被执行。
-  const subMatch = code.match(/^\s*Sub\s+(\w+)\s*\(\s*\)\s*$/im);
-  if (subMatch && !code.includes("' --- 脚本开始 ---")) {
-    code += `\n\n' --- 执行子程序 ---\n${subMatch[1]}`;
-  }
+  // 5. 统一 SolidWorks 连接方式。三种来源全部收口到 SWCP_ConnectSW():
+  //    - 生成器/VBA 宏环境: Set swApp = Application.SldWorks
+  //    - AI 仿独立脚本:     GetObject(, "SldWorks.Application")
+  //    - AI 危险写法:       CreateObject("SldWorks.Application") ← 会开隐形新实例!
+  code = code.replace(/Set\s+(\w+)\s*=\s*Application\.SldWorks\b/gi, 'Set $1 = SWCP_ConnectSW()');
+  code = code.replace(/GetObject\s*\(\s*,\s*["']SldWorks\.Application["']\s*\)/gi, 'SWCP_ConnectSW()');
+  code = code.replace(/CreateObject\s*\(\s*["']SldWorks\.Application["']\s*\)/gi, 'SWCP_ConnectSW()');
+
+  // 6. MsgBox 转换。cscript 下 MsgBox 是真实弹窗,会阻塞到超时,必须全部移除:
+  //    - 失败语义(vbExclamation/vbCritical) → SWCP_Fail(写失败结果 + 退出码 1)
+  //    - 其它 MsgBox → WScript.Echo(消息进 stdout)
+  code = code.replace(
+    /^([ \t]*)MsgBox\s+(.+?),\s*vb(?:Exclamation|Critical)\b[^\n]*$/gim,
+    '$1SWCP_Fail $2',
+  );
+  // 其它带选项的 MsgBox(vbInformation 等):只保留消息表达式,丢弃 vb* 参数和标题
+  code = code.replace(/^([ \t]*)MsgBox\s+(.+?),\s*vb\w+\b[^\n]*$/gim, '$1WScript.Echo $2');
+  code = code.replace(/^([ \t]*)MsgBox\s+(.+)$/gim, '$1WScript.Echo $2');
+
+  // 7. 移除 As <Type>(逐行处理,跳过字符串字面量)
+  code = code.split('\n').map(stripAsTypesLine).join('\n');
+
+  // 7b. VBA 的 "Next i" → VBS 只允许裸 Next(带变量名会编译错误)
+  code = code.replace(/^([ \t]*)Next\s+\w+[ \t]*$/gim, '$1Next');
+
+  // 7c. VBA Format() → SWCP_Format()(VBS 没有 Format 函数)
+  code = code.replace(/\bFormat\s*\(/g, 'SWCP_Format(');
 
   // 8. 清理多余空行
-  code = code.replace(/\n{3,}/g, '\n\n');
+  code = code.replace(/\n{3,}/g, '\n\n').trim();
 
-  // 9. 添加 VBS 头部。
-  //    注意:这里的 "On Error Resume Next" 看起来和规则 4 转换出来的重复,但它是必需的。
-  //    理由:footer 用 Err.Number 判断执行成功与否。如果 body 里没设 On Error Resume Next
-  //    (比如用户的自定义脚本、或规则 4 没触发),body 抛出的错误会终止整个 cscript,
-  //    footer 写不了结果文件,engine 只能拿到 stderr 且没法知道具体错误类型。
-  const header = `' SW Copilot 自动生成的 VBScript
-' 通过 cscript.exe 执行，连接到已运行的 SolidWorks 实例
+  // 9. 确定入口。保留 Sub 结构(VBS 原生支持,Exit Sub 合法)。
+  const mainMatch = code.match(/^\s*Sub\s+(main)\s*\(/im);
+  const firstSubMatch = code.match(/^\s*Sub\s+(\w+)\s*\(/im);
+  const hasAnyProc = /^\s*(?:Sub|Function)\s+\w+/im.test(code);
+
+  let entry = '';
+  if (mainMatch) {
+    entry = 'main';
+  } else if (firstSubMatch) {
+    entry = firstSubMatch[1];
+  } else if (!hasAnyProc) {
+    // 纯顶层代码(AI 未包 Sub):包裹成 main,让错误能被 runner 捕获
+    const indented = code
+      .split('\n')
+      .map((l) => (l.trim() ? '    ' + l : l))
+      .join('\n');
+    code = `Sub main()\n${indented}\nEnd Sub`;
+    entry = 'main';
+  }
+  // 只有 Function 没有 Sub 的罕见情形: 顶层代码原样执行,entry 留空
+
+  // 10. 组装完整 VBS
+  const resultPath = opts?.resultFilePath ?? '';
+  // VBS 字符串没有反斜杠转义,路径直接嵌入;只需防御性处理双引号
+  const resultPathLiteral = resultPath.replace(/"/g, '""');
+
+  const banner = `' SW Copilot 自动生成的 VBScript
+' 通过 cscript.exe 连接到【已运行】的 SolidWorks 实例执行
 ' 生成时间: ${new Date().toISOString()}
 
+Dim SWCP_RESULT_PATH
+SWCP_RESULT_PATH = "${resultPathLiteral}"
+Dim SWCP_APP
+`;
+
+  const runner = entry
+    ? `
+' ===== 执行入口 =====
 On Error Resume Next
-
-`;
-
-  // 10. 如果需要结果回传,追加写结果文件的代码
-  let footer = '';
-  if (opts?.resultFilePath) {
-    const escapedPath = opts.resultFilePath.replace(/\\/g, '\\\\');
-    footer = `
-
-' --- 写入执行结果 ---
-If Err.Number = 0 Then
-    Dim fso, resultFile
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Set resultFile = fso.CreateTextFile("${escapedPath}", True)
-    resultFile.Write "{""success"":true,""message"":""脚本执行完成""}"
-    resultFile.Close
-Else
-    Dim fso2, errFile
-    Set fso2 = CreateObject("Scripting.FileSystemObject")
-    Set errFile = fso2.CreateTextFile("${escapedPath}", True)
-    errFile.Write "{""success"":false,""message"":""" & Replace(Err.Description, """", "'") & """}"
-    errFile.Close
+Err.Clear
+${entry}
+If Err.Number <> 0 Then
+    Dim SWCP_ERRDESC
+    SWCP_ERRDESC = Err.Description
+    If SWCP_ERRDESC = "" Then SWCP_ERRDESC = "未知错误 (代码 " & Err.Number & ")"
+    SWCP_Fail "脚本执行出错: " & SWCP_ERRDESC
 End If
+On Error GoTo 0
+SWCP_WriteResult True, "脚本执行完成"
+WScript.Quit 0
+`
+    : `
+' ===== 顶层代码已执行完毕 =====
+SWCP_WriteResult True, "脚本执行完成"
+WScript.Quit 0
 `;
-  }
 
-  return header + code.trim() + footer;
+  const supportLib = `
+' ===== SW Copilot 运行时支持 =====
+
+' 连接已运行的 SolidWorks 实例。
+' 关键: 只用 GetObject。CreateObject 会启动一个隐形的新实例,
+' 脚本会在用户看不见的窗口里"成功"执行 —— 这是必须杜绝的静默失败。
+Function SWCP_ConnectSW()
+    If IsObject(SWCP_APP) Then
+        If Not SWCP_APP Is Nothing Then
+            Set SWCP_ConnectSW = SWCP_APP
+            Exit Function
+        End If
+    End If
+    On Error Resume Next
+    Err.Clear
+    Set SWCP_APP = GetObject(, "SldWorks.Application")
+    If Err.Number <> 0 Or Not IsObject(SWCP_APP) Then
+        Err.Clear
+        On Error GoTo 0
+        SWCP_Fail "无法连接到正在运行的 SolidWorks。请确认: 1) SolidWorks 已启动; 2) SolidWorks 与本应用以相同权限运行(同为管理员或同为普通用户); 3) 任务管理器中没有残留的 SLDWORKS.exe 后台进程。"
+    End If
+    ' 若连接到的实例不可见(可能是旧版本残留的后台实例),强制显示出来
+    If Not SWCP_APP.Visible Then SWCP_APP.Visible = True
+    Err.Clear
+    On Error GoTo 0
+    Set SWCP_ConnectSW = SWCP_APP
+End Function
+
+' 写执行结果 JSON。Unicode=True → UTF-16LE+BOM,中文消息不乱码。
+Sub SWCP_WriteResult(ok, msg)
+    On Error Resume Next
+    If SWCP_RESULT_PATH = "" Then Exit Sub
+    Dim fso, f, okStr
+    If ok Then okStr = "true" Else okStr = "false"
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set f = fso.CreateTextFile(SWCP_RESULT_PATH, True, True)
+    f.Write "{""success"":" & okStr & ",""message"":""" & SWCP_JsonEsc(msg) & """}"
+    f.Close
+End Sub
+
+' 报告失败并退出(退出码 1)。所有失败路径都经过这里,保证结果文件存在。
+Sub SWCP_Fail(msg)
+    SWCP_WriteResult False, CStr(msg)
+    WScript.Echo "[SWCP_FAIL] " & msg
+    WScript.Quit 1
+End Sub
+
+Function SWCP_JsonEsc(s)
+    Dim t
+    t = CStr(s)
+    t = Replace(t, "\\", "\\\\")
+    t = Replace(t, """", "\\""")
+    t = Replace(t, vbCrLf, "\\n")
+    t = Replace(t, vbCr, "\\n")
+    t = Replace(t, vbLf, "\\n")
+    t = Replace(t, vbTab, "\\t")
+    SWCP_JsonEsc = t
+End Function
+
+' VBA Format() 的 VBS 替代:按格式串小数位数调 FormatNumber
+Function SWCP_Format(v, fmt)
+    Dim p, decs
+    p = InStr(CStr(fmt), ".")
+    If p > 0 Then decs = Len(CStr(fmt)) - p Else decs = 0
+    SWCP_Format = FormatNumber(v, decs, -1, 0, 0)
+End Function
+`;
+
+  return `${banner}
+' ===== 用户脚本主体 =====
+${code}
+${runner}${supportLib}`;
+}
+
+/**
+ * 检查 VBA 代码中无法转换为 VBScript 的语法。
+ * 返回问题列表(空 = 兼容)。engine 在执行前调用,
+ * 提前拦截并给出可操作的错误信息,而不是让 cscript 报一堆编译错误。
+ */
+export function checkVbsCompatibility(vbaCode: string): string[] {
+  // On Error GoTo 会被转换器处理,先排除再查裸 GoTo
+  const code = vbaCode.replace(/On\s+Error\s+GoTo\s+\w+/gi, '');
+  const rules: Array<[RegExp, string]> = [
+    [/\bGoTo\s+\w+/i, 'GoTo 跳转(VBScript 不支持),请改用 If/Do 结构'],
+    [/^\s*Open\b[^\n]*\bFor\s+(?:Output|Input|Append|Binary|Random)\b/im, 'Open 文件 I/O(VBScript 不支持),请改用 Scripting.FileSystemObject'],
+    [/\bPrint\s*#/i, 'Print # 文件写入,请改用 FileSystemObject 的 WriteLine'],
+    [/\bFreeFile\b/i, 'FreeFile(VBScript 不支持),请改用 FileSystemObject'],
+    [/\bInputBox\s*\(/i, 'InputBox 交互对话框(脚本在后台执行,无法交互)'],
+    [/\b(?:MkDir|RmDir|ChDir|ChDrive)\b/i, 'VBA 文件系统语句(VBScript 不支持),请改用 FileSystemObject'],
+    [/\bDir\s*\(/i, 'Dir() 函数(VBScript 不支持),请改用 FileSystemObject 的 FolderExists/FileExists'],
+  ];
+  const issues: string[] = [];
+  for (const [re, msg] of rules) {
+    if (re.test(code)) issues.push(msg);
+  }
+  return issues;
 }
 
 /**

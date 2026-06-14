@@ -30,13 +30,19 @@ If Not swModel.SketchManager.ActiveSketch Is Nothing Then
 End If
 
 ' 拉伸深度 ${params.depth} mm${both ? '(双向)' : ''}
-swModel.FeatureManager.FeatureExtrusion3 _
+Dim swFeat As Object
+Set swFeat = swModel.FeatureManager.FeatureExtrusion3( _
     True, False, ${both ? 'True' : 'False'}, _
     0, 0, _
     ${depth}, ${both ? depth : '0'}, _
     False, False, False, False, _
     0, 0, False, False, False, False, _
-    True, True, True, 0, 0, False`;
+    True, True, True, 0, 0, False)
+
+If swFeat Is Nothing Then
+    MsgBox "拉伸失败:请确认存在已绘制且闭合的草图(可先运行创建草图/画矩形等工具)", vbExclamation
+    Exit Sub
+End If`;
   return wrapMain(body);
 }
 
@@ -50,14 +56,20 @@ If Not swModel.SketchManager.ActiveSketch Is Nothing Then
 End If
 
 ' 切除拉伸 ${params.depth} mm
-swModel.FeatureManager.FeatureCut4 _
+Dim swFeat As Object
+Set swFeat = swModel.FeatureManager.FeatureCut4( _
     True, False, False, _
     0, 0, _
     ${depth}, 0, _
     False, False, False, False, _
     0, 0, False, False, False, False, _
     True, True, True, True, _
-    0, 0, False`;
+    0, 0, False)
+
+If swFeat Is Nothing Then
+    MsgBox "切除失败:请确认存在已绘制的草图且与实体相交", vbExclamation
+    Exit Sub
+End If`;
   return wrapMain(body);
 }
 
@@ -71,12 +83,18 @@ If Not swModel.SketchManager.ActiveSketch Is Nothing Then
 End If
 
 ' 旋转 ${params.angle}°(${angleRad} 弧度)
-swModel.FeatureManager.FeatureRevolve2 _
+Dim swFeat As Object
+Set swFeat = swModel.FeatureManager.FeatureRevolve2( _
     True, True, False, False, False, False, _
     0, 0, ${angleRad}, 0, _
     False, False, _
     0, 0, 0, 0, 0, _
-    True, True, True`;
+    True, True, True)
+
+If swFeat Is Nothing Then
+    MsgBox "旋转失败:请确认草图中有闭合轮廓和一条作为旋转轴的中心线", vbExclamation
+    Exit Sub
+End If`;
   return wrapMain(body);
 }
 
@@ -130,9 +148,14 @@ End If
 
 ' 倒斜角 ${params.distance} mm
 ' InsertFeatureChamfer(Type, PropagateFeature, DefaultType, Width, Angle, OtherDist)
-' Type: 0 = 距离-距离等距
-swModel.FeatureManager.InsertFeatureChamfer _
-    4, 1, ${d}, ${d}, 0.785398163397448, ${d}`;
+Dim swFeat As Object
+Set swFeat = swModel.FeatureManager.InsertFeatureChamfer( _
+    4, 1, ${d}, ${d}, 0.785398163397448, ${d})
+
+If swFeat Is Nothing Then
+    MsgBox "倒斜角失败:请确认选中的边有效", vbExclamation
+    Exit Sub
+End If`;
   return wrapMain(body);
 }
 
@@ -157,13 +180,19 @@ If swSelMgr.GetSelectedObjectCount2(-1) < 2 Then
 End If
 
 ' 线性阵列:间距 ${params.spacing} mm,数量 ${params.count},方向:${params.direction}
-swModel.FeatureManager.FeatureLinearPattern5 _
+Dim swFeat As Object
+Set swFeat = swModel.FeatureManager.FeatureLinearPattern5( _
     ${params.count}, ${spacing}, _
     1, 0.01, _
     False, False, _
     "NULL", "NULL", _
     False, False, False, False, False, False, _
-    True, True, False, False, 0, 0`;
+    True, True, False, False, 0, 0)
+
+If swFeat Is Nothing Then
+    MsgBox "阵列失败:请确认已选中要阵列的特征和方向参考(边/轴)", vbExclamation
+    Exit Sub
+End If`;
   return wrapMain(body);
 }
 
@@ -185,8 +214,14 @@ End If
 ${selectPlaneAppend(params.plane)}
 
 ' 镜像
-swModel.FeatureManager.InsertMirrorFeature2 _
-    False, False, False, False, 0`;
+Dim swFeat As Object
+Set swFeat = swModel.FeatureManager.InsertMirrorFeature2( _
+    False, False, False, False, 0)
+
+If swFeat Is Nothing Then
+    MsgBox "镜像失败:请确认已选中要镜像的特征且对称面有效", vbExclamation
+    Exit Sub
+End If`;
   return wrapMain(body);
 }
 

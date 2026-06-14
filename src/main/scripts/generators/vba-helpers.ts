@@ -109,6 +109,31 @@ End If`;
 }
 
 /**
+ * 确保目标文件的父目录存在 —— 用 FileSystemObject 递归创建。
+ * FSO 在 VBA 和 VBScript 中通用;VBA 的 Dir()/MkDir 在 VBScript 中不存在,禁止使用。
+ * @param fsoVar 已 Set 的 FileSystemObject 变量名
+ * @param targetVar 目标文件完整路径的变量名
+ */
+export function ensureParentDir(fsoVar: string, targetVar: string): string {
+  return `' 确保目标目录存在(FileSystemObject 在 VBA/VBScript 中通用)
+Dim swcpDir As String
+swcpDir = ${fsoVar}.GetParentFolderName(${targetVar})
+If Len(swcpDir) > 0 Then
+    If Not ${fsoVar}.FolderExists(swcpDir) Then
+        Dim swcpParts() As String
+        swcpParts = Split(swcpDir, "\\")
+        Dim swcpAcc As String
+        Dim swcpI As Long
+        swcpAcc = swcpParts(0)
+        For swcpI = 1 To UBound(swcpParts)
+            swcpAcc = swcpAcc & "\\" & swcpParts(swcpI)
+            If Not ${fsoVar}.FolderExists(swcpAcc) Then ${fsoVar}.CreateFolder swcpAcc
+        Next swcpI
+    End If
+End If`;
+}
+
+/**
  * 追加选择基准面（用于镜像等需要保留先前选择的场景）。
  * Append=True, Mark=2 告诉 SolidWorks 这是镜像面而非替换当前选择。
  */

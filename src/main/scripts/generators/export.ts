@@ -4,11 +4,13 @@
 // SolidWorks 的 Extension.SaveAs 对扩展名敏感 —— .step/.stp/.pdf/.stl/.dxf 会自动
 // 选对应的转换器。我们只要确保路径写对就行。
 
-import { PRELUDE_ACTIVE_DOC, wrapMain, vbaString } from './vba-helpers';
+import { PRELUDE_ACTIVE_DOC, wrapMain, vbaString, ensureParentDir } from './vba-helpers';
 
 /**
  * 通用 SaveAs 代码片段 —— 给定目标文件路径,调用 SaveAs 并处理错误。
  * 内部使用:不对外导出。
+ * 注意:目录检测/创建必须用 FileSystemObject ——
+ * VBA 的 Dir()/MkDir 在 VBScript 执行环境中不存在。
  */
 function saveAsBody(path: string, description: string): string {
   return `${PRELUDE_ACTIVE_DOC}
@@ -17,23 +19,12 @@ Dim errors As Long
 Dim warnings As Long
 Dim ok As Boolean
 
-' 确保目录存在 —— VBA 里用 Dir 检测,不存在则尝试用 MkDir 创建
 Dim targetPath As String
 targetPath = ${vbaString(path)}
-Dim dirPath As String
-dirPath = Left(targetPath, InStrRev(targetPath, "\\") - 1)
-If Len(dirPath) > 0 And Dir(dirPath, vbDirectory) = "" Then
-    ' 递归创建目录
-    Dim parts() As String
-    parts = Split(dirPath, "\\")
-    Dim acc As String
-    Dim i As Long
-    acc = parts(0)
-    For i = 1 To UBound(parts)
-        acc = acc & "\\" & parts(i)
-        If Dir(acc, vbDirectory) = "" Then MkDir acc
-    Next i
-End If
+
+Dim swcpFso As Object
+Set swcpFso = CreateObject("Scripting.FileSystemObject")
+${ensureParentDir('swcpFso', 'targetPath')}
 
 ok = swModel.Extension.SaveAs(targetPath, 0, 1, Nothing, errors, warnings)
 
@@ -67,19 +58,9 @@ Dim warnings As Long
 Dim targetPath As String
 targetPath = ${vbaString(params.outputPath)}
 
-Dim dirPath As String
-dirPath = Left(targetPath, InStrRev(targetPath, "\\") - 1)
-If Len(dirPath) > 0 And Dir(dirPath, vbDirectory) = "" Then
-    Dim parts() As String
-    parts = Split(dirPath, "\\")
-    Dim acc As String
-    Dim i As Long
-    acc = parts(0)
-    For i = 1 To UBound(parts)
-        acc = acc & "\\" & parts(i)
-        If Dir(acc, vbDirectory) = "" Then MkDir acc
-    Next i
-End If
+Dim swcpFso As Object
+Set swcpFso = CreateObject("Scripting.FileSystemObject")
+${ensureParentDir('swcpFso', 'targetPath')}
 
 If swModel.Extension.SaveAs(targetPath, 0, 1, Nothing, errors, warnings) Then
     MsgBox "STL 导出成功: " & targetPath, vbInformation

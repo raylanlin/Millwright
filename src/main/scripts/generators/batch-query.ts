@@ -2,7 +2,7 @@
 //
 // 批量重命名 / 干涉检查 / 质量属性 / BOM 导出。
 
-import { PRELUDE_ACTIVE_DOC, wrapMain, vbaString } from './vba-helpers';
+import { PRELUDE_ACTIVE_DOC, wrapMain, vbaString, ensureParentDir } from './vba-helpers';
 
 /**
  * 批量重命名 —— 装配体中的零部件按字符串替换重命名。
@@ -98,7 +98,7 @@ For i = 0 To UBound(vInterferences)
             If j < UBound(comps) Then msg = msg & " ↔ "
         Next j
     End If
-    msg = msg & "  体积=" & Format(inter.Volume * 1000000000, "0.00") & " mm³" & vbCrLf
+    msg = msg & "  体积=" & FormatNumber(inter.Volume * 1000000000, 2) & " mm³" & vbCrLf
     If i >= 19 Then
         msg = msg & "..." & vbCrLf
         Exit For
@@ -127,11 +127,11 @@ Dim cog As Variant
 cog = swMass.CenterOfMass  ' [x, y, z] in meters
 
 Dim msg As String
-msg = "质量: " & Format(m, "0.0000") & " kg" & vbCrLf & _
-      "体积: " & Format(v * 1000000000, "0.00") & " mm³" & vbCrLf & _
-      "重心: (" & Format(cog(0) * 1000, "0.00") & ", " & _
-                 Format(cog(1) * 1000, "0.00") & ", " & _
-                 Format(cog(2) * 1000, "0.00") & ") mm"
+msg = "质量: " & FormatNumber(m, 4) & " kg" & vbCrLf & _
+      "体积: " & FormatNumber(v * 1000000000, 2) & " mm³" & vbCrLf & _
+      "重心: (" & FormatNumber(cog(0) * 1000, 2) & ", " & _
+                 FormatNumber(cog(1) * 1000, 2) & ", " & _
+                 FormatNumber(cog(2) * 1000, 2) & ") mm"
 
 MsgBox msg, vbInformation, "质量属性"`;
   return wrapMain(body);
@@ -167,6 +167,7 @@ Dim vComps As Variant
 vComps = swAssembly.GetComponents(True)
 
 ' 汇总:零件文件名 → 数量
+' 注意:不用 GoTo(VBScript 不支持),用 If 块代替
 Dim dict As Object
 Set dict = CreateObject("Scripting.Dictionary")
 Dim i As Long
@@ -175,48 +176,35 @@ For i = 0 To UBound(vComps)
     Set comp = vComps(i)
     Dim pathName As String
     pathName = comp.GetPathName
-    If Len(pathName) = 0 Then GoTo NextComp
-    Dim fileName As String
-    fileName = Mid(pathName, InStrRev(pathName, "\\") + 1)
-    If dict.Exists(fileName) Then
-        dict(fileName) = dict(fileName) + 1
-    Else
-        dict(fileName) = 1
+    If Len(pathName) > 0 Then
+        Dim fileName As String
+        fileName = Mid(pathName, InStrRev(pathName, "\\") + 1)
+        If dict.Exists(fileName) Then
+            dict(fileName) = dict(fileName) + 1
+        Else
+            dict(fileName) = 1
+        End If
     End If
-NextComp:
 Next i
 
-' 写 CSV
-Dim fileNum As Integer
-fileNum = FreeFile
+' 写 CSV —— 用 FileSystemObject(VBA 的 Open/Print #/FreeFile 在 VBScript 中不存在)
+' ANSI 编码:中文 Windows 上的 Excel 可直接打开不乱码
 Dim outPath As String
 outPath = ${vbaString(params.outputPath)}
 
-' 确保目录存在
-Dim dirPath As String
-dirPath = Left(outPath, InStrRev(outPath, "\\") - 1)
-If Len(dirPath) > 0 And Dir(dirPath, vbDirectory) = "" Then
-    Dim parts() As String
-    parts = Split(dirPath, "\\")
-    Dim acc As String
-    Dim k As Long
-    acc = parts(0)
-    For k = 1 To UBound(parts)
-        acc = acc & "\\" & parts(k)
-        If Dir(acc, vbDirectory) = "" Then MkDir acc
-    Next k
-End If
+Dim swcpFso As Object
+Set swcpFso = CreateObject("Scripting.FileSystemObject")
+${ensureParentDir('swcpFso', 'outPath')}
 
-Open outPath For Output As #fileNum
-' UTF-8 BOM,Excel 才能识别中文
-Print #fileNum, Chr(239) & Chr(187) & Chr(191);
-Print #fileNum, "文件名,数量"
+Dim csvFile As Object
+Set csvFile = swcpFso.CreateTextFile(outPath, True)
+csvFile.WriteLine "文件名,数量"
 Dim keys As Variant
 keys = dict.Keys
 For i = 0 To UBound(keys)
-    Print #fileNum, keys(i) & "," & dict(keys(i))
+    csvFile.WriteLine keys(i) & "," & dict(keys(i))
 Next i
-Close #fileNum
+csvFile.Close
 
 MsgBox "BOM 导出完成: " & outPath & vbCrLf & "共 " & dict.Count & " 种零件", vbInformation`;
   return wrapMain(body);

@@ -1,7 +1,7 @@
 // src/renderer/components/Sidebar.tsx
 
 import type { ThemeTokens } from '../themes';
-import type { LLMConfig, SWStatus, ThemeName } from '../../shared/types';
+import type { LLMConfig, SWStatus, ThemeName, ChatSessionMeta } from '../../shared/types';
 import { StatusDot } from './StatusDot';
 
 export type TabKey = 'chat' | 'automations' | 'tools';
@@ -17,6 +17,12 @@ interface Props {
   swStatus: SWStatus;
   onReconnectSW: () => void;
   swLoading: boolean;
+  /** 对话历史 */
+  sessions: ChatSessionMeta[];
+  currentSessionId: string | null;
+  onSelectSession: (id: string) => void;
+  onDeleteSession: (id: string) => void;
+  onNewChat: () => void;
 }
 
 const TABS: { key: TabKey; icon: string; label: string }[] = [
@@ -36,6 +42,11 @@ export function Sidebar({
   swStatus,
   onReconnectSW,
   swLoading,
+  sessions,
+  currentSessionId,
+  onSelectSession,
+  onDeleteSession,
+  onNewChat,
 }: Props) {
   const isConfigured = !!(config.apiKey && config.apiKey.length > 5);
   // 模型名过长时截断显示
@@ -165,6 +176,118 @@ export function Sidebar({
       </nav>
 
       <div style={{ flex: 1 }} />
+
+      {/* 对话历史(仅在对话标签下显示) */}
+      {activeTab === 'chat' && (
+        <div
+          style={{
+            flexBasis: 'auto',
+            maxHeight: '42%',
+            overflowY: 'auto',
+            padding: '4px 8px 8px',
+            borderTop: `1px solid ${t.sidebarBorder}`,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 6px 6px',
+              position: 'sticky',
+              top: 0,
+              background: t.sidebar,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.5,
+                color: t.textMuted,
+                textTransform: 'uppercase',
+              }}
+            >
+              对话历史
+            </span>
+            <button
+              onClick={onNewChat}
+              title="新建对话"
+              style={{
+                background: 'none',
+                border: `1px solid ${t.cardBorder}`,
+                color: t.textSecondary,
+                fontSize: 11,
+                cursor: 'pointer',
+                borderRadius: 6,
+                padding: '2px 8px',
+                fontFamily: 'inherit',
+              }}
+            >
+              ＋ 新对话
+            </button>
+          </div>
+          {sessions.length === 0 ? (
+            <div style={{ fontSize: 11, color: t.textMuted, padding: '4px 6px' }}>
+              暂无历史,开始对话后自动保存
+            </div>
+          ) : (
+            sessions.map((s) => {
+              const active = s.id === currentSessionId;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => onSelectSession(s.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '7px 8px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    background: active ? t.accentSoft : 'transparent',
+                    marginBottom: 1,
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 12,
+                      color: active ? t.text : t.textSecondary,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={s.title}
+                  >
+                    {s.title || '新对话'}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSession(s.id);
+                    }}
+                    title="删除对话"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: t.textMuted,
+                      fontSize: 15,
+                      lineHeight: 1,
+                      cursor: 'pointer',
+                      padding: '0 2px',
+                      flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {/* 底部操作 */}
       <div style={{ padding: '8px 10px 14px', borderTop: `1px solid ${t.sidebarBorder}` }}>

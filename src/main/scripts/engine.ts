@@ -15,12 +15,12 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import type { ScriptLanguage, ScriptResult } from '../../shared/types';
 import { validateScript } from './sanitizer';
-import { vbaToVbs, detectRuntimes } from './vba-macro-writer';
+import { vbaToVbs, detectRuntimes, checkVbsCompatibility } from './vba-macro-writer';
 import type { SolidWorksBridge } from '../com/sw-bridge';
 import { writeVBSFile, safeUnlink } from '../com/vbs-writer';
 
 const PYTHON_TIMEOUT_MS = 60_000;
-const VBS_TIMEOUT_MS = 30_000;
+const VBS_TIMEOUT_MS = 60_000; // 大模型重建/导出可能超过 30 秒
 
 type Runtime = 'python' | 'cscript';
 
@@ -59,6 +59,19 @@ export class ScriptEngine {
       };
     }
 
+    // VBA 路径:提前检查 VBScript 不支持的语法,给出可操作的错误
+    // (好过让 cscript 吞掉错误或报一堆看不懂的编译错误)
+    if (language !== 'python') {
+      const compat = checkVbsCompatibility(code);
+      if (compat.length > 0) {
+        return {
+          success: false, output: '',
+          error: `脚本包含无法在后台执行的 VBA 语法: ${compat.join('; ')}`,
+          duration: 0,
+        };
+      }
+    }
+
     const start = Date.now();
     try {
       if (language === 'python') {
@@ -95,20 +108,45 @@ export class ScriptEngine {
           safeUnlink(resultPath);
 
           if (error) {
+            const timedOut =
+              (error as { killed?: boolean }).killed === true ||
+              /ETIMEDOUT/i.test(String((error as { code?: unknown }).code ?? ''));
             resolve({
               success: false,
               output: stdout || '',
-              error: resultData?.message || stderr || error.message,
+              error:
+                resultData && !resultData.success
+                  ? resultData.message
+                  : timedOut
+                    ? `脚本执行超时(${VBS_TIMEOUT_MS / 1000}秒)。可能原因: SolidWorks 正在重建/忙碌、弹出了等待确认的对话框、或操作过于复杂。请检查 SolidWorks 窗口后重试。`
+                    : stderr || error.message,
               duration: Date.now() - startedAt,
               data: resultData ?? undefined,
             });
-          } else {
+          } else if (resultData) {
+            // 成功时把脚本的 Echo 输出(如导出路径、统计数量)放在通用消息前面
+            const echoOut = (stdout || '').trim();
             resolve({
-              success: resultData?.success ?? true,
-              output: resultData?.message || stdout || '',
-              error: stderr ? String(stderr) : undefined,
+              success: resultData.success,
+              output: echoOut
+                ? `${echoOut}\n${resultData.message || ''}`.trim()
+                : resultData.message || '',
+              error: resultData.success ? undefined : resultData.message,
               duration: Date.now() - startedAt,
-              data: resultData ?? undefined,
+              data: resultData,
+            });
+          } else {
+            // 没有结果文件 = 脚本提前退出而未上报。
+            // 新版 vbaToVbs 保证所有正常路径都写结果文件,
+            // 走到这里说明脚本崩溃或被外部终止 —— 绝不能当作成功。
+            resolve({
+              success: false,
+              output: stdout || '',
+              error:
+                '脚本未返回执行结果(可能提前退出或被终止)。' +
+                (stderr ? ` stderr: ${stderr}` : '') +
+                (stdout ? ` 输出: ${stdout}` : ''),
+              duration: Date.now() - startedAt,
             });
           }
         },
@@ -173,7 +211,14 @@ export class ScriptEngine {
 function readResultFile(p: string): { success: boolean; message: string } | null {
   try {
     if (fs.existsSync(p)) {
-      return JSON.parse(fs.readFileSync(p, 'utf8'));
+      const buf = fs.readFileSync(p);
+      // VBS 的 FileSystemObject 以 Unicode 模式写入时是 UTF-16LE + BOM,
+      // Python 路径写的是 UTF-8。按 BOM 自动识别,避免中文乱码。
+      const text =
+        buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe
+          ? buf.subarray(2).toString('utf16le')
+          : buf.toString('utf8');
+      return JSON.parse(text);
     }
   } catch { /* ignore */ }
   return null;
