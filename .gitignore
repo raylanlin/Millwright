@@ -26,3 +26,4 @@ Desktop.ini
 # Build artifacts
 *.tsbuildinfo
 package-lock.json
+backups/

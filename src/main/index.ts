@@ -81,7 +81,9 @@ app.whenReady().then(async () => {
 
   try {
     crashLog('generators coverage check');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { checkCoverage } = require('./scripts/generators');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { SW_TOOLS } = require('../shared/sw-tools');
     const cov = checkCoverage(SW_TOOLS);
     if (cov.missing.length > 0) {

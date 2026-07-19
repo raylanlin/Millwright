@@ -229,7 +229,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
 
   // 把内部 ChatMessage[] 转成 OpenAI 线格式，正确还原 tool_calls / role:'tool'
   private buildToolMessages(messages: ChatMessage[]): any[] {
-    const { system, rest } = this.splitSystem(
+    const { system } = this.splitSystem(
       messages.filter((m) => !(m.role === 'system' && m.toolCalls)),
     );
     const systemPrompt = resolveSystemPrompt(

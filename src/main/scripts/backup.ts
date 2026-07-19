@@ -74,6 +74,7 @@ export async function backupActiveDocument(bridge: SolidWorksBridge): Promise<Ba
  */
 export function removeBackup(backupPath: string): void {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('fs');
     if (fs.existsSync(backupPath)) {
       fs.unlinkSync(backupPath);
@@ -88,6 +89,7 @@ export function removeBackup(backupPath: string): void {
  */
 export function cleanOldBackups(): void {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('fs');
     if (!fs.existsSync(BACKUP_DIR)) return;
 

@@ -1,6 +1,7 @@
 // src/main/com/sw-bridge.ts
 //
 // SolidWorks COM 桥接层。
+/* eslint-disable no-useless-escape */
 //
 // 通过 cscript.exe 运行 VBScript 实现 COM 操作，完全不依赖 winax 原生模块。
 // 这样在 Windows 上总是可用（cscript 自带），且无需处理原生模块编译问题。
@@ -13,6 +14,7 @@
 // 3. getRawApp() 不再可用（跨进程无法传递 COM 指针），context-collector 改用 VBS 采集
 
 import * as fs from 'fs';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import * as path from 'path';
 import { exec } from 'child_process';
 import type { SWDocumentType, SWStatus } from '../../shared/types';
@@ -189,6 +191,7 @@ Function EscapeJson(s)
         EscapeJson = ""
         Exit Function
     End If
+    // eslint-disable-next-line no-useless-escape
     EscapeJson = Replace(Replace(Replace(s, "\", "\\"), """", "\"""), vbCrLf, "\n")
 End Function`;
     try {
@@ -348,6 +351,7 @@ If docType = 2 Then
             If Not IsNull(cName) And cName <> "" Then
                 cFile = ""
                 If Not IsNull(cPath) And cPath <> "" Then
+                    // eslint-disable-next-line no-useless-escape
                     arr = Split(cPath, "\")
                     cFile = arr(UBound(arr))
                 End If
@@ -374,6 +378,7 @@ Function EscapeJson(s)
         EscapeJson = ""
         Exit Function
     End If
+    // eslint-disable-next-line no-useless-escape
     EscapeJson = Replace(Replace(Replace(s, "\", "\\"), """", "\"""), vbCrLf, "\n")
 End Function
 

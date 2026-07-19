@@ -118,7 +118,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   ): AsyncIterable<LLMStreamEvent> {
     const { signal: s, cleanup } = this.withTimeout(signal);
     let acc = '';
-    let usage: { input_tokens?: number; output_tokens?: number } = {};
+    const usage: { input_tokens?: number; output_tokens?: number } = {};
     let stopReason: string | null = null;
 
     try {

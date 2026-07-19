@@ -17,7 +17,9 @@ import * as fs from 'fs';
 export function writeVBSFile(scriptCode: string, prefix: string = 'sw_vbs'): string {
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 6);
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const scriptPath = require('path').join(
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     require('os').tmpdir(),
     `${prefix}_${ts}_${rand}.vbs`,
   );

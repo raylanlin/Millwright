@@ -29,7 +29,7 @@ function write(msg: string): void {
   if (!CRASH_LOG) return;
   try {
     fs.appendFileSync(CRASH_LOG, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {}
+  } catch { /* intentionally empty */ }
 }
 
 write(`crash-log init, electron ${process.versions.electron}, userData: ${CRASH_LOG}`);
