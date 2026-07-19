@@ -70,6 +70,22 @@ const api = {
         ipcRenderer.removeListener(IpcChannels.LLM_STREAM_EVENT, handler);
       };
     },
+
+    agent: (
+      config: LLMConfig,
+      messages: ChatMessage[],
+    ): Promise<
+      | { ok: true; text: string; requestId: string }
+      | { ok: false; error: LLMErrorInfo; requestId?: string }
+    > => ipcRenderer.invoke(IpcChannels.LLM_AGENT, { config, messages }),
+
+    onAgentEvent: (cb: (ev: any) => void) => {
+      const handler = (_e: unknown, ev: any) => cb(ev);
+      ipcRenderer.on(IpcChannels.LLM_AGENT_EVENT, handler);
+      return () => {
+        ipcRenderer.removeListener(IpcChannels.LLM_AGENT_EVENT, handler);
+      };
+    },
   },
   script: {
     validate: (code: string, lang: 'vba' | 'python'): Promise<ScriptValidation> =>

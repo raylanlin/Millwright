@@ -19,6 +19,8 @@ import { backupActiveDocument, removeBackup, cleanOldBackups } from '../scripts/
 import { loadConfig, saveConfig, loadTheme, saveTheme } from '../store/config';
 import { listSessions, getSession, saveSession, deleteSession, createSession } from '../store/chat-store';
 import { toLLMError } from '../llm/errors';
+import { runAgentLoop } from '../agent/agent-loop';
+import { OpenAIAdapter } from '../llm/openai';
 
 /**
  * 取消令牌表:requestId → AbortController
@@ -170,6 +172,72 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     } catch (err) {
       // 同上:归一化错误,保证渲染层拿到 { code, message }
       return { ok: false, error: toLLMError(err, '连接测试失败') };
+    }
+  });
+
+  // ===== Agent =====
+
+  ipcMain.handle(IpcChannels.LLM_AGENT, async (_e, payload: { config: LLMConfig; messages: ChatMessage[] }) => {
+    const check = validateConfig(payload.config);
+    if (!check.valid) {
+      return { ok: false, error: toLLMError(new Error(check.issues.join(', ')), '配置无效') };
+    }
+    const adapter = createAdapter(payload.config);
+    if (!(adapter instanceof OpenAIAdapter)) {
+      return { ok: false, error: { code: 'LLM_AGENT_UNSUPPORTED', message: 'agent 模式目前仅支持 OpenAI 兼容协议' } };
+    }
+    const controller = new AbortController();
+    const reqId = uuid();
+    activeRequests.set(reqId, controller);
+    try {
+      const swContext = await formatContextForPromptAsync(bridge);
+      const enrichedConfig = swContext
+        ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
+        : payload.config;
+      const adapter2 = createAdapter(enrichedConfig) as OpenAIAdapter;
+      const text = await runAgentLoop(adapter2, payload.messages, scriptEngine, {
+        maxRounds: 8,
+        signal: controller.signal,
+        onEvent: (ev) => getMainWindow()?.webContents.send(IpcChannels.LLM_AGENT_EVENT, ev),
+      });
+      return { ok: true, text, requestId: reqId };
+    } catch (err) {
+      return { ok: false, error: toLLMError(err, 'Agent 执行失败'), requestId: reqId };
+    } finally {
+      activeRequests.delete(reqId);
+    }
+  });
+
+  // ===== Agent =====
+
+  ipcMain.handle(IpcChannels.LLM_AGENT, async (_e, payload: { config: LLMConfig; messages: ChatMessage[] }) => {
+    const check = validateConfig(payload.config);
+    if (!check.valid) {
+      return { ok: false, error: toLLMError(new Error(check.issues.join(', ')), '配置无效') };
+    }
+    const adapter = createAdapter(payload.config);
+    if (!(adapter instanceof OpenAIAdapter)) {
+      return { ok: false, error: { code: 'LLM_AGENT_UNSUPPORTED', message: 'agent 模式目前仅支持 OpenAI 兼容协议' } };
+    }
+    const controller = new AbortController();
+    const reqId = uuid();
+    activeRequests.set(reqId, controller);
+    try {
+      const swContext = await formatContextForPromptAsync(bridge);
+      const enrichedConfig = swContext
+        ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
+        : payload.config;
+      const richAdapter = createAdapter(enrichedConfig) as OpenAIAdapter;
+      const text = await runAgentLoop(richAdapter, payload.messages, scriptEngine, {
+        maxRounds: 8,
+        signal: controller.signal,
+        onEvent: (ev) => getMainWindow()?.webContents.send(IpcChannels.LLM_AGENT_EVENT, ev),
+      });
+      return { ok: true, text, requestId: reqId };
+    } catch (err) {
+      return { ok: false, error: toLLMError(err, 'Agent 执行失败'), requestId: reqId };
+    } finally {
+      activeRequests.delete(reqId);
     }
   });
 

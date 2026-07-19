@@ -59,9 +59,9 @@ test('presets: DEFAULT_CONFIG 除 apiKey 外通过校验', () => {
   assert.equal(r.valid, true, `DEFAULT_CONFIG 不通过: ${r.issues.join(', ')}`);
 });
 
-test('presets: DEFAULT_CONFIG 默认使用 anthropic + 对应 URL', () => {
-  assert.equal(DEFAULT_CONFIG.protocol, 'anthropic');
-  assert.equal(DEFAULT_CONFIG.baseURL, DEFAULT_URLS.anthropic);
+test('presets: DEFAULT_CONFIG 默认使用 openai + DeepSeek URL', () => {
+  assert.equal(DEFAULT_CONFIG.protocol, 'openai');
+  assert.equal(DEFAULT_CONFIG.baseURL, 'https://api.deepseek.com');
 });
 
 test('presets: DEFAULT_CONFIG 温度和 maxTokens 在合理范围', () => {

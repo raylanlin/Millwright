@@ -12,11 +12,13 @@ import { resolveSystemPrompt } from './prompts';
 import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
 import { parseSSE } from './sse';
+import { buildOpenAITools, type OpenAITool } from './tools-schema';
 import type {
   ChatMessage,
   LLMResponse,
   LLMStreamEvent,
   LLMUsage,
+  ToolCall,
 } from '../../shared/types';
 
 interface OpenAIChoice {
@@ -206,6 +208,103 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       return true;
     } catch (err) {
       throw toLLMError(err, '测试连接失败');
+    } finally {
+      cleanup();
+    }
+  }
+
+  // —— P1: Function Calling / Agent 模式 ——
+
+  private buildToolBody(openAIMessages: any[], tools: OpenAITool[]) {
+    return {
+      model: this.config.model,
+      messages: openAIMessages,
+      temperature: this.config.temperature ?? 0.3,
+      max_tokens: this.config.maxTokens ?? 4096,
+      tools,
+      tool_choice: 'auto',
+      stream: false,
+    };
+  }
+
+  // 把内部 ChatMessage[] 转成 OpenAI 线格式，正确还原 tool_calls / role:'tool'
+  private buildToolMessages(messages: ChatMessage[]): any[] {
+    const { system, rest } = this.splitSystem(
+      messages.filter((m) => !(m.role === 'system' && m.toolCalls)),
+    );
+    const systemPrompt = resolveSystemPrompt(
+      [this.config.systemPrompt, system].filter(Boolean).join('\n\n'),
+    );
+    const out: any[] = [{ role: 'system', content: systemPrompt }];
+
+    for (const m of messages) {
+      // 承载工具"结果"的消息（agent-loop 用 role:'system' + toolCalls[0].result 承载）
+      if (m.role === 'system' && m.toolCalls && m.toolCalls[0]?.result != null) {
+        const tc = m.toolCalls[0];
+        out.push({
+          role: 'tool',
+          tool_call_id: tc.id ?? tc.name,
+          content: tc.result,
+        });
+        continue;
+      }
+      // 助手发起工具调用的消息
+      if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+        out.push({
+          role: 'assistant',
+          content: m.content || null,
+          tool_calls: m.toolCalls.map((tc, i) => ({
+            id: tc.id ?? `call_${i}`,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.parameters ?? {}) },
+          })),
+        });
+        continue;
+      }
+      // 普通的 system 已在开头合并，跳过
+      if (m.role === 'system') continue;
+      out.push({ role: m.role, content: m.content });
+    }
+    return out;
+  }
+
+  async chatWithTools(messages: ChatMessage[], signal?: AbortSignal): Promise<LLMResponse> {
+    const { signal: s, cleanup } = this.withTimeout(signal);
+    try {
+      const tools = buildOpenAITools(true); // P1: 只放开白名单工具
+      const body = this.buildToolBody(this.buildToolMessages(messages), tools);
+      const res = await fetch(`${this.getBaseURL()}/chat/completions`, {
+        method: 'POST',
+        headers: this.buildHeaders(),
+        body: JSON.stringify(body),
+        signal: s,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        throw new LLMHttpError(res.status, text,
+          extractErrorMessage(text, `API 错误 (HTTP ${res.status})`));
+      }
+      const data = JSON.parse(text);
+      const choice = data.choices?.[0];
+      const content: string = choice?.message?.content ?? '';
+
+      const rawCalls = choice?.message?.tool_calls ?? [];
+      const toolCalls: ToolCall[] = rawCalls.map((c: any) => {
+        let params: Record<string, any> = {};
+        try { params = JSON.parse(c.function?.arguments || '{}'); } catch { params = {}; }
+        return { id: c.id, name: c.function?.name, parameters: params };
+      });
+
+      return {
+        content,
+        toolCalls: toolCalls.length ? toolCalls : undefined,
+        finishReason: toolCalls.length ? 'tool_use' : 'stop',
+        usage: data.usage
+          ? { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens }
+          : undefined,
+      };
+    } catch (err) {
+      throw toLLMError(err, '工具调用请求失败');
     } finally {
       cleanup();
     }

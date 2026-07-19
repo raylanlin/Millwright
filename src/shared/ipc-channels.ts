@@ -26,6 +26,10 @@ export const IpcChannels = {
   CONFIG_SAVE: 'config:save',
   CONFIG_LOAD: 'config:load',
 
+  // Agent
+  LLM_AGENT: 'llm:agent',
+  LLM_AGENT_EVENT: 'llm:agent-event',
+
   // 对话历史
   CHAT_LIST: 'chat:list',
   CHAT_GET: 'chat:get',
