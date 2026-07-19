@@ -1,6 +1,7 @@
+Current version: 0.2.3
 {
   "name": "sw-copilot",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "\u5f00\u6e90 SolidWorks AI \u81ea\u52a8\u5316\u52a9\u624b \u2014 \u81ea\u7531\u9009\u62e9\u4efb\u610f AI \u540e\u7aef",
   "main": "dist/main/main/index.js",
   "author": "SW Copilot Contributors",
