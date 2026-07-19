@@ -88,7 +88,8 @@ function Banner({
 }
 
 function BannerButton({
-  _t,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  t,
   onClick,
   children,
 }: {
