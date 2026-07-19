@@ -191,7 +191,6 @@ Function EscapeJson(s)
         EscapeJson = ""
         Exit Function
     End If
-    // eslint-disable-next-line no-useless-escape
     EscapeJson = Replace(Replace(Replace(s, "\", "\\"), """", "\"""), vbCrLf, "\n")
 End Function`;
     try {
@@ -351,7 +350,6 @@ If docType = 2 Then
             If Not IsNull(cName) And cName <> "" Then
                 cFile = ""
                 If Not IsNull(cPath) And cPath <> "" Then
-                    // eslint-disable-next-line no-useless-escape
                     arr = Split(cPath, "\")
                     cFile = arr(UBound(arr))
                 End If
@@ -378,7 +376,6 @@ Function EscapeJson(s)
         EscapeJson = ""
         Exit Function
     End If
-    // eslint-disable-next-line no-useless-escape
     EscapeJson = Replace(Replace(Replace(s, "\", "\\"), """", "\"""), vbCrLf, "\n")
 End Function
 
