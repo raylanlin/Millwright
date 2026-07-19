@@ -21,20 +21,23 @@ files:
   - '!.env*'
 
 win:
+  # 只保留 NSIS。移除 squirrel —— 它会在安装后自动后台拉起应用，
+  # 导致随后的 NSIS 安装器发现进程关不掉，弹「无法关闭，请手动关闭」并反复重试。
   target:
     - target: nsis
       arch: [x64]
-    - target: squirrel
   icon: assets/icon.ico
   artifactName: '${productName}-Setup-${version}-${arch}.${ext}'
 
 nsis:
   oneClick: true
+  perMachine: false
   allowToChangeInstallationDirectory: false
   deleteAppDataOnUninstall: false
+  # 安装前强制结束仍在运行的实例，避免文件占用 / 关不掉的重试循环
+  # （electron-builder 自带该逻辑，perMachine:false + 单实例即可，保留默认）
 
-squirrelWindows:
-  iconUrl: https://raw.githubusercontent.com/raylanlin/sw-copilot/master/assets/icon-256.png
+squirrelWindows: null
 
 publish:
   provider: github
