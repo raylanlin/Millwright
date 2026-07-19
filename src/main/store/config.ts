@@ -24,6 +24,7 @@ export interface StoredConfig {
 const SCHEMA_VERSION = 1;
 
 // 把 DEFAULT_CONFIG 里的 apiKey 拆掉 —— StoredConfig.llm 是 Omit<LLMConfig, 'apiKey'>
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const { apiKey: _unusedDefaultKey, ...DEFAULT_LLM_WITHOUT_KEY } = DEFAULT_CONFIG;
 
 const DEFAULT_STORED: StoredConfig = {

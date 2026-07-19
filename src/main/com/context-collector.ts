@@ -7,7 +7,7 @@
 // 所有 COM 调用通过 sw-bridge 的 VBScript 代理完成，
 // 不再直接调用 COM API（winax 依赖已移除）。
 
-import type { SolidWorksBridge, DocumentFeatures } from './sw-bridge';
+import type { SolidWorksBridge } from './sw-bridge';
 
 export interface SWDocumentContext {
   fileName: string;

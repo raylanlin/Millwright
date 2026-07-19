@@ -5,7 +5,6 @@
 import {
   PRELUDE_ACTIVE_DOC,
   wrapMain,
-  selectPlane,
   selectPlaneAppend,
   mmToM,
   degToRad,

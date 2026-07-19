@@ -88,7 +88,7 @@ function Banner({
 }
 
 function BannerButton({
-  t,
+  _t,
   onClick,
   children,
 }: {

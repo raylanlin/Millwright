@@ -15,7 +15,7 @@ import { collectDocumentContext, formatContextForPrompt, formatContextForPromptA
 import { ScriptEngine } from '../scripts/engine';
 import { validateScript } from '../scripts/sanitizer';
 import { generateScript } from '../scripts/generators';
-import { backupActiveDocument, removeBackup, cleanOldBackups } from '../scripts/backup';
+import { backupActiveDocument, removeBackup } from '../scripts/backup';
 import { loadConfig, saveConfig, loadTheme, saveTheme } from '../store/config';
 import { listSessions, getSession, saveSession, deleteSession, createSession } from '../store/chat-store';
 import { toLLMError } from '../llm/errors';
