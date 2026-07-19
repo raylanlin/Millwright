@@ -41,11 +41,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifact
+      - name: Package (portable / 免安装版)
+        run: npm run pack
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
           name: SW-Copilot-Setup
           path: release/*.exe
+          retention-days: 30
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: SW-Copilot-Portable
+          path: release/win-unpacked/**
           retention-days: 30
 
       - name: Create Release
