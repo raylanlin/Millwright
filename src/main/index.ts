@@ -4,6 +4,30 @@
 
 import { app, BrowserWindow, shell, Menu } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
+
+// 启动 crash 日志
+let CRASH_LOG = '';
+function initCrashLog(): void {
+  try {
+    CRASH_LOG = path.join(app.getPath('userData'), 'crash.log');
+    fs.mkdirSync(path.dirname(CRASH_LOG), { recursive: true });
+  } catch { /* 备用 */ CRASH_LOG = path.join(process.env.TEMP || '/tmp', 'sw-copilot-crash.log'); }
+}
+function crashLog(msg: string): void {
+  if (!CRASH_LOG) initCrashLog();
+  try { fs.appendFileSync(CRASH_LOG, `[${new Date().toISOString()}] ${msg}\n`); } catch {}
+}
+
+process.on('uncaughtException', (err) => {
+  crashLog(`UNCAUGHT: ${err.stack || err.message}`);
+  // 写入后不 quit，让 Electron 默认处理（通常会弹出错误框）
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  crashLog(`UNHANDLED_REJECTION: ${reason?.stack || reason}`);
+});
+
 import { registerIpcHandlers, abortAllRequests } from './ipc/handlers';
 import { getBridge } from './com/sw-bridge';
 import { SWHealthMonitor } from './com/health';
@@ -19,6 +43,7 @@ function getMainWindow(): BrowserWindow | null {
 }
 
 function createMainWindow(): void {
+  crashLog('createMainWindow start');
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -40,8 +65,15 @@ function createMainWindow(): void {
       sandbox: false, // preload 需要用到 require('electron')
     },
   });
+  const preloadPath = app.isPackaged
+    ? path.join(app.getAppPath(), 'dist/preload/preload/index.js')
+    : path.join(__dirname, '../../preload/preload/index.js');
+  crashLog(`preload path: ${preloadPath}`);
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    crashLog('ready-to-show');
+    mainWindow?.show();
+  });
 
   // 新窗口交给系统浏览器
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -53,7 +85,9 @@ function createMainWindow(): void {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    mainWindow.loadFile(path.join(app.getAppPath(), 'dist/renderer/index.html'));
+    const rendererPath = path.join(app.getAppPath(), 'dist/renderer/index.html');
+    crashLog(`loading renderer: ${rendererPath}`);
+    mainWindow.loadFile(rendererPath);
   }
 
   mainWindow.on('closed', () => {
@@ -74,9 +108,13 @@ function startHealthMonitor(): void {
 }
 
 app.whenReady().then(async () => {
+  initCrashLog();
+  crashLog(`app ready, electron ${process.versions.electron}, chrome ${process.versions.chrome}`);
+
   // 启动时做一次生成器覆盖率自检,尽早暴露声明与实现不一致的问题。
   // 这个检查只读,不产生任何副作用,生产环境代价忽略不计。
   try {
+    crashLog('generators coverage check');
     // 动态 require 避免在电子启动路径里引入循环依赖;失败不阻塞启动
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { checkCoverage } = require('./scripts/generators');
@@ -89,15 +127,26 @@ app.whenReady().then(async () => {
     if (cov.extra.length > 0) {
       console.warn('[SW Copilot] 注册表中有 SW_TOOLS 未声明的工具:', cov.extra);
     }
+    crashLog('generators ok');
   } catch (err) {
+    crashLog(`generators error: ${err}`);
     console.warn('[SW Copilot] 生成器自检失败:', err);
   }
 
   // 移除默认菜单栏 (File/Edit/View/Window/Help)
+  crashLog('register handlers + create window');
   Menu.setApplicationMenu(null);
 
-  registerIpcHandlers(getMainWindow);
+  try {
+    registerIpcHandlers(getMainWindow);
+    crashLog('handlers registered ok');
+  } catch (err) {
+    crashLog(`handlers error: ${err}`);
+    throw err;
+  }
+
   createMainWindow();
+  crashLog('window created');
 
   // SKIP_SW_CONNECT=true 时跳过 COM 连接和心跳，方便纯 UI 开发
   if (process.env.SKIP_SW_CONNECT !== 'true') {
