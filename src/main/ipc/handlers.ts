@@ -19,7 +19,7 @@ import { backupActiveDocument, removeBackup } from '../scripts/backup';
 import { loadConfig, saveConfig, loadTheme, saveTheme } from '../store/config';
 import { listSessions, getSession, saveSession, deleteSession, createSession } from '../store/chat-store';
 import { toLLMError } from '../llm/errors';
-import { runAgentLoop } from '../agent/agent-loop';
+import { runAgentLoop, type AgentEvent } from '../agent/agent-loop';
 import { OpenAIAdapter } from '../llm/openai';
 
 /**
@@ -27,6 +27,12 @@ import { OpenAIAdapter } from '../llm/openai';
  * 渲染进程可以通过 requestId 取消正在进行的流式请求
  */
 const activeRequests = new Map<string, AbortController>();
+
+/** MED-1：同一时刻只允许一个 agent 会话，第二个直接拒 */
+let agentRunning = false;
+
+/** MED-3：等待渲染层确认的工具回调表，key = `${requestId}:${callId}` */
+const pendingConfirms = new Map<string, (ok: boolean) => void>();
 
 export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   const bridge = getBridge();
@@ -177,35 +183,77 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
 
   // ===== Agent =====
 
-  ipcMain.handle(IpcChannels.LLM_AGENT, async (_e, payload: { config: LLMConfig; messages: ChatMessage[] }) => {
+  ipcMain.handle(IpcChannels.LLM_AGENT, async (e, payload: { config: LLMConfig; messages: ChatMessage[]; requestId: string }) => {
+    // MED-1：互斥，第二个直接拒
+    if (agentRunning) {
+      return { ok: false, error: { code: 'AGENT_BUSY', message: '已有一个任务在执行中，请等待完成或先停止。' } };
+    }
     const check = validateConfig(payload.config);
     if (!check.valid) {
       return { ok: false, error: toLLMError(new Error(check.issues.join(', ')), '配置无效') };
     }
-    const adapter = createAdapter(payload.config);
-    if (!(adapter instanceof OpenAIAdapter)) {
-      return { ok: false, error: { code: 'LLM_AGENT_UNSUPPORTED', message: 'agent 模式目前仅支持 OpenAI 兼容协议' } };
-    }
+    const { requestId } = payload;
     const controller = new AbortController();
-    const reqId = uuid();
-    activeRequests.set(reqId, controller);
+    activeRequests.set(requestId, controller); // 复用 LLM_CANCEL 的 map
+    agentRunning = true;
     try {
       const swContext = await formatContextForPromptAsync(bridge);
       const enrichedConfig = swContext
         ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
         : payload.config;
-      const adapter2 = createAdapter(enrichedConfig) as OpenAIAdapter;
-      const text = await runAgentLoop(adapter2, payload.messages, scriptEngine, {
+      // LOW：只 build 一次 adapter（包括 enriched config）
+      const adapter = createAdapter(enrichedConfig) as OpenAIAdapter;
+      if (!(adapter instanceof OpenAIAdapter)) {
+        return { ok: false, error: { code: 'LLM_AGENT_UNSUPPORTED', message: 'agent 模式目前仅支持 OpenAI 兼容协议' } };
+      }
+
+      const send = (ev: AgentEvent) =>
+        e.sender.send(IpcChannels.LLM_AGENT_EVENT, { ...ev, requestId });
+
+      const text = await runAgentLoop(adapter, payload.messages, scriptEngine, {
+        requestId,
         maxRounds: 8,
         signal: controller.signal,
-        onEvent: (ev) => getMainWindow()?.webContents.send(IpcChannels.LLM_AGENT_EVENT, ev),
+        onEvent: send,
+        // HIGH-1：会话级备份（整轮回滚点）
+        backup: async () => {
+          const r = await backupActiveDocument(bridge);
+          return r.backupPath ?? null;
+        },
+        // MED-3：确认门 — 先注册 resolver、再发事件，避免 race
+        confirmTool: (call) =>
+          new Promise<boolean>((resolve) => {
+            const callId = call.id ?? call.name;
+            const key = `${requestId}:${callId}`;
+            const timer = setTimeout(() => {
+              if (pendingConfirms.has(key)) {
+                pendingConfirms.delete(key);
+                resolve(false); // 超时默认拒绝
+              }
+            }, 120_000);
+            pendingConfirms.set(key, (ok) => {
+              clearTimeout(timer);
+              pendingConfirms.delete(key);
+              resolve(ok);
+            });
+            send({ type: 'confirm_request', toolCall: call });
+          }),
       });
-      return { ok: true, text, requestId: reqId };
+      return { ok: true, text, requestId };
     } catch (err) {
-      return { ok: false, error: toLLMError(err, 'Agent 执行失败'), requestId: reqId };
+      return { ok: false, error: toLLMError(err, 'Agent 执行失败'), requestId };
     } finally {
-      activeRequests.delete(reqId);
+      activeRequests.delete(requestId);
+      agentRunning = false;
     }
+  });
+
+  // MED-3：渲染层回包
+  ipcMain.on(IpcChannels.AGENT_CONFIRM_REPLY, (_e, payload: { requestId: string; callId: string; approved: boolean }) => {
+    const key = `${payload.requestId}:${payload.callId}`;
+    const resolve = pendingConfirms.get(key);
+    if (resolve) resolve(!!payload.approved);
+    // 超时已删 / 二次点击：no-op
   });
 
   // ===== 脚本 =====

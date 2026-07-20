@@ -74,10 +74,24 @@ const api = {
     agent: (
       config: LLMConfig,
       messages: ChatMessage[],
-    ): Promise<
-      | { ok: true; text: string; requestId: string }
-      | { ok: false; error: LLMErrorInfo; requestId?: string }
-    > => ipcRenderer.invoke(IpcChannels.LLM_AGENT, { config, messages }),
+    ): {
+      requestId: string;
+      promise: Promise<
+        | { ok: true; text: string; requestId: string }
+        | { ok: false; error: LLMErrorInfo; requestId?: string }
+      >;
+    } => {
+      const requestId = crypto.randomUUID();
+      const promise = ipcRenderer.invoke(IpcChannels.LLM_AGENT, { config, messages, requestId }) as Promise<
+        | { ok: true; text: string; requestId: string }
+        | { ok: false; error: LLMErrorInfo; requestId?: string }
+      >;
+      return { requestId, promise };
+    },
+
+    confirmReply: (requestId: string, callId: string, approved: boolean) => {
+      ipcRenderer.send(IpcChannels.AGENT_CONFIRM_REPLY, { requestId, callId, approved });
+    },
 
     onAgentEvent: (cb: (ev: any) => void) => {
       const handler = (_e: unknown, ev: any) => cb(ev);

@@ -63,8 +63,8 @@ export function estimateTokens(text: string): number {
  */
 export function truncateMessages(
   messages: ChatMessage[],
-  systemPrompt: string,
-  model: string,
+  systemPrompt: string = '',
+  model: string = '',
 ): ChatMessage[] {
   // 查找模型预算
   const budgetKey = Object.keys(MODEL_TOKEN_BUDGETS).find((k) =>

@@ -29,6 +29,8 @@ export const IpcChannels = {
   // Agent
   LLM_AGENT: 'llm:agent',
   LLM_AGENT_EVENT: 'llm:agent-event',
+  AGENT_CONFIRM_REQUEST: 'agent:confirm-request',
+  AGENT_CONFIRM_REPLY: 'agent:confirm-reply',
 
   // 对话历史
   CHAT_LIST: 'chat:list',

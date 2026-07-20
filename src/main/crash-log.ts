@@ -28,6 +28,10 @@ init();
 function write(msg: string): void {
   if (!CRASH_LOG) return;
   try {
+    // LOW：>256KB 自动清空，避免反复写入后越胀越大
+    if (fs.existsSync(CRASH_LOG) && fs.statSync(CRASH_LOG).size > 256 * 1024) {
+      fs.truncateSync(CRASH_LOG, 0);
+    }
     fs.appendFileSync(CRASH_LOG, `[${new Date().toISOString()}] ${msg}\n`);
   } catch { /* intentionally empty */ }
 }

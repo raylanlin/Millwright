@@ -254,7 +254,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
           role: 'assistant',
           content: m.content || null,
           tool_calls: m.toolCalls.map((tc, i) => ({
-            id: tc.id ?? `call_${i}`,
+            id: tc.id ?? tc.name,
             type: 'function',
             function: { name: tc.name, arguments: JSON.stringify(tc.parameters ?? {}) },
           })),
