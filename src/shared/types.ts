@@ -81,6 +81,7 @@ export type ErrorCode =
   | 'LLM_TIMEOUT'
   | 'LLM_CANCELLED'
   | 'LLM_UNKNOWN'
+  | 'AGENT_ERROR'
   // 脚本相关
   | 'SCRIPT_UNSAFE'
   | 'SCRIPT_EXEC_FAILED'
