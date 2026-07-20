@@ -16,7 +16,7 @@
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --publish never",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "test": "npm run build:main && node --test tests/agent-loop.test.mjs tests/code-extract.test.mjs tests/env-fallback.test.mjs tests/errors.test.mjs tests/factory.test.mjs tests/generators.test.mjs tests/presets.test.mjs tests/sanitizer.test.mjs tests/sse.test.mjs tests/sw-tools.test.mjs tests/vba-helpers.test.mjs tests/vba-macro-writer.test.mjs",
     "lint": "eslint src/ --ext .ts,.tsx",
