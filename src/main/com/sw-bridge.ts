@@ -109,11 +109,11 @@ export class SolidWorksBridge {
    */
   async collectDocumentFeatures(): Promise<DocumentFeatures> {
     if (process.platform !== 'win32') return emptyFeatures();
-
-    const vbs = buildCollectFeaturesVBS();
-    const stdout = await runVBS(vbs);
-    if (!stdout) return emptyFeatures();
+    // FIX-vbs-line47：VBS 任何失败都降级为空特征上下文，绝不拖垮聊天流
     try {
+      const vbs = buildCollectFeaturesVBS();
+      const stdout = await runVBS(vbs);
+      if (!stdout) return emptyFeatures();
       return JSON.parse(stdout);
     } catch {
       return emptyFeatures();
@@ -290,10 +290,10 @@ Set feat = doc.FirstFeature()
 Do While Not feat Is Nothing And dCount < 30
     Set dispDim = feat.GetFirstDisplayDimension()
     Do While Not dispDim Is Nothing And dCount < 30
-        Set dim = dispDim.GetDimension2(0)
-        If Not dim Is Nothing Then
-            dName = dim.FullName
-            dVal = dim.GetSystemValue3(1, Nothing)
+        Set swDim = dispDim.GetDimension2(0)
+        If Not swDim Is Nothing Then
+            dName = swDim.FullName
+            dVal = swDim.GetSystemValue3(1, Nothing)
             If Not IsNull(dName) And Not IsNull(dVal) Then
                 If dName <> "" Then
                     If dims <> "" Then dims = dims & "|"
