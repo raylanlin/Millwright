@@ -142,6 +142,55 @@ export function Sidebar({
         </div>
       </div>
 
+      {/* FEATURE: 当前文档卡片 —— 3 秒轮询后自动反映用户切文档/进零件 */}
+      <div style={{ padding: '0 16px 10px' }}>
+        {swStatus.connected && swStatus.hasDoc && swStatus.activeDocumentTitle && (
+          <div
+            style={{
+              marginTop: 9,
+              background: t.card,
+              border: `1px solid ${t.cardBorder}`,
+              borderRadius: 8,
+              padding: '9px 11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 9,
+            }}
+          >
+            <span style={{ fontSize: 15 }}>
+              {({ part: '🔩', assembly: '📦', drawing: '📐' } as Record<string, string>)[
+                swStatus.activeDocumentType ?? 'part'
+              ] ?? '📄'}
+            </span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: t.text,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+                title={swStatus.activeDocumentTitle}
+              >
+                {swStatus.activeDocumentTitle}
+              </div>
+              <div style={{ fontSize: 10, color: t.textMuted, marginTop: 1 }}>
+                {({ part: '零件', assembly: '装配体', drawing: '工程图' } as Record<string, string>)[
+                  swStatus.activeDocumentType ?? 'part'
+                ] ?? '未知'}
+              </div>
+            </div>
+          </div>
+        )}
+        {swStatus.connected && !swStatus.hasDoc && (
+          <div style={{ marginTop: 9, fontSize: 11, color: t.textMuted }}>
+            SolidWorks 已连接 · 未打开文档
+          </div>
+        )}
+      </div>
+
       {/* 标签切换 */}
       <nav style={{ padding: '10px 10px 0' }}>
         {TABS.map((tab) => {

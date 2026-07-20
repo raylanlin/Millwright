@@ -12,7 +12,7 @@ import type { SolidWorksBridge } from './sw-bridge';
 export interface SWDocumentContext {
   fileName: string;
   filePath: string;
-  docType: 'part' | 'assembly' | 'drawing';
+  docType: 'part' | 'assembly' | 'drawing' | null;
   swVersion?: string;
   activeConfiguration?: string;
   features: Array<{ name: string; type: string; suppressed: boolean }>;
@@ -36,15 +36,36 @@ export async function collectDocumentContext(
   const features = await bridge.collectDocumentFeatures();
   if (!features) return null;
 
-  const filePath = status.activeDocumentPath ?? '(未保存)';
-  const fileName = filePath
-    ? filePath.split('\\').pop() || filePath
-    : '(未保存)';
+  // FEATURE：用 activeDocumentTitle 优先作为显示名（未保存时 SW 也会返回“零件1”等占位标题）
+  const filePath =
+    status.activeDocumentPath && status.activeDocumentPath !== '(未保存)'
+      ? status.activeDocumentPath
+      : '';
+  const fileName =
+    status.activeDocumentTitle ||
+    (filePath ? filePath.split('\\').pop()! : '(未命名文档)');
+
+  // docType 不再瞎猜 part —— SW 实际返回什么就什么
+  const docType = status.activeDocumentType ?? null;
+
+  // 没文档时给一个明确的占位对象，别让下游 model 误判
+  if (!status.hasDoc || !docType) {
+    return {
+      fileName: '(当前无打开文档)',
+      filePath: '',
+      docType: null,
+      swVersion: status.version,
+      activeConfiguration: undefined,
+      features: [],
+      dimensions: [],
+      customProperties: {},
+    };
+  }
 
   return {
     fileName,
     filePath,
-    docType: status.activeDocumentType ?? 'part',
+    docType,
     swVersion: status.version,
     activeConfiguration: features.activeConfiguration,
     features: features.features ?? [],
@@ -74,7 +95,7 @@ export function formatContextForPrompt(ctx: SWDocumentContext): string {
   const lines: string[] = [
     `## 当前 SolidWorks 文档信息`,
     `- 文件: ${ctx.fileName}`,
-    `- 类型: ${ctx.docType === 'part' ? '零件' : ctx.docType === 'assembly' ? '装配体' : '工程图'}`,
+    `- 类型: ${ctx.docType === 'part' ? '零件' : ctx.docType === 'assembly' ? '装配体' : ctx.docType === 'drawing' ? '工程图' : '未知'}`,
   ];
 
   if (ctx.activeConfiguration) {

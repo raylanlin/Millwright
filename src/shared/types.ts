@@ -125,6 +125,8 @@ export interface SWStatus {
   version?: string;
   activeDocumentType?: SWDocumentType;
   activeDocumentPath?: string;
+  activeDocumentTitle?: string;
+  hasDoc?: boolean;
 }
 
 /** 文档上下文（用于注入 AI system prompt） */

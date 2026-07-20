@@ -60,7 +60,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   });
 
   ipcMain.handle(IpcChannels.SW_STATUS, async () => {
-    return bridge.getStatus();
+    // FEATURE: 返回真实当前文档（供 UI 轮询），不走陈旧 cache
+    return await bridge.refresh();
   });
 
   ipcMain.handle(IpcChannels.SW_CONTEXT, async () => {
@@ -84,6 +85,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       const reqId = uuid();
       activeRequests.set(reqId, controller);
       try {
+        // FEATURE: 每次对话前先取真实当前文档（连接后用户可能已切文档/进零件）
+        await bridge.refresh();
         // SolidWorks 文档上下文:在主进程统一采集并注入 system prompt,
         // 真正发送给模型(adapter 用 config.systemPrompt 构造请求)。
         const swContext = await formatContextForPromptAsync(bridge);
@@ -121,6 +124,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       // 异步运行,不 await(立即把 requestId 返回给 renderer)
       (async () => {
         try {
+          // FEATURE: 每次对话前先取真实当前文档
+          await bridge.refresh();
           // SolidWorks 文档上下文:主进程统一采集并注入(发送给模型)
           const swContext = await formatContextForPromptAsync(bridge);
           const enrichedConfig = swContext
@@ -197,6 +202,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     activeRequests.set(requestId, controller); // 复用 LLM_CANCEL 的 map
     agentRunning = true;
     try {
+      // FEATURE: agent 会话前先 refresh 取真实当前文档
+      await bridge.refresh();
       const swContext = await formatContextForPromptAsync(bridge);
       const enrichedConfig = swContext
         ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }

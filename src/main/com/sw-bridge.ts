@@ -51,6 +51,22 @@ export class SolidWorksBridge {
   }
 
   /**
+   * FEATURE: 取当前真实文档状态（不走连接流程，供轮询/每次对话前调用）。
+   * 总是 fetch —— 调用方应自己控制频率。
+   */
+  async refresh(): Promise<SWStatus> {
+    if (process.platform !== 'win32') {
+      this.cachedStatus = { connected: false };
+      this.lastCheck = Date.now();
+      return this.cachedStatus;
+    }
+    const connected = await this.checkConnection();
+    this.cachedStatus = connected ? await this.fetchStatus() : { connected: false };
+    this.lastCheck = Date.now();
+    return this.cachedStatus;
+  }
+
+  /**
    * 心跳检查 —— 快速判断 SolidWorks 是否还活着。
    * 利用缓存避免频繁创建临时文件。
    */
@@ -161,9 +177,12 @@ End If`;
   }
 
   private async fetchStatus(): Promise<SWStatus> {
+    // FEATURE: 逐字段容错，任何可选调用失败都不清空核心字段；
+    // hasDoc/activeDocumentTitle 让 UI 能正确显示当前文档（即使未保存）。
+    // 注意：变量名避开 VBScript 保留字（dim/date/type 等），用 dt/dtStr/dp/title/ver。
     const vbs = `
 On Error Resume Next
-Dim swApp
+Dim swApp, doc
 Set swApp = GetObject(, "SldWorks.Application")
 If Err.Number <> 0 Or Not IsObject(swApp) Then
     WScript.Echo "{""connected"":false}"
@@ -171,33 +190,43 @@ If Err.Number <> 0 Or Not IsObject(swApp) Then
 End If
 Err.Clear
 
-Dim doc, docType, docPath, docTypeStr, ver
-Set doc = swApp.ActiveDoc
+Dim ver
 ver = swApp.RevisionNumber()
+If Err.Number <> 0 Then ver = "" : Err.Clear
 
-If Not doc Is Nothing Then
-    docType = doc.GetType()
-    docPath = doc.GetPathName()
-    If docPath = "" Or IsNull(docPath) Then docPath = "(未保存)"
-    If docType = 1 Then docTypeStr = "part"
-    If docType = 2 Then docTypeStr = "assembly"
-    If docType = 3 Then docTypeStr = "drawing"
+Set doc = swApp.ActiveDoc
+If doc Is Nothing Then
+    WScript.Echo "{""connected"":true,""hasDoc"":false,""version"":""" & J(ver) & """}"
+    WScript.Quit 0
 End If
 
-WScript.Echo "{""connected"":true,""version"":""" & EscapeJson(ver) & """,""activeDocumentType"":""" & docTypeStr & """,""activeDocumentPath"":""" & EscapeJson(docPath) & """}"
+Dim dt, dtStr, dp, title
+dt = doc.GetType()
+dtStr = ""
+If dt = 1 Then dtStr = "part"
+If dt = 2 Then dtStr = "assembly"
+If dt = 3 Then dtStr = "drawing"
 
-Function EscapeJson(s)
-    If IsNull(s) Or s = "" Then
-        EscapeJson = ""
-        Exit Function
-    End If
-    EscapeJson = Replace(Replace(Replace(s, "\", "\\"), """", "\"""), vbCrLf, "\n")
+dp = doc.GetPathName()
+If Err.Number <> 0 Then dp = "" : Err.Clear
+If IsNull(dp) Then dp = ""
+
+title = doc.GetTitle()
+If Err.Number <> 0 Then title = "" : Err.Clear
+If IsNull(title) Then title = ""
+
+WScript.Echo "{""connected"":true,""hasDoc"":true,""version"":""" & J(ver) & """,""activeDocumentType"":""" & dtStr & """,""activeDocumentPath"":""" & J(dp) & """,""activeDocumentTitle"":""" & J(title) & """}"
+
+Function J(s)
+    If IsNull(s) Then J = "" : Exit Function
+    J = Replace(Replace(Replace(CStr(s), "\", "\\"), """", "\"""), vbCrLf, "\n")
 End Function`;
     try {
       const stdout = await runVBS(vbs);
       if (!stdout) return { connected: true };
       return JSON.parse(stdout);
     } catch {
+      // 即使 VBS 挂了也保持 connected 状态（避免 UI 把短暂 VBS 错误误判为断连）
       return { connected: true };
     }
   }
