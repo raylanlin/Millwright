@@ -1,4 +1,4 @@
-# SW Copilot — API 参考与 SolidWorks COM 速查手册
+# Millwright — API 参考与 SolidWorks COM 速查手册
 
 > 版本 1.0 · 2026-04-23
 

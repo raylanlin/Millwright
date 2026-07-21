@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SolidWorksBridge } from '../com/sw-bridge';
 
-const BACKUP_DIR = path.join(os.tmpdir(), 'sw-copilot-backups');
+const BACKUP_DIR = path.join(os.tmpdir(), 'millwright-backups');
 
 export interface BackupResult {
   success: boolean;

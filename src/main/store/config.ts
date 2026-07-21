@@ -51,7 +51,7 @@ async function getStore(): Promise<StoreInstance> {
       // `electron-store` v8+ is ESM-only
       const { default: Store } = await import('electron-store');
       return new Store<StoredConfig>({
-        name: 'sw-copilot-config',
+        name: 'millwright-config',
         defaults: DEFAULT_STORED,
       }) as unknown as StoreInstance;
     })();

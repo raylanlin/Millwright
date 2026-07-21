@@ -16,7 +16,7 @@ function init(): void {
     // Fallback: write to the OS temp directory
     try {
       const tmp = process.env.TEMP || process.env.TMP || '/tmp';
-      CRASH_LOG = path.join(tmp, 'sw-copilot-crash.log');
+      CRASH_LOG = path.join(tmp, 'millwright-crash.log');
       fs.mkdirSync(path.dirname(CRASH_LOG), { recursive: true });
     } catch {
       CRASH_LOG = ''; // give up entirely

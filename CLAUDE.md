@@ -1,10 +1,10 @@
-# SW Copilot — 项目规范 (CLAUDE.md)
+# Millwright — 项目规范 (CLAUDE.md)
 
 > 本文件供 Claude Code / AI 辅助开发时自动读取，也作为团队开发规范参考。
 
 ## 项目简介
 
-SW Copilot 是开源的 SolidWorks AI 自动化助手。用户用自然语言描述操作，AI 生成 VBA/Python 脚本并通过 COM 接口注入 SolidWorks 执行。支持 Anthropic / OpenAI 兼容协议，可接入任意大模型。
+Millwright 是开源的 SolidWorks AI 自动化助手。用户用自然语言描述操作，AI 生成 VBA/Python 脚本并通过 COM 接口注入 SolidWorks 执行。支持 Anthropic / OpenAI 兼容协议，可接入任意大模型。
 
 - **技术栈**: Electron 28 + React 18 + TypeScript 5.3 + cscript/VBS (COM) + 原生 fetch/SSE
 - **运行环境**: Windows 10/11 (64-bit), SolidWorks 2017+, Node.js 20+

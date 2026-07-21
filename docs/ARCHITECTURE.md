@@ -1,4 +1,4 @@
-# SW Copilot — 技术设计文档
+# Millwright — 技术设计文档
 
 > SolidWorks AI 自动化助手 · 技术方案 v0.2 · 2026-04-29
 
@@ -8,7 +8,7 @@
 
 ### 1.1 产品定位
 
-SW Copilot 是一款开源的 SolidWorks AI 自动化助手，用户通过自然语言描述操作需求，AI 自动生成并执行 SolidWorks 宏脚本。与 MecAgent 等商业方案不同，SW Copilot 允许用户自由选择 AI 后端（Anthropic / OpenAI / 百炼 / MiniMax / DeepSeek 等），无需绑定特定服务商。
+Millwright 是一款开源的 SolidWorks AI 自动化助手，用户通过自然语言描述操作需求，AI 自动生成并执行 SolidWorks 宏脚本。与 MecAgent 等商业方案不同，Millwright 允许用户自由选择 AI 后端（Anthropic / OpenAI / 百炼 / MiniMax / DeepSeek 等），无需绑定特定服务商。
 
 ### 1.2 核心能力
 
@@ -378,7 +378,7 @@ class ScriptSanitizer {
 ## 6. 项目结构
 
 ```
-sw-copilot/
+Millwright/
 ├── package.json
 ├── electron-builder.yml          # 打包配置
 ├── tsconfig.json
@@ -447,8 +447,8 @@ python >= 3.10
 SolidWorks 2017+（已安装并至少运行过一次）
 
 # 初始化项目
-git clone https://github.com/yourname/sw-copilot.git
-cd sw-copilot
+git clone https://github.com/raylanlin/Millwright.git
+cd Millwright
 npm install
 npm run dev          # 启动开发模式（热重载）
 ```
@@ -458,7 +458,7 @@ npm run dev          # 启动开发模式（热重载）
 ```yaml
 # electron-builder.yml
 appId: com.swcopilot.app
-productName: SW Copilot
+productName: Millwright
 win:
   target:
     - target: nsis
@@ -473,7 +473,7 @@ nsis:
 publish:
   provider: github
   owner: raylanlin
-  repo: sw-copilot
+  repo: Millwright
 ```
 
 ### 7.3 构建命令
@@ -485,8 +485,8 @@ npm run dist          # 生成安装包 + 自动更新文件
 ```
 
 产出物：
-- `SW Copilot Setup x.x.x.exe`（NSIS 安装包）
-- `sw-copilot-x.x.x-full.nupkg`（Squirrel 更新包）
+- `Millwright Setup x.x.x.exe`（NSIS 安装包）
+- `Millwright-x.x.x-full.nupkg`（Squirrel 更新包，v0.2.0 之前版本使用）
 - `RELEASES`（版本索引）
 
 与 MecAgent 的打包结构完全一致。
@@ -507,7 +507,7 @@ npm run dist          # 生成安装包 + 自动更新文件
 
 ## 9. 与 MecAgent 的技术对比
 
-| 维度 | MecAgent | SW Copilot |
+| 维度 | MecAgent | Millwright |
 |------|----------|------------|
 | 架构 | Electron + 私有 AI | Electron + 开放 AI |
 | AI 后端 | 固定（按套餐分级） | 用户自选（任意模型） |

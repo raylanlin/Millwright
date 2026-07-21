@@ -1,12 +1,12 @@
 # 开发者指南
 
-> 本文档面向贡献者,说明 SW Copilot 代码结构与开发约定。
+> 本文档面向贡献者,说明 Millwright 代码结构与开发约定。
 > 用户使用请看 [`../README.md`](../README.md) 和 [`USER-GUIDE.md`](USER-GUIDE.md)。
 
 ## 项目结构
 
 ```
-sw-copilot/
+Millwright/
 ├── package.json
 ├── tsconfig.json                # 引用 main/renderer 两个工程
 ├── tsconfig.main.json           # 主进程 + preload 编译
@@ -135,7 +135,7 @@ npm run dist       # 生成 NSIS 安装包 + Squirrel 更新包
 | 变量 | 说明 | 默认 |
 |------|------|------|
 | `SKIP_SW_CONNECT` | 设为 `true` 跳过 COM 连接和心跳检测,纯 UI 开发时使用 | — |
-| `DEBUG` | 设为 `sw-copilot:*` 开启详细日志 | — |
+| `DEBUG` | 设为 `millwright:*` 开启详细日志 | — |
 | `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` | Anthropic fallback(UI 未配置时生效) | — |
 | `OPENAI_API_KEY` + `OPENAI_MODEL` + `OPENAI_BASE_URL` | OpenAI fallback | — |
 | `DEEPSEEK_API_KEY` + `DEEPSEEK_MODEL` | DeepSeek fallback | — |

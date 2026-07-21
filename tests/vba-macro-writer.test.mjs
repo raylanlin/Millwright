@@ -26,7 +26,7 @@ Sub main()
 
     Exit Sub
 ErrorHandler:
-    MsgBox "脚本执行出错: " & Err.Description, vbCritical, "SW Copilot"
+    MsgBox "脚本执行出错: " & Err.Description, vbCritical, "Millwright"
 End Sub
 `;
 

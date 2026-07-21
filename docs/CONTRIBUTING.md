@@ -1,14 +1,14 @@
-# Contributing to SW Copilot / 贡献指南
+# Contributing to Millwright / 贡献指南
 
-感谢你对 SW Copilot 的关注！Thank you for your interest in contributing!
+感谢你对 Millwright 的关注！Thank you for your interest in contributing!
 
 ---
 
 ## 🚀 快速开始 / Quick Start
 
 ```bash
-git clone https://github.com/raylanlin/sw-copilot.git
-cd sw-copilot
+git clone https://github.com/raylanlin/Millwright.git
+cd Millwright
 npm install
 cp .env.example .env          # 填入 API Key（可选）
 SKIP_SW_CONNECT=true npm run dev   # 无需 SolidWorks 即可开发 UI
@@ -27,7 +27,7 @@ SKIP_SW_CONNECT=true npm run dev   # 无需 SolidWorks 即可开发 UI
 |---|---|---|
 | 🧪 SolidWorks 实测 | ⭐ | 在真实 SW 环境测试工具，提交测试报告 |
 | 📝 文档翻译 | ⭐ | 中英双语文档完善 |
-| 🐛 Bug 修复 | ⭐⭐ | 查看 [Issues](https://github.com/raylanlin/sw-copilot/issues) |
+| 🐛 Bug 修复 | ⭐⭐ | 查看 [Issues](https://github.com/raylanlin/Millwright/issues) |
 | 🔨 新工具生成器 | ⭐⭐ | 扩展 SW 工具覆盖（见下方流程） |
 | 🎨 UI/UX 改进 | ⭐⭐ | 交互优化、动画、响应式 |
 | 🔌 MCP Server | ⭐⭐⭐ | 作为 MCP Server 被 Claude Desktop 等调用 |
@@ -92,4 +92,4 @@ node --test tests/sse.test.mjs    # 单个文件
 
 ## 📄 许可证 / License
 
-贡献的代码将以 [GNU GPLv3](../LICENSE) 发布。
+贡献的代码将以 [Apache-2.0](../LICENSE) 发布。

@@ -350,7 +350,7 @@ export default function App() {
               fontSize: 14, fontWeight: 700, color: t.btnPrimaryText,
             }}>S</div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>SW Copilot</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Millwright</div>
               <div style={{ fontSize: 10, color: t.textMuted }}>SolidWorks AI 助手</div>
             </div>
           </div>

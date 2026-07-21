@@ -1,6 +1,8 @@
 # Changelog
 
-本文件记录 SW Copilot 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+本文件记录 Millwright 的所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+> **项目重命名（v0.2.4）**：仓库从 `sw-copilot` 改名为 `Millwright`，本地目录 `projects/sw-copilot/` → `projects/millwright/`。所有历史版本链接保持指向旧仓库地址（GitHub 重定向生效），仅 `[Unreleased]` 链接更新到新仓库。
 
 ## [Unreleased]
 
@@ -117,7 +119,7 @@
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/sw-copilot/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.3...HEAD
 [0.2.3]: https://github.com/raylanlin/sw-copilot/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/raylanlin/sw-copilot/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/raylanlin/sw-copilot/compare/v0.1.0...v0.2.1

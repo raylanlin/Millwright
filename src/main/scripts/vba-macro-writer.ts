@@ -65,7 +65,7 @@ export function vbaToVbs(vbaCode: string, opts?: { resultFilePath?: string }): s
   // 2. 移除错误处理块。wrapMain 产物形如:
   //        Exit Sub
   //    ErrorHandler:
-  //        MsgBox "脚本执行出错: " & Err.Description, vbCritical, "SW Copilot"
+  //        MsgBox "脚本执行出错: " & Err.Description, vbCritical, "Millwright"
   //    End Sub
   //    AI 生成的代码可能用其他 label 名,统一按结构匹配。
   code = code.replace(
@@ -141,7 +141,7 @@ export function vbaToVbs(vbaCode: string, opts?: { resultFilePath?: string }): s
   // VBS 字符串没有反斜杠转义,路径直接嵌入;只需防御性处理双引号
   const resultPathLiteral = resultPath.replace(/"/g, '""');
 
-  const banner = `' SW Copilot 自动生成的 VBScript
+  const banner = `' Millwright 自动生成的 VBScript
 ' 通过 cscript.exe 连接到【已运行】的 SolidWorks 实例执行
 ' 生成时间: ${new Date().toISOString()}
 
@@ -173,7 +173,7 @@ WScript.Quit 0
 `;
 
   const supportLib = `
-' ===== SW Copilot 运行时支持 =====
+' ===== Millwright 运行时支持 =====
 
 ' 连接已运行的 SolidWorks 实例。
 ' 关键: 只用 GetObject。CreateObject 会启动一个隐形的新实例,
@@ -285,7 +285,7 @@ export function vbaToPython(vbaCode: string, opts?: { resultFilePath?: string })
     ? opts.resultFilePath.replace(/\\/g, '\\\\')
     : '';
 
-  return `# SW Copilot 自动生成的 Python 脚本
+  return `# Millwright 自动生成的 Python 脚本
 # 通过 win32com 连接已运行的 SolidWorks 实例
 import win32com.client
 import json
