@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="assets/banner-hero.png" alt="SW Copilot — SolidWorks AI 自动化助手" />
+  <img src="assets/icon-256.png" width="80" height="80" alt="SW Copilot" />
 </p>
 
 <h1 align="center">SW Copilot</h1>
 
 <p align="center">
-  <strong>开源的 SolidWorks AI 自动化助手</strong><br/>
-  <em>用自然语言跟 CAD 对话,直接出货几何体,不再写样板代码。</em>
+  <strong>开源的 SolidWorks AI 自动化助手 —— 用自然语言驱动你的 CAD。</strong>
 </p>
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
-  <a href="docs/USER-GUIDE.md">用户手册</a> ·
+  <a href="#工作原理">工作原理</a> ·
+  <a href="#支持的-ai-服务商">AI 服务商</a> ·
   <a href="docs/ARCHITECTURE.md">技术架构</a> ·
   <a href="docs/CONTRIBUTING.md">参与贡献</a> ·
-  <a href="CHANGELOG.md">更新日志</a>
+  <a href="README.md">English</a>
 </p>
 
 <p align="center">
@@ -22,61 +22,47 @@
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
-  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python" alt="python" />
+  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white" alt="python" />
   <img src="https://img.shields.io/badge/tests-167_passed-brightgreen" alt="tests" />
-  <img src="https://img.shields.io/badge/license-Apache_2.0-green" alt="license" />
+  <img src="https://img.shields.io/badge/license-Apache_2.0-orange" alt="license" />
 </p>
 
 ---
 
-## 为什么选择 SW Copilot?
+用大白话描述你的需求 —— *「在前视基准面画一个 50×30 的矩形，拉伸 20mm」* —— SW Copilot 就会驱动 SolidWorks 完成。AI 会规划任务、一步步调用真实的建模工具、读取结构化的执行结果，并在出错时自我纠正。
 
-市面上的 CAD AI 助手(如 MecAgent)把用户绑死在单一服务商、按月收费 $16–417,且底层模型闭源无法审计。**SW Copilot 把这两个默认都翻了过来**:你可以选任何 AI 后端(Claude、GPT-4o、DeepSeek、Qwen、MiniMax、本地 Ollama),跑的是你能读、能改、能 fork 的开源代码。
+**AI 后端由你决定。** Claude、GPT-4o、DeepSeek、Kimi、MiniMax、Qwen，或本地 Ollama —— 任何支持 Anthropic 或 OpenAI 兼容协议的模型都行。代码开源，你只付自己的 API 费用。
 
-| | 闭源 CAD AI | **SW Copilot** |
+> 市面上的 CAD AI 工具绑定单一服务商、按月收 \$16–417。SW Copilot 免费且不锁定服务商。
+
+| | 常见 CAD AI SaaS | **SW Copilot** |
 |---|---|---|
-| AI 后端 | 单一服务商,按套餐分级 | **任意 OpenAI / Anthropic 兼容端点** |
-| 价格 | $16–417/月 | **免费**(你自付 API 费用) |
-| 源代码 | 闭源 | **Apache-2.0,开源** |
-| COM 桥 | 原生 `winax` 模块 | **Python `pywin32` + stdio JSON-RPC** |
-| 工具集 | 固定目录 | **26+ 工具,带扩展 API** |
-
----
+| AI 后端 | 按套餐固定 | **任你选择** |
+| 价格 | \$16–417 / 月 | **免费**（自带 API Key） |
+| 源代码 | 闭源 | **开源（Apache-2.0）** |
+| 自动化方式 | 提示词 → 一次性脚本 | **可自我纠正的 agent 工具循环** |
+| 视觉反馈 | — | **截取视口并进行视觉推理** |
 
 ## 核心特性
 
-- **自然语言 → SolidWorks 操作**。用中文或英文描述需求,agent 自动规划步骤、调用工具、返回结构化结果——不是甩一坨文本给你。
-- **LLM 不绑服务商**。同时支持 Anthropic 协议 + OpenAI 兼容协议。Anthropic Claude、OpenAI、DeepSeek、Qwen(百炼)、MiniMax、硅基流动、Ollama,以及任何自定义端点。
-- **Python 边车架构**。常驻 `sw_agent` 进程持有 SolidWorks COM 连接、执行工具、以结构化 JSON 流式回传结果。再也不会每个动作起一个 cscript 子进程。
-- **可选视觉感知**。可配独立视觉模型(图生文),或勾选多模态主模型。Agent 可以转视角、截屏、分析、决策。
-- **26+ 内置工具**覆盖草图、特征、装配、参考几何、文档、视图、导出。每个工具都是 `@tool` 装饰的 Python 函数,带自动生成的 JSON schema。
-- **安全第一**。脚本黑名单校验、会话级备份一键回滚、破坏性操作需用户确认、crash log 滚动保留。
-- **开发者友好**。167 个单元测试、端到端构建(typecheck + lint + test + electron-builder)、`SKIP_SW_CONNECT` 开关让你在没装 SW 的情况下纯开发 UI。
-
----
+- **自然语言 → 真实建模。** 中英文皆可；草图、特征、装配、导出全覆盖。
+- **Agent 工具循环。** 模型调用结构化的单一职责工具（`create_sketch`、`extrude`、`chamfer`、`mass_properties`……），拿到 JSON 结果，串联多步完成任务，出错能自愈，而不是静默失败。
+- **原生 Function Calling。** 工具通过标准 `tools` 接口注入模型，而非塞进提示词。单一真源 —— 工具自我描述。
+- **视觉理解。** agent 可翻转、旋转、截屏，再做分析 —— 既支持**独立视觉模型**（图生文），也支持把图像直接喂给**多模态主模型**。
+- **常驻执行引擎。** 常驻 Python 边车通过 `pywin32` 直接驱动 SolidWorks COM API，跨多步复用同一连接。
+- **安全第一。** 分语言脚本校验 + 执行前自动备份 + 破坏性操作前用户确认门。
+- **开发者友好。** 167 个单元测试、类型化 IPC 边界、`SKIP_SW_CONNECT` 纯 UI 开发模式（无需 SolidWorks）。
 
 ## 快速开始
 
-### 系统要求
+### 安装
 
-- **Windows 10/11 (64-bit)**
-- **SolidWorks 2017+**(已安装并能正常运行)
-- **Python 3.9+**,装好 `pywin32` 和 `Pillow`:
-
-  ```powershell
-  pip install pywin32 pillow
-  ```
-
-  Pillow 这一步很关键——没装的话边车只能返回 BMP 截屏,大多数视觉模型会拒绝解码。
-
-- **Node.js 20+**(仅从源码构建时需要)
-
-### 安装(终端用户)
-
-1. 从 [Releases](https://github.com/raylanlin/sw-copilot/releases) 下载最新的 `SW Copilot-Setup-x.y.z-x64.exe`
-2. 双击安装。安装器会把应用和打包好的 Python 边车一起放到 `Program Files\SW Copilot\`
-3. 先启动 SolidWorks,再启动 SW Copilot
-4. 打开 ⚙️ 设置 → 选择 AI 服务商 → 粘贴 API Key → 保存
+1. 从 [Releases](https://github.com/raylanlin/sw-copilot/releases) 下载安装包并运行。
+2. 安装边车运行时（用于驱动 SolidWorks）：
+   ```bash
+   pip install pywin32 pillow
+   ```
+   > 未装 Python 时应用仍可运行，会自动回退到旧的 VBScript 引擎 —— 但会失去结构化结果与视觉理解。强烈建议安装 Python。
 
 ### 从源码运行
 
@@ -87,159 +73,110 @@ npm install
 npm run dev
 ```
 
-> 纯 UI 开发模式(不需要 SolidWorks):`SKIP_SW_CONNECT=true npm run dev`
+> 纯 UI 开发无需 SolidWorks：设置 `SKIP_SW_CONNECT=true`。
 
-### 第一次对话
+### 配置
 
-打开聊天面板,试试:
+1. 先启动 SolidWorks，再启动 SW Copilot。
+2. 打开 ⚙️ **设置** → 选择协议 → 填入 Base URL、API Key、模型名 → **保存**。
+3. （可选）开启**视觉**：勾选「主模型支持图像」，或单独配置一个视觉模型。
+
+## 支持的 AI 服务商
+
+| 服务商 | 协议 | Base URL | 推荐模型 |
+|---|---|---|---|
+| DeepSeek | OpenAI 兼容 | `https://api.deepseek.com` | `deepseek-v4-pro` |
+| Kimi / 月之暗面 | OpenAI 兼容 | `https://api.moonshot.cn/v1` | `kimi-k3` |
+| MiniMax | OpenAI 兼容 | `https://api.minimaxi.com/v1` | `minimax-m3` |
+| Anthropic | Anthropic | `https://api.anthropic.com` | `claude-sonnet-4` |
+| OpenAI | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| 阿里百炼 (Qwen) | OpenAI 兼容 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` |
+| 硅基流动 | OpenAI 兼容 | `https://api.siliconflow.cn/v1` | — |
+| Ollama（本地） | OpenAI 兼容 | `http://localhost:11434/v1` | — |
+
+> Agent 工具调用需要模型支持 function calling。DeepSeek、Kimi K3、MiniMax M3 是一等公民。
+
+## 使用示例
 
 ```
-在前视基准面画一个 50×30 mm 的矩形,拉伸 20 mm。
+你: 在前视基准面画一个 50×30 的矩形，拉伸 20mm
+AI: create_sketch(front) → sketch_rectangle(50,30) → extrude(20)  ✓  零件已创建
+
+你: 这个零件多重？包络多大？
+AI: mass_properties → bounding_box  ✓  0.42 kg · 50 × 30 × 20 mm
+
+你: 从等轴测看看，比例协调吗？
+AI: set_view_orientation(isometric) → analyze_view("比例是否协调？")  ✓
+
+你: 把模型里所有圆角改成 3mm
+AI: fillet_all(3)  → 确认？ → ✓  更新了 6 个圆角
 ```
 
-```
-这个零件多重?包络多大?
-```
-
-Agent 会依次调 `start_sketch` → `sketch_rectangle` → `extrude`,每一步实时渲染到 UI。在 SolidWorks 里切换文档,侧栏指示器会在 3 秒内自动刷新。
-
----
-
-## 架构
-
-SW Copilot 是三层架构。Python 边车是工具的唯一真源;主进程是编排者;渲染层是表现面。
+## 工作原理
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│  渲染层 (React)                                             │
-│    └─ llm:agent → window.api.llm.agent(config, messages)    │
-└────────────────────────┬───────────────────────────────────┘
-                         │ IPC (preload)
-┌────────────────────────▼───────────────────────────────────┐
-│  主进程 (Electron)                                          │
-│    ├─ runSidecarAgent ─ OpenAI 兼容工具分发                │
-│    │     ├─ 工具真源 = 边车 list_tools() 自描述 JSON schema │
-│    │     ├─ 执行 = 边车 call() → 结构化 {ok, data, error}  │
-│    │     └─ 视觉 analyze_view → 独立视觉模型 或 主模型多模态│
-│    ├─ 确认门 → 破坏性工具需用户确认                         │
-│    ├─ 会话级备份 → 一键回滚                                 │
-│    └─ 兜底:边车不可用时 → runAgentLoop (旧 VBS 路径)        │
-└────────────────────────┬───────────────────────────────────┘
-                         │ stdio JSON-RPC (按换行符分隔)
-┌────────────────────────▼───────────────────────────────────┐
-│  Python 边车 (sw_agent, 常驻)                              │
-│    ├─ win32com → SolidWorks (单连接常驻)                   │
-│    ├─ 工具注册表 (@tool 装饰) — view/sketch/feature/       │
-│    │   reference/assembly/query/document/export            │
-│    └─ 每次工具调用返回结构化 JSON                           │
-└────────────────────────────────────────────────────────────┘
+渲染层 (React UI)
+      │  IPC
+主进程 (Electron / Node)
+      │  agent 循环  ──  原生 function-calling 工具注入模型
+      │      ├─ 工具来源与执行 = 边车（结构化 JSON 出入）
+      │      └─ analyze_view ─┬─ 独立视觉模型（图生文）
+      │                       └─ 或多模态主模型（图像直喂）
+      │  stdio 上的 JSON-RPC
+Python 边车（常驻）  ──  pywin32 → SolidWorks COM API
+      │
+SolidWorks
 ```
 
-### 为什么要用 Python 边车?
+- **结构化、可观测的工具。** 每个工具返回 `{ ok, data | error }` JSON，模型能读到真实状态（特征树、尺寸、质量、干涉）来规划下一步。
+- **保留旧路径。** Python 边车无法启动时，自动回退原 VBScript 引擎，绝不硬崩。
+- **LLM 访问零 SDK 依赖**：原生 `fetch` + 手写 SSE 解析。
 
-旧设计每次工具调用都起一个新 `cscript.exe`。能跑,但有三个坑:(a) 每步都要付 COM 握手的代价;(b) VBS 里任何未捕获错误都会让进程进入不确定状态;(c) VBS 没有原生的结构化数据返回——agent 只能看到 `MsgBox` 字符串。
-
-P3 边车用一个常驻 Python 进程替换掉这一切:
-
-1. 整个 App 生命周期内持有同一个 `SldWorks.Application` COM 句柄
-2. 每个工具都是 `@tool` 装饰的函数,自动生成 JSON schema
-3. 每次调用返回 `{ ok, data, error }`,agent 失败时能自纠
-4. 进度通过 stdio 流式回传,UI 可以实时渲染每一步
-
-如果 `pywin32` 或 Python 没装,应用会自动回退到旧 VBS 路径——不会崩,但吃不到结构化返回和视觉。README 在第一次启动时会强制提示。
-
----
+详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 系统要求
 
-| 层级 | 要求 |
-|---|---|
-| 操作系统 | Windows 10 / 11 (64-bit) |
-| CAD | SolidWorks 2017 或更新(已安装并授权) |
-| Python | 3.9+ 装好 `pywin32` 和 `Pillow` |
-| 内存 | 最低 4 GB,推荐 8 GB(跑视觉流程时) |
-| Node | 20+ (仅从源码构建) |
-| 网络 | 出站 HTTPS 到你选的 LLM 端点 |
-
----
+- Windows 10/11 (64-bit)
+- SolidWorks 2017+
+- Python 3.9+（含 `pywin32`、`pillow`，供边车使用）
+- Node.js 20+（仅开发模式）
 
 ## 文档
 
-| 文档 | 说明 |
+| 文档 | 内容 |
 |---|---|
-| [用户手册](docs/USER-GUIDE.md) | 安装配置、使用指南、FAQ |
-| [技术架构](docs/ARCHITECTURE.md) | 系统设计、模块说明、数据流 |
-| [API 参考](docs/API-REFERENCE.md) | LLM 接口、工具目录、COM API 速查 |
-| [开发者指南](docs/DEVELOPMENT.md) | 代码结构、开发约定、测试 |
-| [贡献指南](docs/CONTRIBUTING.md) | 如何参与贡献、代码风格、PR 流程 |
-| [VERIFY 追踪](docs/VERIFY-ISSUES.md) | 待 SolidWorks 宏录制核验的工具 |
-| [更新日志](CHANGELOG.md) | 版本历史 |
+| [技术架构](docs/ARCHITECTURE.md) | 系统设计、模块、数据流 |
+| [用户手册](docs/USER-GUIDE.md) | 安装、配置、FAQ |
+| [开发者指南](docs/DEVELOPMENT.md) | 代码结构、约定、测试 |
+| [API 参考](docs/API-REFERENCE.md) | LLM 接口、工具清单 |
+| [贡献指南](docs/CONTRIBUTING.md) | 如何参与 |
+| [待核验清单](docs/VERIFY-ISSUES.md) | 待宏录制器核验的多参 API |
+| [变更记录](CHANGELOG.md) | 版本历史 |
 | [安全策略](SECURITY.md) | 安全规范与漏洞报告 |
-
----
 
 ## 参与贡献
 
-欢迎贡献!详见 [CONTRIBUTING.md](docs/CONTRIBUTING.md)。
+欢迎贡献 —— 详见 [CONTRIBUTING.md](docs/CONTRIBUTING.md)。我们尤其欢迎：
 
-特别欢迎:
-
-- 🧪 **SolidWorks 真实环境测试报告**——开个 issue 附上你的 SW 版本和最小复现
-- 🔨 **新增工具实现**(在 `sidecar/sw_agent/tools/` 下)——把工具目录从 26 扩到 40+
-- 🎨 **UI/UX 改进**——聊天面板和工具步骤渲染
-- 🌐 **多 CAD 适配器**(Inventor、CATIA、NX、Onshape)
-- 📝 **文档翻译与国际化**——README.zh-CN.md 需要持续跟进
-- 🔌 **MCP Server 集成**——让 SW Copilot 能被 Claude Code / Cursor 直接驱动
-
-### 加一个新工具
-
-边车的工具注册表就是扩展点。在 `sidecar/sw_agent/tools/` 下加一个新文件:
-
-```python
-from ..registry import tool
-
-@tool(
-    name="my_tool",
-    description="这个工具做什么(LLM 可见)。",
-    parameters={
-        "type": "object",
-        "properties": {
-            "param1": {"type": "string", "description": "第一个参数"},
-        },
-        "required": ["param1"],
-    },
-)
-def my_tool(param1: str) -> dict:
-    """实现写这里。返回 {\"ok\": True, \"data\": {...}}。"""
-    return {"ok": True, "data": {"result": param1}}
-```
-
-重启 App——边车会自动发现新工具并暴露给 LLM。完整注册表协议见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
-
----
+- 🧪 真实 SolidWorks 环境的测试报告（以及对[待核验 API](docs/VERIFY-ISSUES.md) 的宏录制器核对）
+- 🔨 新的边车工具（`sidecar/sw_agent/tools/`）
+- 🎨 UI/UX 改进
+- 🌐 其他 CAD 适配（Inventor、CATIA、NX）与 MCP server 集成
+- 📝 文档与翻译
 
 ## 路线图
 
-- [x] **v0.1.0** — MVP(Electron + LLM + COM + 26 工具)
-- [x] **v0.2.0** — 稳定版(修 bug + CI/CD + .env fallback)
-- [x] **v0.2.1** — 彻底修复"假成功"问题(移除 CreateObject fallback)
-- [x] **v0.2.2** — 渲染层加固(IPC 错误归一化 + 主题色 token)
-- [x] **v0.2.3** — CI 质量门(每次 PR / push 跑 typecheck + lint + test)
-- [x] **v0.2.4** — **Python 边车架构(P3)**——结构化工具返回、视觉管线、agent 循环重写
-- [ ] **v0.3.0** — 强制边车作为装机依赖(干掉 VBS fallback)、所有 `# VERIFY` 工具在真实 SW 版本上跑过验证
-- [ ] **v0.4.0** — MCP Server 适配器(让 Claude Code / Cursor 直接驱动 SW Copilot)
-- [ ] **v1.0.0** — 多 CAD 适配器(Inventor、CATIA、NX、Onshape)+ 商业授权轨道
-
----
+- [x] **v0.1** — MVP（Electron + LLM + COM + 工具）
+- [x] **v0.2** — 稳定基座、CI、文档
+- [x] **v0.2.4** — Python 边车、agent 工具循环、视觉理解、Apache-2.0 开源 ← *当前*
+- [ ] **v0.3** — 工具全覆盖、宏核验参数、流式工具调用
+- [ ] **v1.0** — MCP server、多 CAD 支持
 
 ## 许可证
 
-[Apache License 2.0](LICENSE)——宽松开源。可用、可改、可塞进商业产品。署不署名都欢迎,不强求;带专利授权;无 copyleft。
-
----
+[Apache-2.0](LICENSE) —— 宽松协议，含明确的专利授权。允许商业使用。
 
 ## 致谢
 
-- SolidWorks COM API 参考:[CodeStack](https://www.codestack.net/) SolidWorks API 文档
-- MCP 生态:[SolidworksMCP-TS](https://github.com/vespo92/SolidworksMCP-TS)、[SolidPilot](https://github.com/eyfel/mcp-server-solidworks)
-- 灵感来源:Cursor、Claude Code、MecAgent,以及每一个手写过 FeatureExtrusion3 调用的工程师
+- SolidWorks COM API 参考：[CodeStack](https://www.codestack.net/)
+- 灵感来源：Cursor、Claude Code

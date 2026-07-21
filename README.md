@@ -1,20 +1,20 @@
 <p align="center">
-  <img src="assets/banner-hero.png" alt="SW Copilot — SolidWorks AI automation assistant" />
+  <img src="assets/icon-256.png" width="80" height="80" alt="SW Copilot" />
 </p>
 
 <h1 align="center">SW Copilot</h1>
 
 <p align="center">
-  <strong>Open-source SolidWorks AI automation assistant</strong><br/>
-  <em>Talk to your CAD. Ship geometry, not boilerplate.</em>
+  <strong>Open-source AI automation for SolidWorks — talk to your CAD.</strong>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
-  <a href="docs/USER-GUIDE.md">User Guide</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#supported-ai-providers">AI providers</a> ·
   <a href="docs/ARCHITECTURE.md">Architecture</a> ·
   <a href="docs/CONTRIBUTING.md">Contributing</a> ·
-  <a href="CHANGELOG.md">Changelog</a>
+  <a href="README.zh-CN.md">中文</a>
 </p>
 
 <p align="center">
@@ -22,63 +22,49 @@
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
-  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python" alt="python" />
+  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white" alt="python" />
   <img src="https://img.shields.io/badge/tests-167_passed-brightgreen" alt="tests" />
-  <img src="https://img.shields.io/badge/license-Apache_2.0-green" alt="license" />
+  <img src="https://img.shields.io/badge/license-Apache_2.0-orange" alt="license" />
 </p>
 
 ---
 
-## Why SW Copilot?
+Describe what you want in plain language — *"sketch a 50×30 rectangle on the front plane and extrude it 20 mm"* — and SW Copilot drives SolidWorks to do it. The AI plans the work, calls real modeling tools one step at a time, reads structured results back, and corrects itself as it goes.
 
-Existing CAD AI tools lock you into one provider at $16–417/month and ship closed-source models you can't audit. **SW Copilot flips both defaults**: pick any AI backend (Claude, GPT-4o, DeepSeek, Qwen, MiniMax, Ollama local) and run open source you can read, fork, and extend.
+**You choose the AI backend.** Claude, GPT-4o, DeepSeek, Kimi, MiniMax, Qwen, or a local Ollama model — anything speaking the Anthropic or OpenAI-compatible protocol. The code is open; you pay only your own API usage.
 
-| | Closed-source CAD AI | **SW Copilot** |
+> Existing CAD AI tools lock you into one provider at \$16–417/mo. SW Copilot is free and provider-agnostic.
+
+| | Typical CAD AI SaaS | **SW Copilot** |
 |---|---|---|
-| AI backend | Single provider, per-tier pricing | **Any OpenAI- or Anthropic-compatible endpoint** |
-| Price | $16–417 / month | **Free** (you pay your own API costs) |
-| Source code | Closed | **Apache-2.0, open source** |
-| COM bridge | Native `winax` module | **Python `pywin32` via stdio JSON-RPC** |
-| Tools | Fixed catalog | **26+ tools, plus an extension API** |
-
----
+| AI backend | Fixed by plan | **Any model you choose** |
+| Pricing | \$16–417 / month | **Free** (you bring your own API key) |
+| Source | Closed | **Open (Apache-2.0)** |
+| Automation | Prompt → one-shot script | **Agentic tool loop with self-correction** |
+| Visual feedback | — | **Screenshots the viewport & reasons over it** |
 
 ## Features
 
-- **Natural language → SolidWorks operations.** Describe what you want in English or Chinese. The agent plans the steps, calls tools, and reports structured results — not just a wall of text.
-- **Provider-agnostic LLM.** Anthropic protocol + OpenAI-compatible protocol. Anthropic Claude, OpenAI, DeepSeek, Qwen (DashScope), MiniMax, SiliconFlow, Ollama, and any custom endpoint.
-- **Python sidecar architecture.** A long-running `sw_agent` process holds the SolidWorks COM connection open, executes tools, and streams structured JSON results back over stdio. No more per-action subprocess thrash.
-- **Vision-aware (optional).** Configure an independent vision model (image-to-text) or enable a multimodal main model. The agent can rotate the viewport, capture, analyze, and decide.
-- **26+ built-in tools** covering sketch, feature, assembly, reference geometry, document, view, and export. Each tool is a self-describing `@tool`-decorated Python function with an auto-generated JSON schema.
-- **Safety first.** Script sanitization, per-session backup with one-click restore, user confirmation gate for destructive operations, and crash log rotation.
-- **Developer friendly.** 167 unit tests, end-to-end build (typecheck + lint + test + electron-builder), and a `SKIP_SW_CONNECT` flag for UI-only iteration without SolidWorks installed.
-
----
+- **Natural language → real modeling.** English or Chinese in; sketches, features, assemblies, and exports out.
+- **Agentic tool loop.** The model calls structured, single-purpose tools (`create_sketch`, `extrude`, `chamfer`, `mass_properties`, …), receives JSON results, and chains multiple steps to finish a task — recovering from errors instead of failing silently.
+- **Native function calling.** Tools are injected into the model via the standard `tools` API, not stuffed into a prompt. One source of truth — the tools describe themselves.
+- **Visual understanding.** The agent can reorient, rotate, and screenshot the model, then analyze it — either through a **dedicated vision model** (image→text) or by feeding the image straight to a **multimodal main model**.
+- **Resident execution engine.** A persistent Python sidecar drives the SolidWorks COM API directly (via `pywin32`), holding one connection across many steps.
+- **Safety first.** Per-language script validation, automatic pre-execution backup, and a confirmation gate before any destructive operation.
+- **Developer-friendly.** 167 unit tests, typed IPC boundary, and a `SKIP_SW_CONNECT` mode for UI-only development without SolidWorks.
 
 ## Quick Start
 
-### Prerequisites
+### Install
 
-- **Windows 10/11 (64-bit)**
-- **SolidWorks 2017+** (must be installed and runnable)
-- **Python 3.9+** with `pywin32` and `Pillow`:
+1. Download the installer from [Releases](https://github.com/raylanlin/sw-copilot/releases) and run it.
+2. Install the sidecar runtime (drives SolidWorks):
+   ```bash
+   pip install pywin32 pillow
+   ```
+   > Without Python, the app still runs and falls back to the legacy VBScript engine — but you lose structured results and visual understanding. Installing Python is strongly recommended.
 
-  ```powershell
-  pip install pywin32 pillow
-  ```
-
-  The Pillow dependency is important — without it, the sidecar falls back to BMP captures and many vision models refuse to decode them.
-
-- **Node.js 20+** (only required for building from source)
-
-### Install (end users)
-
-1. Download the latest `SW Copilot-Setup-x.y.z-x64.exe` from [Releases](https://github.com/raylanlin/sw-copilot/releases).
-2. Double-click to install. The installer places the app and the bundled Python sidecar in `Program Files\SW Copilot\`.
-3. Launch SolidWorks, then launch SW Copilot.
-4. Open ⚙️ Settings → choose your AI provider → paste your API key → Save.
-
-### Run from source
+### From source
 
 ```bash
 git clone https://github.com/raylanlin/sw-copilot.git
@@ -87,161 +73,110 @@ npm install
 npm run dev
 ```
 
-> For UI-only iteration without SolidWorks running: `SKIP_SW_CONNECT=true npm run dev`
+> UI-only development without SolidWorks: set `SKIP_SW_CONNECT=true`.
 
-### First conversation
+### Configure
 
-Open the chat panel and try:
+1. Start SolidWorks, then launch SW Copilot.
+2. Open ⚙️ **Settings** → pick a protocol → enter Base URL, API key, and model → **Save**.
+3. (Optional) Enable **Vision**: either toggle *"main model supports images"* or configure a separate vision model.
+
+## Supported AI providers
+
+| Provider | Protocol | Base URL | Suggested model |
+|---|---|---|---|
+| DeepSeek | OpenAI-compatible | `https://api.deepseek.com` | `deepseek-v4-pro` |
+| Kimi / Moonshot | OpenAI-compatible | `https://api.moonshot.cn/v1` | `kimi-k3` |
+| MiniMax | OpenAI-compatible | `https://api.minimaxi.com/v1` | `minimax-m3` |
+| Anthropic | Anthropic | `https://api.anthropic.com` | `claude-sonnet-4` |
+| OpenAI | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| Alibaba Bailian (Qwen) | OpenAI-compatible | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` |
+| SiliconFlow | OpenAI-compatible | `https://api.siliconflow.cn/v1` | — |
+| Ollama (local) | OpenAI-compatible | `http://localhost:11434/v1` | — |
+
+> Agentic tool calling requires a model that supports function calling. DeepSeek, Kimi K3, and MiniMax M3 are first-class targets.
+
+## Examples
 
 ```
-Draw a 50×30 mm rectangle on the Front Plane and extrude it 20 mm.
+You: Sketch a 50×30 rectangle on the front plane and extrude it 20 mm.
+AI:  create_sketch(front) → sketch_rectangle(50,30) → extrude(20)  ✓  part created
+
+You: How heavy is this part, and what's its bounding box?
+AI:  mass_properties → bounding_box  ✓  0.42 kg · 50 × 30 × 20 mm
+
+You: Look at it from isometric — do the proportions look right?
+AI:  set_view_orientation(isometric) → analyze_view("are the proportions balanced?")  ✓
+
+You: Set every fillet in the model to 3 mm.
+AI:  fillet_all(3)  → confirm? → ✓  6 fillets updated
 ```
 
-```
-What is the mass and bounding box of this part?
-```
-
-The agent will call `start_sketch` → `sketch_rectangle` → `extrude` in turn and stream each step into the UI. Switch documents in SolidWorks and the sidebar indicator updates within 3 seconds.
-
----
-
-## Architecture
-
-SW Copilot uses a three-tier architecture. The Python sidecar is the single source of truth for tools; the main process is the orchestrator; the renderer is the surface.
+## How it works
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│  Renderer (React)                                           │
-│    └─ llm:agent → window.api.llm.agent(config, messages)    │
-└────────────────────────┬───────────────────────────────────┘
-                         │ IPC (preload)
-┌────────────────────────▼───────────────────────────────────┐
-│  Main (Electron)                                            │
-│    ├─ runSidecarAgent ─ OpenAI-compatible tool dispatch    │
-│    │     ├─ Tools source = sidecar list_tools() (self-describing JSON schema)
-│    │     ├─ Execution = sidecar call() → structured {ok, data, error}
-│    │     └─ Vision analyze_view → independent vision model OR main model multimodal
-│    ├─ Confirmation gate → user approves destructive tools
-│    ├─ Per-session backup → one-click rollback
-│    └─ Fallback: runAgentLoop (legacy VBS) if sidecar not available
-└────────────────────────┬───────────────────────────────────┘
-                         │ stdio JSON-RPC (newline-delimited)
-┌────────────────────────▼───────────────────────────────────┐
-│  Python sidecar (sw_agent, long-running)                    │
-│    ├─ win32com → SolidWorks (one persistent connection)    │
-│    ├─ Tool registry (@tool decorator) — view/sketch/feature/
-│    │   reference/assembly/query/document/export
-│    └─ Returns structured JSON for every tool call          │
-└────────────────────────────────────────────────────────────┘
+Renderer (React UI)
+      │  IPC
+Main process (Electron / Node)
+      │  agent loop  ──  native function-calling tools injected into the model
+      │      ├─ tool source & execution = sidecar (structured JSON in/out)
+      │      └─ analyze_view ─┬─ dedicated vision model (image→text)
+      │                       └─ or multimodal main model (image fed directly)
+      │  JSON-RPC over stdio
+Python sidecar (resident)  ──  pywin32 → SolidWorks COM API
+      │
+SolidWorks
 ```
 
-### Why a Python sidecar?
+- **Structured, observable tools.** Every tool returns `{ ok, data | error }` JSON, so the model can read the real state (feature tree, dimensions, mass, interferences) and plan the next step.
+- **Legacy path retained.** If the Python sidecar can't start, the app automatically falls back to the original VBScript engine so nothing hard-breaks.
+- **Zero SDK dependency** for LLM access: native `fetch` + a hand-written SSE parser.
 
-The legacy design spawned a fresh `cscript.exe` per tool call. That worked but: (a) it paid the COM handshake cost on every step, (b) any uncaught error in the generated VBS left the process in an indeterminate state, and (c) VBS has no first-class way to return structured data — the agent only saw raw `MsgBox` strings.
-
-The P3 sidecar replaces that with a long-running Python process that:
-
-1. Holds one `SldWorks.Application` COM handle for the lifetime of the app.
-2. Exposes each tool as a `@tool`-decorated function with auto-generated JSON schema.
-3. Returns `{ ok, data, error }` for every call so the agent can self-correct on failure.
-4. Streams progress over stdio so the UI can render each step live.
-
-If `pywin32` or Python is missing, the app automatically falls back to the legacy VBS path — nothing crashes, but you lose structured returns and vision. The README will yell at you on first launch.
-
----
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 ## Requirements
 
-| Layer | Requirement |
-|---|---|
-| OS | Windows 10 / 11 (64-bit) |
-| CAD | SolidWorks 2017 or newer (must be installed and licensed) |
-| Python | 3.9+ with `pywin32` and `Pillow` |
-| RAM | 4 GB minimum, 8 GB recommended for vision workflows |
-| Node | 20+ (only for building from source) |
-| Network | Outbound HTTPS to your chosen LLM endpoint |
-
----
+- Windows 10/11 (64-bit)
+- SolidWorks 2017+
+- Python 3.9+ with `pywin32` and `pillow` (for the sidecar)
+- Node.js 20+ (development only)
 
 ## Documentation
 
-| Doc | Description |
+| Doc | What's inside |
 |---|---|
-| [User Guide](docs/USER-GUIDE.md) | Install, configuration, usage, FAQ |
-| [Architecture](docs/ARCHITECTURE.md) | System design, module breakdown, data flow |
-| [API Reference](docs/API-REFERENCE.md) | LLM endpoints, tool catalog, COM API cheat sheet |
-| [Development Guide](docs/DEVELOPMENT.md) | Code structure, dev conventions, testing |
-| [Contributing](docs/CONTRIBUTING.md) | How to contribute, code style, PR process |
-| [Verify Tracker](docs/VERIFY-ISSUES.md) | Tools pending SolidWorks macro-recorder validation |
+| [Architecture](docs/ARCHITECTURE.md) | System design, modules, data flow |
+| [User Guide](docs/USER-GUIDE.md) | Install, configure, FAQ |
+| [Development](docs/DEVELOPMENT.md) | Code layout, conventions, testing |
+| [API Reference](docs/API-REFERENCE.md) | LLM interfaces, tool catalog |
+| [Contributing](docs/CONTRIBUTING.md) | How to contribute |
+| [Verification backlog](docs/VERIFY-ISSUES.md) | Multi-parameter APIs pending macro-recorder verification |
 | [Changelog](CHANGELOG.md) | Version history |
-| [Security Policy](SECURITY.md) | Security practices and vulnerability reporting |
-
-中文版文档请见 [README.zh-CN.md](README.zh-CN.md)。
-
----
+| [Security](SECURITY.md) | Security policy & disclosure |
 
 ## Contributing
 
-We welcome contributions. See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
+Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especially value:
 
-Particularly welcome:
-
-- 🧪 **SolidWorks real-environment testing reports** — open an issue with your SW version and a minimal repro
-- 🔨 **New tool implementations** in `sidecar/sw_agent/tools/` — extend the catalog from 26 → 40+
-- 🎨 **UI/UX improvements** to the chat surface and tool step rendering
-- 🌐 **Multi-CAD adapters** (Inventor, CATIA, NX, Onshape)
-- 📝 **Documentation and translations** — README.zh-CN.md needs continuous updates
-- 🔌 **MCP server integration** so SW Copilot can be driven from Claude Code / Cursor
-
-### Adding a new tool
-
-The sidecar's tool registry is the extension point. Add a new file under `sidecar/sw_agent/tools/`:
-
-```python
-from ..registry import tool
-
-@tool(
-    name="my_tool",
-    description="What this tool does (visible to the LLM).",
-    parameters={
-        "type": "object",
-        "properties": {
-            "param1": {"type": "string", "description": "First parameter"},
-        },
-        "required": ["param1"],
-    },
-)
-def my_tool(param1: str) -> dict:
-    """Implementation goes here. Return {"ok": True, "data": {...}}."""
-    return {"ok": True, "data": {"result": param1}}
-```
-
-Restart the app — the sidecar will auto-discover the new tool and surface it to the LLM. See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full registry protocol.
-
----
+- 🧪 Test reports from real SolidWorks environments (and macro-recorder verification of the [pending APIs](docs/VERIFY-ISSUES.md))
+- 🔨 New sidecar tools (`sidecar/sw_agent/tools/`)
+- 🎨 UI/UX improvements
+- 🌐 Adapters for other CAD (Inventor, CATIA, NX) and MCP server integration
+- 📝 Documentation & translations
 
 ## Roadmap
 
-- [x] **v0.1.0** — MVP (Electron + LLM + COM + 26 tools)
-- [x] **v0.2.0** — Stability (bug fixes + CI/CD + .env fallback)
-- [x] **v0.2.1** — Defeat the "silent success" footgun (remove CreateObject fallback)
-- [x] **v0.2.2** — Renderer hardening (IPC error normalization + theme tokens)
-- [x] **v0.2.3** — CI quality gate on every PR and push
-- [x] **v0.2.4** — **Python sidecar architecture (P3)** — structured tool returns, vision pipeline, agent loop rewrite
-- [ ] **v0.3.0** — Make sidecar required at install time (drop VBS fallback), validate all `# VERIFY` tools against real SolidWorks versions
-- [ ] **v0.4.0** — MCP server adapter (drive SW Copilot from Claude Code / Cursor)
-- [ ] **v1.0.0** — Multi-CAD adapters (Inventor, CATIA, NX, Onshape), commercial license track
-
----
+- [x] **v0.1** — MVP (Electron + LLM + COM + tools)
+- [x] **v0.2** — Stable base, CI, docs
+- [x] **v0.2.4** — Python sidecar, agentic tool loop, visual understanding, Apache-2.0 open source ← *current*
+- [ ] **v0.3** — Full tool coverage, macro-verified parameters, streaming tool calls
+- [ ] **v1.0** — MCP server, multi-CAD support
 
 ## License
 
-[Apache License 2.0](LICENSE) — permissive open source. Use it, fork it, ship it in a commercial product. Attribution appreciated, not required. Patent grant included. No copyleft.
-
----
+[Apache-2.0](LICENSE) — permissive, with an explicit patent grant. Free for commercial use.
 
 ## Acknowledgments
 
-- SolidWorks COM API reference: [CodeStack](https://www.codestack.net/) SolidWorks API documentation
-- MCP ecosystem: [SolidworksMCP-TS](https://github.com/vespo92/SolidworksMCP-TS), [SolidPilot](https://github.com/eyfel/mcp-server-solidworks)
-- Inspiration: Cursor, Claude Code, MecAgent, and every engineer who has ever hand-written a FeatureExtrusion3 call
+- SolidWorks COM API reference: [CodeStack](https://www.codestack.net/)
+- Inspiration: Cursor, Claude Code

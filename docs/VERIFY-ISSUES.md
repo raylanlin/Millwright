@@ -1,60 +1,47 @@
-# Pre-Public VERIFY Checklist
+# Verification backlog — multi-parameter SolidWorks APIs
 
-> **Purpose**: Track all `# VERIFY` markers in the Python sidecar that need SolidWorks macro-recorder validation against target SW versions before claiming full API coverage. **Until each item is verified, the corresponding feature is marked experimental** in the public README.
->
-> **Process**: For each item below, file a GitHub issue (label: `verify`, `pre-public`) using the suggested title. Link it back here.
+Some SolidWorks feature APIs take long positional argument lists whose exact
+parameter positions and enum values can differ between SolidWorks releases.
+The sidecar calls them by name (safer than the old positional VBScript), but the
+argument positions still deserve a one-time check against a target SolidWorks
+version using the **macro recorder** (record the operation in SolidWorks, then
+compare the generated call to ours).
 
-## Status legend
+Each item below is ready to file as a GitHub issue. Remove the `# VERIFY:`
+comment in the source once confirmed on a given version.
 
-- [ ] = Open (needs SW macro validation)
-- [x] = Verified and signed off
-- ❌ = Won't fix / won't support (mark experimental in README)
+| # | Tool | Source | API call | What to verify |
+|---|------|--------|----------|----------------|
+| 1 | `extrude` | `sidecar/sw_agent/tools/feature.py` | `FeatureExtrusion3` | 24-arg positions (end conditions, draft, merge flags) |
+| 2 | `cut_extrude` | feature.py | `FeatureCut4` | 25-arg positions; through-all flag |
+| 3 | `revolve` | feature.py | `FeatureRevolve2` | arg positions; thin-feature flags |
+| 4 | `fillet_edges` | feature.py | `FeatureFillet3` | fillet-type constant (195) + arg positions |
+| 5 | `shell` | feature.py | `InsertShell` | method ownership & signature `(thickness, outward)` |
+| 6 | `linear_pattern` | feature.py | `FeatureLinearPattern5` | arg positions; direction refs |
+| 7 | `circular_pattern` | feature.py | `FeatureCircularPattern5` | arg positions; equal-spacing flag |
+| 8 | `mirror_feature` | feature.py | `InsertMirrorFeature2` | arg positions |
+| 9 | `create_reference_point` | `sidecar/sw_agent/tools/reference.py` | `InsertReferencePoint` | reference-point type enum + arg positions |
+| 10 | `export_stl` | `sidecar/sw_agent/tools/export.py` | `SetUserPreferenceIntegerValue(334, …)` | STL-quality preference constant (334) |
 
----
+## Already verified (no action)
+- `add_mate` — `swMateType_e` enum + `AddMate5` 15-arg signature
+- document type / template constants
+- sketch primitives (`CreateCornerRectangle`, `CreateCircle`, `CreateLine`, `CreateArc`, `CreatePolygon`)
+- `chamfer` — parameter roles corrected (distance in Width slot, not Angle)
 
-## feature.py
+## Issue template
 
-| Tool | Line | Suggested issue title | Notes |
-|------|------|----------------------|-------|
-| `extrude` (FeatureExtrusion3) | 39 | verify: FeatureExtrusion3 24-param signature | Verify parameter positions vs target SW version |
-| `cut` (FeatureCut4) | 61 | verify: FeatureCut4 25-param signature | Verify parameter positions |
-| `revolve` (FeatureRevolve2) | 80 | verify: FeatureRevolve2 signature | Verify parameter positions |
-| `fillet` (FeatureFillet3) | 99 | verify: FeatureFillet3 signature | "不同版本略异" — verify on every supported version |
-| `linear_pattern` (Type 枚举) | 139 | verify: linear pattern Type enum (1=距离-距离) | Verify enum value mapping |
-| `shell` (InsertShell) | 156 | verify: InsertShell ownership/signature | Verify whether it's `IModelDoc2::InsertShell(thickness, outward)` |
-| `linear_pattern` (FeatureLinearPattern5) | 174 | verify: FeatureLinearPattern5 param positions | Verify parameter positions |
-| `circular_pattern` (FeatureCircularPattern5) | 196 | verify: FeatureCircularPattern5 param positions | Verify parameter positions |
-| `mirror_feature` (InsertMirrorFeature2) | 215 | verify: InsertMirrorFeature2 signature | Verify parameter positions |
+```
+Title: [VERIFY] <tool> — confirm <API> parameter positions on SolidWorks <version>
 
-## export.py
+Tool: <tool>  (sidecar/sw_agent/tools/<file>.py)
+API: <API call>
+SolidWorks version tested: <e.g. 2021 SP5>
 
-| Tool | Line | Suggested issue title | Notes |
-|------|------|----------------------|-------|
-| `export_stl` | 13 | verify: STL export quality enum (334 = 精细?) | "粗糙=0 精细=1" — verify enum mapping on target SW |
+Steps:
+1. Record the equivalent operation with the SolidWorks macro recorder.
+2. Compare the recorded call's argument order/values to ours.
+3. Report matches/mismatches; attach the recorded snippet.
 
-## Already verified (no issue needed)
-
-These were already validated during P3 integration:
-
-- `mate` enum + `AddMate5` signature (assembly.py)
-- Document type / template constants
-- Sketch primitive constants
-- `chamfer` parameter roles (chamfer bug fixed in feature.py)
-
-## Verification procedure
-
-For each item:
-
-1. Open target SolidWorks version with a sample document
-2. Start macro recorder (Tools → Macro → Record)
-3. Perform the operation through the UI with non-default parameters
-4. Stop macro, inspect the recorded VBA
-5. Compare parameter order with the Python implementation in feature.py / export.py
-6. If mismatched: file a follow-up issue and patch the Python
-7. Update this doc: `[ ]` → `[x]` with SW version + date
-
-## README disclaimer template
-
-Until all items are `[x]`, the public README must state:
-
-> **Experimental APIs**: Several SolidWorks feature APIs in `sidecar/sw_agent/tools/feature.py` and `export.py` rely on parameter-position orderings that may differ across SolidWorks versions. These are marked `# VERIFY` in source. If a feature returns an error or unexpected geometry, please file an issue with your SW version and a minimal repro.
+Definition of done: `# VERIFY:` comment removed for this API on a confirmed version.
+```
