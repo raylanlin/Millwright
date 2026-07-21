@@ -18,6 +18,18 @@ export interface LLMConfig {
   proxyURL?: string;
   /** 请求超时(毫秒),默认 60_000 */
   timeoutMs?: number;
+  /** P3：独立视觉模型配置（图生文，与主模型解耦）。空 → 尝试主模型多模态 */
+  visionModel?: VisionConfig;
+  /** P3：主模型本身是否支持视觉输入（true 时 analyze_view 会把截图喂给主模型） */
+  mainModelVision?: boolean;
+}
+
+/** P3：独立视觉模型（OpenAI 兼容多模态）的配置 */
+export interface VisionConfig {
+  baseURL: string;
+  apiKey: string;
+  model: string;
+  timeoutMs?: number;
 }
 
 export type ChatRole = 'user' | 'assistant' | 'system';
@@ -39,6 +51,8 @@ export interface ChatMessage {
   id?: string;
   /** 可选:unix ms 时间戳 */
   timestamp?: number;
+  /** 可选:附加图片 URL / data URL（多模态消息，主模型支持视觉时使用） */
+  images?: string[];
 }
 
 export interface LLMUsage {

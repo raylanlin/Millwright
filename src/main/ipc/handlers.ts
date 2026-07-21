@@ -3,14 +3,16 @@
 // IPC 处理器注册。集中定义所有 renderer ↔ main 的通信,
 // 保证 channel 名字只从 shared/ipc-channels 来,避免拼写漂移。
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, nativeImage } from 'electron';
+import { readFileSync } from 'fs';
 import { v4 as uuid } from 'uuid';
 import { IpcChannels } from '../../shared/ipc-channels';
-import type { LLMConfig, ChatMessage, ThemeName } from '../../shared/types';
+import type { LLMConfig, ChatMessage, ThemeName, ToolCall } from '../../shared/types';
 import { createAdapter, validateConfig } from '../llm';
 import { truncateMessages } from '../llm/context-window';
 import { resolveSystemPrompt } from '../llm/prompts';
 import { getBridge } from '../com/sw-bridge';
+import { getSidecar } from '../com/sw-sidecar';
 import { collectDocumentContext, formatContextForPrompt, formatContextForPromptAsync } from '../com/context-collector';
 import { ScriptEngine } from '../scripts/engine';
 import { validateScript } from '../scripts/sanitizer';
@@ -19,7 +21,8 @@ import { backupActiveDocument, removeBackup } from '../scripts/backup';
 import { loadConfig, saveConfig, loadTheme, saveTheme } from '../store/config';
 import { listSessions, getSession, saveSession, deleteSession, createSession } from '../store/chat-store';
 import { toLLMError } from '../llm/errors';
-import { runAgentLoop, type AgentEvent } from '../agent/agent-loop';
+import { runAgentLoop } from '../agent/agent-loop';
+import { runSidecarAgent, type AgentEvent } from '../agent/agent-loop-sidecar';
 import { OpenAIAdapter } from '../llm/openai';
 
 /**
@@ -33,6 +36,41 @@ let agentRunning = false;
 
 /** MED-3：等待渲染层确认的工具回调表，key = `${requestId}:${callId}` */
 const pendingConfirms = new Map<string, (ok: boolean) => void>();
+
+/** P3：把边车返回的本地图片路径转 data URL（边车调用 capture_view 后用） */
+function imageToDataUrl(p: string, format: string): string {
+  if (format === 'png') return `data:image/png;base64,${readFileSync(p).toString('base64')}`;
+  const png = nativeImage.createFromPath(p).toPNG();
+  if (png?.length) return `data:image/png;base64,${png.toString('base64')}`;
+  return `data:image/bmp;base64,${readFileSync(p).toString('base64')}`;
+}
+
+/** P3：工具确认门（共用） —— 发 confirm_request 事件 + 等渲染层回包 / 超时默认拒绝 */
+function requestUserConfirm(
+  sender: Electron.WebContents,
+  requestId: string,
+  call: ToolCall,
+  sendEvent: (ev: AgentEvent) => void,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const callId = call.id ?? call.name;
+    const key = `${requestId}:${callId}`;
+    const timer = setTimeout(() => {
+      if (pendingConfirms.has(key)) {
+        pendingConfirms.delete(key);
+        resolve(false); // 超时默认拒绝
+      }
+    }, 120_000);
+    pendingConfirms.set(key, (ok) => {
+      clearTimeout(timer);
+      pendingConfirms.delete(key);
+      resolve(ok);
+    });
+    sendEvent({ type: 'confirm_request', toolCall: call });
+    // sender 占位保留（避免 unused 警告）
+    void sender;
+  });
+}
 
 export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   const bridge = getBridge();
@@ -217,36 +255,37 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       const send = (ev: AgentEvent) =>
         e.sender.send(IpcChannels.LLM_AGENT_EVENT, { ...ev, requestId });
 
-      const text = await runAgentLoop(adapter, payload.messages, scriptEngine, {
-        requestId,
-        maxRounds: 8,
-        signal: controller.signal,
-        onEvent: send,
-        // HIGH-1：会话级备份（整轮回滚点）
-        backup: async () => {
-          const r = await backupActiveDocument(bridge);
-          return r.backupPath ?? null;
-        },
-        // MED-3：确认门 — 先注册 resolver、再发事件，避免 race
-        confirmTool: (call) =>
-          new Promise<boolean>((resolve) => {
-            const callId = call.id ?? call.name;
-            const key = `${requestId}:${callId}`;
-            const timer = setTimeout(() => {
-              if (pendingConfirms.has(key)) {
-                pendingConfirms.delete(key);
-                resolve(false); // 超时默认拒绝
-              }
-            }, 120_000);
-            pendingConfirms.set(key, (ok) => {
-              clearTimeout(timer);
-              pendingConfirms.delete(key);
-              resolve(ok);
-            });
-            send({ type: 'confirm_request', toolCall: call });
-          }),
-      });
-      return { ok: true, text, requestId };
+      // P3：边车优先；边车不可用（未装 python / pywin32）→ 回退旧 VBS agent
+      const sidecar = getSidecar({ onLog: (l) => console.log('[sidecar]', l) });
+      try {
+        await sidecar.start();
+        const text = await runSidecarAgent(adapter, payload.messages, sidecar, {
+          requestId,
+          maxRounds: 12,
+          signal: controller.signal,
+          onEvent: send,
+          confirmTool: (call) => requestUserConfirm(e.sender, requestId, call, send),
+          visionConfig: enrichedConfig.visionModel,
+          mainModelVision: !!enrichedConfig.mainModelVision,
+          imageToDataUrl,
+        });
+        return { ok: true, text, requestId };
+      } catch (sidecarErr) {
+        // 边车不可用 → 回退旧 VBS agent 路径
+        console.warn('[agent] sidecar 不可用，回退 VBS agent:', sidecarErr);
+        const text = await runAgentLoop(adapter, payload.messages, scriptEngine, {
+          requestId,
+          maxRounds: 8,
+          signal: controller.signal,
+          onEvent: send,
+          backup: async () => {
+            const r = await backupActiveDocument(bridge);
+            return r.backupPath ?? null;
+          },
+          confirmTool: (call) => requestUserConfirm(e.sender, requestId, call, send),
+        });
+        return { ok: true, text, requestId };
+      }
     } catch (err) {
       return { ok: false, error: toLLMError(err, 'Agent 执行失败'), requestId };
     } finally {

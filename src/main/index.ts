@@ -9,6 +9,7 @@ import * as path from 'path';
 import { crashLog } from './crash-log';
 import { registerIpcHandlers, abortAllRequests } from './ipc/handlers';
 import { getBridge } from './com/sw-bridge';
+import { getSidecar } from './com/sw-sidecar';
 import { SWHealthMonitor } from './com/health';
 import { IpcChannels } from '../shared/ipc-channels';
 
@@ -129,5 +130,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   abortAllRequests();
   healthMonitor?.stop();
+  getSidecar().stop(); // P3：退出时关掉 python 进程
   getBridge().disconnect();
 });

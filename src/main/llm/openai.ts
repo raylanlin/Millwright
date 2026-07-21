@@ -12,7 +12,7 @@ import { resolveSystemPrompt } from './prompts';
 import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
 import { parseSSE } from './sse';
-import { buildOpenAITools, type OpenAITool } from './tools-schema';
+import { buildOpenAITools } from './tools-schema';
 import type {
   ChatMessage,
   LLMResponse,
@@ -215,7 +215,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
 
   // —— P1: Function Calling / Agent 模式 ——
 
-  private buildToolBody(openAIMessages: any[], tools: OpenAITool[]) {
+  private buildToolBody(openAIMessages: any[], tools: any[]) {
     return {
       model: this.config.model,
       messages: openAIMessages,
@@ -263,16 +263,30 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       }
       // 普通的 system 已在开头合并，跳过
       if (m.role === 'system') continue;
-      out.push({ role: m.role, content: m.content });
+      out.push({ role: m.role, content: this.contentOf(m) });
     }
     return out;
   }
 
-  async chatWithTools(messages: ChatMessage[], signal?: AbortSignal): Promise<LLMResponse> {
+  /** P3：user 消息带 images → OpenAI 多模态 content（text + image_url 列表） */
+  private contentOf(m: ChatMessage): any {
+    if (!m.images?.length) return m.content;
+    return [
+      ...(m.content ? [{ type: 'text', text: m.content }] : []),
+      ...m.images.map((url) => ({ type: 'image_url', image_url: { url } })),
+    ];
+  }
+
+  async chatWithTools(
+    messages: ChatMessage[],
+    signal?: AbortSignal,
+    tools?: any[],
+  ): Promise<LLMResponse> {
     const { signal: s, cleanup } = this.withTimeout(signal);
     try {
-      const tools = buildOpenAITools(true); // P1: 只放开白名单工具
-      const body = this.buildToolBody(this.buildToolMessages(messages), tools);
+      // P3：外部传入 tools（边车 listTools 注入）；未传则退回内置全量
+      const toolDefs = tools ?? buildOpenAITools(false);
+      const body = this.buildToolBody(this.buildToolMessages(messages), toolDefs);
       const res = await fetch(`${this.getBaseURL()}/chat/completions`, {
         method: 'POST',
         headers: this.buildHeaders(),

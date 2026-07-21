@@ -20,6 +20,14 @@ files:
   - '!vite.config.ts'
   - '!.env*'
 
+# P3：把 Python 边车代码随安装包/免安装版一起出去
+# sw-sidecar.ts 默认 cwd = resourcesPath/sidecar（见其构造）
+extraResources:
+  - from: 'sidecar'
+    to: 'sidecar'
+    filter:
+      - '**/*'
+
 win:
   # 只保留 NSIS。移除 squirrel —— 它会在安装后自动后台拉起应用，
   # 导致随后的 NSIS 安装器发现进程关不掉，弹「无法关闭，请手动关闭」并反复重试。
