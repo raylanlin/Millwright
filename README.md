@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon-256.png" width="80" height="80" alt="SW Copilot" />
+  <img src="assets/banner-hero.png" alt="SW Copilot — Open-source AI automation for SolidWorks" />
 </p>
 
 <h1 align="center">SW Copilot</h1>
