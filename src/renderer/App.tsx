@@ -4,13 +4,14 @@
 // Each child component only worries about its own concern. Script execution is wired in here
 // as a new capability.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, LLMConfig, ScriptResult } from '../shared/types';
 import { DEFAULT_CONFIG } from '../shared/presets';
 import { useTheme } from './hooks/useTheme';
 import { useLLM } from './hooks/useLLM';
 import { useSWStatus } from './hooks/useSWStatus';
 import { useChatSessions } from './hooks/useChatSessions';
+import { useT } from './i18n/LocaleContext';
 import { Sidebar, type TabKey } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ChatInput, type ChatInputHandle } from './components/ChatInput';
@@ -19,16 +20,16 @@ import { Automations } from './components/Automations';
 import { ToolsList } from './components/ToolsList';
 import { ErrorBanner } from './components/ErrorBanner';
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    role: 'assistant',
-    content:
-      '你好,我是 SW Copilot。\n\n先到左下角「设置」配置 AI 服务商(Anthropic / OpenAI / 百炼 / DeepSeek …),之后就能用自然语言驱动 SolidWorks。\n\n当 AI 回复里包含代码,你可以直接点「执行」把脚本注入 SolidWorks,或「复制」到自己的宏环境中用。',
-  },
-];
-
 export default function App() {
   const { theme, setTheme, toggle, tokens: t } = useTheme();
+  const tr = useT();
+
+  // Build the greeting message from the current locale.
+  // `useMemo` keeps the array reference stable so `useLLM`'s initial effect doesn't re-run on every render.
+  const INITIAL_MESSAGES = useMemo<ChatMessage[]>(
+    () => [{ role: 'assistant', content: tr('app.greeting') }],
+    [tr],
+  );
 
   // —— Config ——
   const [config, setConfig] = useState<LLMConfig>(DEFAULT_CONFIG);
@@ -152,7 +153,7 @@ export default function App() {
       const validation = await window.api.script.validate(code, lang);
       if (!validation.safe) {
         const confirmed = window.confirm(
-          `检测到潜在风险:\n\n${validation.issues.join('\n')}\n\n仍要继续执行吗?`,
+          tr('app.riskConfirm', { issues: validation.issues.join('\n') }),
         );
         if (!confirmed) return;
       }
@@ -179,9 +180,9 @@ export default function App() {
   }, []);
 
   const tabTitle: Record<TabKey, string> = {
-    chat: '💬 对话',
-    automations: '⚡ 快捷自动化',
-    tools: '🔧 可用工具',
+    chat: tr('header.chat'),
+    automations: tr('header.automations'),
+    tools: tr('header.tools'),
   };
 
   return (
@@ -255,7 +256,7 @@ export default function App() {
                 fontFamily: 'inherit',
               }}
             >
-              清空对话
+              {tr('app.clearChat')}
             </button>
           )}
         </header>
@@ -281,10 +282,10 @@ export default function App() {
               isGenerating={isGenerating}
               placeholder={
                 !config.apiKey
-                  ? '请先在「设置」中配置 API…'
-                  : '描述你想在 SolidWorks 中执行的操作…'
+                  ? tr('input.placeholderNoKey')
+                  : tr('input.placeholder')
               }
-              hint={`${config.protocol} · ${config.model || '(未指定模型)'} · Enter 发送 / Shift+Enter 换行`}
+              hint={`${config.protocol} · ${config.model || tr('input.noModel')} · ${tr('input.enterHint')}`}
             />
           </>
         )}

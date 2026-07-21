@@ -8,7 +8,7 @@ import { ipcMain, BrowserWindow, nativeImage } from 'electron';
 import { readFileSync } from 'fs';
 import { v4 as uuid } from 'uuid';
 import { IpcChannels } from '../../shared/ipc-channels';
-import type { LLMConfig, ChatMessage, ThemeName, ToolCall } from '../../shared/types';
+import type { LLMConfig, ChatMessage, LocaleName, ThemeName, ToolCall } from '../../shared/types';
 import { createAdapter, validateConfig } from '../llm';
 import { truncateMessages } from '../llm/context-window';
 import { resolveSystemPrompt } from '../llm/prompts';
@@ -19,7 +19,7 @@ import { ScriptEngine } from '../scripts/engine';
 import { validateScript } from '../scripts/sanitizer';
 import { generateScript } from '../scripts/generators';
 import { backupActiveDocument, removeBackup } from '../scripts/backup';
-import { loadConfig, saveConfig, loadTheme, saveTheme } from '../store/config';
+import { loadConfig, saveConfig, loadTheme, saveTheme, loadLocale, saveLocale } from '../store/config';
 import { listSessions, getSession, saveSession, deleteSession, createSession } from '../store/chat-store';
 import { toLLMError } from '../llm/errors';
 import { runAgentLoop } from '../agent/agent-loop';
@@ -383,6 +383,15 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
 
   ipcMain.handle('theme:save', async (_e, theme: ThemeName) => {
     await saveTheme(theme);
+    return { ok: true };
+  });
+
+  ipcMain.handle('locale:load', async (): Promise<LocaleName> => {
+    return await loadLocale();
+  });
+
+  ipcMain.handle('locale:save', async (_e, locale: LocaleName) => {
+    await saveLocale(locale);
     return { ok: true };
   });
 }

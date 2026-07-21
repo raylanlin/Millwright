@@ -1,7 +1,9 @@
 // src/renderer/components/Sidebar.tsx
 
+import { useMemo } from 'react';
 import type { ThemeTokens } from '../themes';
 import type { LLMConfig, SWStatus, ThemeName, ChatSessionMeta } from '../../shared/types';
+import { useT } from '../i18n/LocaleContext';
 import { StatusDot } from './StatusDot';
 
 export type TabKey = 'chat' | 'automations' | 'tools';
@@ -25,12 +27,6 @@ interface Props {
   onNewChat: () => void;
 }
 
-const TABS: { key: TabKey; icon: string; label: string }[] = [
-  { key: 'chat', icon: '💬', label: '对话' },
-  { key: 'automations', icon: '⚡', label: '自动化' },
-  { key: 'tools', icon: '🔧', label: '工具列表' },
-];
-
 export function Sidebar({
   t,
   theme,
@@ -48,6 +44,17 @@ export function Sidebar({
   onDeleteSession,
   onNewChat,
 }: Props) {
+  const tr = useT();
+
+  const TABS = useMemo<{ key: TabKey; icon: string; label: string }[]>(
+    () => [
+      { key: 'chat', icon: '💬', label: tr('tab.chat') },
+      { key: 'automations', icon: '⚡', label: tr('tab.automations') },
+      { key: 'tools', icon: '🔧', label: tr('tab.tools') },
+    ],
+    [tr],
+  );
+
   const isConfigured = !!(config.apiKey && config.apiKey.length > 5);
   // Truncate overly long model names for display
   const modelLabel =
@@ -79,7 +86,7 @@ export function Sidebar({
           </div>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>SW Copilot</div>
-            <div style={{ fontSize: 10, color: t.textMuted }}>SolidWorks AI 助手</div>
+            <div style={{ fontSize: 10, color: t.textMuted }}>{tr('sidebar.subtitle')}</div>
           </div>
         </div>
       </div>
@@ -104,8 +111,8 @@ export function Sidebar({
               }}
               title={
                 swStatus.connected
-                  ? `SolidWorks ${swStatus.version ?? ''} · ${swStatus.activeDocumentType ?? '无文档'}`
-                  : 'SolidWorks 未连接'
+                  ? `SolidWorks ${swStatus.version ?? ''} · ${swStatus.activeDocumentType ?? tr('sw.noDoc')}`
+                  : tr('sw.notConnected')
               }
             >
               SolidWorks
@@ -122,7 +129,7 @@ export function Sidebar({
               fontSize: 10, cursor: swLoading ? 'default' : 'pointer',
             }}
           >
-            {swLoading ? '…' : '刷新'}
+            {swLoading ? '…' : tr('sidebar.refresh')}
           </button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
@@ -135,9 +142,9 @@ export function Sidebar({
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
-            title={isConfigured ? `${config.protocol} · ${config.model}` : 'API 未配置'}
+            title={isConfigured ? `${config.protocol} · ${config.model}` : tr('sidebar.apiNotConfigured')}
           >
-            {isConfigured ? `${config.protocol} · ${modelLabel}` : 'API 未配置'}
+            {isConfigured ? `${config.protocol} · ${modelLabel}` : tr('sidebar.apiNotConfigured')}
           </span>
         </div>
       </div>
@@ -177,16 +184,16 @@ export function Sidebar({
                 {swStatus.activeDocumentTitle}
               </div>
               <div style={{ fontSize: 10, color: t.textMuted, marginTop: 1 }}>
-                {({ part: '零件', assembly: '装配体', drawing: '工程图' } as Record<string, string>)[
+                {({ part: tr('docType.part'), assembly: tr('docType.assembly'), drawing: tr('docType.drawing') } as Record<string, string>)[
                   swStatus.activeDocumentType ?? 'part'
-                ] ?? '未知'}
+                ] ?? tr('docType.unknown')}
               </div>
             </div>
           </div>
         )}
         {swStatus.connected && !swStatus.hasDoc && (
           <div style={{ marginTop: 9, fontSize: 11, color: t.textMuted }}>
-            SolidWorks 已连接 · 未打开文档
+            {tr('sidebar.connectedNoDoc')}
           </div>
         )}
       </div>
@@ -257,11 +264,11 @@ export function Sidebar({
                 textTransform: 'uppercase',
               }}
             >
-              对话历史
+              {tr('sidebar.history')}
             </span>
             <button
               onClick={onNewChat}
-              title="新建对话"
+              title={tr('sidebar.newChatTitle')}
               style={{
                 background: 'none',
                 border: `1px solid ${t.cardBorder}`,
@@ -273,12 +280,12 @@ export function Sidebar({
                 fontFamily: 'inherit',
               }}
             >
-              ＋ 新对话
+              {tr('sidebar.newChat')}
             </button>
           </div>
           {sessions.length === 0 ? (
             <div style={{ fontSize: 11, color: t.textMuted, padding: '4px 6px' }}>
-              暂无历史,开始对话后自动保存
+              {tr('sidebar.noHistory')}
             </div>
           ) : (
             sessions.map((s) => {
@@ -310,14 +317,14 @@ export function Sidebar({
                     }}
                     title={s.title}
                   >
-                    {s.title || '新对话'}
+                    {s.title || tr('sidebar.untitled')}
                   </span>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       onDeleteSession(s.id);
                     }}
-                    title="删除对话"
+                    title={tr('sidebar.deleteChat')}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -349,7 +356,7 @@ export function Sidebar({
             display: 'flex', alignItems: 'center', gap: 7,
           }}
         >
-          {theme === 'light' ? '🌙' : '☀️'} {theme === 'light' ? '深色模式' : '浅色模式'}
+          {theme === 'light' ? '🌙' : '☀️'} {theme === 'light' ? tr('sidebar.darkMode') : tr('sidebar.lightMode')}
         </button>
         <button
           onClick={onOpenSettings}
@@ -360,7 +367,7 @@ export function Sidebar({
             display: 'flex', alignItems: 'center', gap: 7,
           }}
         >
-          ⚙️ 设置
+          ⚙️ {tr('sidebar.settings')}
         </button>
       </div>
     </aside>

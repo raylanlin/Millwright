@@ -1,6 +1,7 @@
 // src/renderer/components/Automations.tsx
 
 import type { ThemeTokens } from '../themes';
+import { useT } from '../i18n/LocaleContext';
 import { AUTOMATIONS } from './automations-data';
 
 interface Props {
@@ -10,10 +11,11 @@ interface Props {
 }
 
 export function Automations({ t, onPick }: Props) {
+  const tr = useT();
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
       <p style={{ color: t.textSecondary, fontSize: 13, marginBottom: 16 }}>
-        点击模板快速向 AI 提问(内容会填到输入框,按 Enter 发送):
+        {tr('auto.hint')}
       </p>
       <div
         style={{
@@ -22,28 +24,32 @@ export function Automations({ t, onPick }: Props) {
           gap: 10,
         }}
       >
-        {AUTOMATIONS.map((a, i) => (
-          <button
-            key={i}
-            onClick={() => onPick(a.prompt, a.label)}
-            style={{
-              padding: '14px', borderRadius: 10,
-              border: `1px solid ${t.cardBorder}`, background: t.card,
-              cursor: 'pointer', textAlign: 'left',
-              transition: 'all 0.12s', fontFamily: 'inherit',
-            }}
-          >
-            <div style={{ fontSize: 18, marginBottom: 6 }}>{a.icon}</div>
-            <div
+        {AUTOMATIONS.map((a, i) => {
+          const label = tr(`${a.key}.label`);
+          const desc = tr(`${a.key}.desc`);
+          return (
+            <button
+              key={i}
+              onClick={() => onPick(tr(`${a.key}.prompt`), label)}
               style={{
-                color: t.text, fontSize: 13, fontWeight: 600, marginBottom: 3,
+                padding: '14px', borderRadius: 10,
+                border: `1px solid ${t.cardBorder}`, background: t.card,
+                cursor: 'pointer', textAlign: 'left',
+                transition: 'all 0.12s', fontFamily: 'inherit',
               }}
             >
-              {a.label}
-            </div>
-            <div style={{ color: t.textMuted, fontSize: 11, lineHeight: 1.5 }}>{a.desc}</div>
-          </button>
-        ))}
+              <div style={{ fontSize: 18, marginBottom: 6 }}>{a.icon}</div>
+              <div
+                style={{
+                  color: t.text, fontSize: 13, fontWeight: 600, marginBottom: 3,
+                }}
+              >
+                {label}
+              </div>
+              <div style={{ color: t.textMuted, fontSize: 11, lineHeight: 1.5 }}>{desc}</div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

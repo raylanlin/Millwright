@@ -9,7 +9,7 @@
 // under CommonJS.
 
 import { safeStorage } from 'electron';
-import type { LLMConfig, ThemeName } from '../../shared/types';
+import type { LLMConfig, LocaleName, ThemeName } from '../../shared/types';
 import { DEFAULT_CONFIG } from '../../shared/presets';
 import { loadEnvFallback } from './env-fallback';
 
@@ -18,6 +18,7 @@ export interface StoredConfig {
   /** Base64 of the encrypted API key; empty string when nothing is configured yet */
   encryptedApiKey: string;
   theme: ThemeName;
+  locale: LocaleName;
   /** Persistence schema version; reserved for future migrations */
   schemaVersion: number;
 }
@@ -32,6 +33,7 @@ const DEFAULT_STORED: StoredConfig = {
   llm: DEFAULT_LLM_WITHOUT_KEY,
   encryptedApiKey: '',
   theme: 'light',
+  locale: 'zh',
   schemaVersion: SCHEMA_VERSION,
 };
 
@@ -125,4 +127,14 @@ export async function loadTheme(): Promise<ThemeName> {
 export async function saveTheme(theme: ThemeName): Promise<void> {
   const store = await getStore();
   store.set('theme', theme);
+}
+
+export async function loadLocale(): Promise<LocaleName> {
+  const store = await getStore();
+  return store.get('locale') ?? 'zh';
+}
+
+export async function saveLocale(locale: LocaleName): Promise<void> {
+  const store = await getStore();
+  store.set('locale', locale);
 }

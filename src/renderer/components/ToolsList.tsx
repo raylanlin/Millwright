@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { ThemeTokens } from '../themes';
 import type { ScriptResult } from '../../shared/types';
+import { useT } from '../i18n/LocaleContext';
 import {
   SW_TOOLS,
   CATEGORY_LABELS,
@@ -22,6 +23,7 @@ interface PreviewState {
 }
 
 export function ToolsList({ t }: Props) {
+  const tr = useT();
   const grouped = getToolsByCategory();
   const total = SW_TOOLS.length;
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -31,7 +33,7 @@ export function ToolsList({ t }: Props) {
     if (res.ok) {
       setPreview({ tool, code: res.code, executing: false });
     } else {
-      alert(`生成失败: ${res.error}`);
+      alert(tr('tools.genFail', { error: res.error }));
     }
   };
 
@@ -41,7 +43,7 @@ export function ToolsList({ t }: Props) {
     const validation = await window.api.script.validate(preview.code, 'vba');
     if (!validation.safe) {
       const ok = window.confirm(
-        `检测到潜在风险:\n\n${validation.issues.join('\n')}\n\n仍要继续吗?`,
+        tr('app.riskConfirm', { issues: validation.issues.join('\n') }),
       );
       if (!ok) {
         setPreview({ ...preview, executing: false });
@@ -62,7 +64,7 @@ export function ToolsList({ t }: Props) {
     <>
       <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
         <p style={{ color: t.textSecondary, fontSize: 13, marginBottom: 14 }}>
-          共 {total} 个工具。点击可用示例参数生成 VBA 脚本预览:
+          {tr('tools.count', { total })}
         </p>
 
         {Object.entries(grouped).map(([cat, tools]) => (
@@ -110,14 +112,10 @@ export function ToolsList({ t }: Props) {
           }}
         >
           <div style={{ color: t.textSecondary, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-            工作原理
+            {tr('tools.howTitle')}
           </div>
-          <div style={{ color: t.textMuted, fontSize: 12, lineHeight: 1.8 }}>
-            1. 用自然语言描述操作需求<br />
-            2. AI 模型理解意图并选择工具<br />
-            3. 生成 SolidWorks VBA 宏或 Python 脚本<br />
-            4. 通过 COM 接口注入 SolidWorks 执行<br />
-            5. 返回结果并给出后续建议
+          <div style={{ color: t.textMuted, fontSize: 12, lineHeight: 1.8, whiteSpace: 'pre-line' }}>
+            {tr('tools.how')}
           </div>
         </div>
       </div>
@@ -146,6 +144,7 @@ interface PreviewProps {
 }
 
 function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps) {
+  const tr = useT();
   const { tool, code, executing, result } = preview;
   return (
     <div
@@ -186,7 +185,7 @@ function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps
               {tool.name}
             </div>
             <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>
-              {tool.description} · VBA 预览
+              {tool.description} · {tr('tools.vbaPreview')}
             </div>
           </div>
           <button
@@ -208,7 +207,7 @@ function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps
           {tool.exampleParams && Object.keys(tool.exampleParams).length > 0 && (
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 4 }}>
-                示例参数
+                {tr('tools.exampleParams')}
               </div>
               <div
                 style={{
@@ -249,7 +248,7 @@ function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps
                 color: result.success ? t.successText : t.dangerText,
               }}
             >
-              {result.success ? '✓ 执行完成' : '✕ 执行失败'}
+              {result.success ? tr('tools.execDone') : tr('tools.execFail')}
               {` · ${result.duration} ms`}
               {result.error && (
                 <pre style={{ margin: '4px 0 0', fontSize: 11, whiteSpace: 'pre-wrap' }}>
@@ -276,7 +275,7 @@ function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps
               fontSize: 12, fontFamily: 'inherit',
             }}
           >
-            复制
+            {tr('msg.copy')}
           </button>
           <button
             onClick={onRun}
@@ -289,7 +288,7 @@ function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps
               opacity: executing ? 0.6 : 1,
             }}
           >
-            {executing ? '执行中…' : '在 SolidWorks 中执行'}
+            {executing ? tr('tools.running') : tr('tools.runInSW')}
           </button>
         </footer>
       </div>

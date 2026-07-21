@@ -7,6 +7,7 @@
 import { useEffect, useRef } from 'react';
 import type { ChatMessage as ChatMsg, ScriptResult } from '../../shared/types';
 import type { ThemeTokens } from '../themes';
+import { useT } from '../i18n/LocaleContext';
 import { ChatMessage } from './ChatMessage';
 
 interface Props {
@@ -29,6 +30,7 @@ export function Chat({
   onRunScript,
   onCopyCode,
 }: Props) {
+  const tr = useT();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // When the message list changes, auto-scroll to the bottom: directly set
@@ -75,7 +77,7 @@ export function Chat({
               animation: 'pulse 1.4s infinite',
             }}
           />
-          正在生成…
+          {tr('chat.generating')}
         </div>
       )}
     </div>

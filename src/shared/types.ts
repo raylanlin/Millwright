@@ -168,6 +168,10 @@ export interface ModelPreset {
 
 export type ThemeName = 'light' | 'dark';
 
+// ===== Locale =====
+
+export type LocaleName = 'zh' | 'en';
+
 // ===== Chat sessions =====
 
 export interface ChatSession {

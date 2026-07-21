@@ -4,6 +4,7 @@
 // errors, with quick-action buttons.
 
 import type { LLMErrorInfo, SWStatus } from '../../shared/types';
+import { useT } from '../i18n/LocaleContext';
 
 interface ErrorBannerProps {
   t: any; // theme tokens
@@ -22,12 +23,13 @@ export function ErrorBanner({
   onDismissError,
   onOpenSettings,
 }: ErrorBannerProps) {
+  const tr = useT();
   // SolidWorks disconnected
   if (!swStatus.connected) {
     return (
       <Banner t={t} type="warning">
-        <span>SolidWorks 未连接 — 请确保 SolidWorks 已启动</span>
-        <BannerButton t={t} onClick={onReconnectSW}>重新连接</BannerButton>
+        <span>{tr('err.swDown')}</span>
+        <BannerButton t={t} onClick={onReconnectSW}>{tr('err.reconnect')}</BannerButton>
       </Banner>
     );
   }
@@ -41,13 +43,13 @@ export function ErrorBanner({
     return (
       <Banner t={t} type="error">
         <span style={{ flex: 1 }}>
-          {isAuth && 'API 认证失败 — 请检查 API Key 是否正确'}
-          {isRate && 'API 限流 — 请稍后再试'}
-          {isNetwork && '网络连接失败 — 请检查网络或代理设置'}
-          {!isAuth && !isRate && !isNetwork && `错误: ${llmError.message}`}
+          {isAuth && tr('err.auth')}
+          {isRate && tr('err.rate')}
+          {isNetwork && tr('err.network')}
+          {!isAuth && !isRate && !isNetwork && tr('err.generic', { message: llmError.message })}
         </span>
-        {isAuth && <BannerButton t={t} onClick={onOpenSettings}>打开设置</BannerButton>}
-        <BannerButton t={t} onClick={onDismissError}>关闭</BannerButton>
+        {isAuth && <BannerButton t={t} onClick={onOpenSettings}>{tr('err.openSettings')}</BannerButton>}
+        <BannerButton t={t} onClick={onDismissError}>{tr('err.dismiss')}</BannerButton>
       </Banner>
     );
   }

@@ -2,6 +2,7 @@
 
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import type { ThemeTokens } from '../themes';
+import { useT } from '../i18n/LocaleContext';
 
 interface Props {
   t: ThemeTokens;
@@ -23,6 +24,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   ref,
 ) {
   const ta = useRef<HTMLTextAreaElement>(null);
+  const tr = useT();
   useImperativeHandle(ref, () => ({ focus: () => ta.current?.focus() }), []);
 
   const canSend = value.trim().length > 0 && !isGenerating;
@@ -52,7 +54,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKey}
-          placeholder={placeholder ?? '描述你想在 SolidWorks 中执行的操作…'}
+          placeholder={placeholder ?? tr('input.placeholder')}
           rows={1}
           style={{
             flex: 1,
@@ -72,7 +74,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         {isGenerating && onCancel ? (
           <button
             onClick={onCancel}
-            title="取消生成"
+            title={tr('input.cancel')}
             style={{
               width: 36, height: 36, borderRadius: 8, border: `1px solid ${t.cardBorder}`,
               background: t.cardAlt, color: t.textSecondary,
@@ -87,7 +89,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
           <button
             onClick={onSend}
             disabled={!canSend}
-            title="发送 (Enter)"
+            title={tr('input.send')}
             style={{
               width: 36, height: 36, borderRadius: 8, border: 'none',
               background: canSend ? t.btnPrimary : t.cardAlt,

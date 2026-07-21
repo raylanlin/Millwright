@@ -10,6 +10,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { LLMConfig, LLMErrorInfo, ThemeName, SWStatus } from '../../shared/types';
 import { DEFAULT_URLS, MODEL_PRESETS, OPENAI_COMPATIBLE_PROVIDERS } from '../../shared/presets';
 import type { ThemeTokens } from '../themes';
+import { useLocale, useT } from '../i18n/LocaleContext';
+import { LOCALE_LABELS } from '../i18n/strings';
 import { StatusDot } from './StatusDot';
 
 type TestStatus =
@@ -31,6 +33,8 @@ interface Props {
 export function SettingsModal({
   t, config, onConfigChange, onClose, swStatus, theme, onThemeChange,
 }: Props) {
+  const tr = useT();
+  const { locale, setLocale } = useLocale();
   // Local draft — only committed back on save. Closing without saving leaves the external state untouched.
   const [draft, setDraft] = useState<LLMConfig>(config);
   const [showKey, setShowKey] = useState(false);
@@ -157,7 +161,7 @@ export function SettingsModal({
             marginBottom: 24,
           }}
         >
-          <h2 style={{ margin: 0, fontSize: 17, color: t.text, fontWeight: 600 }}>设置</h2>
+          <h2 style={{ margin: 0, fontSize: 17, color: t.text, fontWeight: 600 }}>{tr('settings.title')}</h2>
           <button
             onClick={onClose}
             style={{
@@ -169,12 +173,33 @@ export function SettingsModal({
           </button>
         </div>
 
+        {/* Language */}
+        <label style={labelStyle}>{tr('settings.language')}</label>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          {(['zh', 'en'] as const).map((l) => (
+            <button
+              key={l}
+              onClick={() => setLocale(l)}
+              style={{
+                flex: 1, padding: '9px 14px', borderRadius: 7,
+                cursor: 'pointer', fontSize: 13, fontWeight: 500,
+                border: locale === l ? `2px solid ${t.accent}` : `1px solid ${t.inputBorder}`,
+                background: locale === l ? t.accentSoft : t.cardAlt,
+                color: locale === l ? t.text : t.textSecondary,
+                transition: 'all 0.15s',
+              }}
+            >
+              {LOCALE_LABELS[l]}
+            </button>
+          ))}
+        </div>
+
         {/* Theme */}
-        <label style={labelStyle}>外观主题</label>
+        <label style={labelStyle}>{tr('settings.theme')}</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           {([
-            { k: 'light' as const, l: '浅色' },
-            { k: 'dark' as const, l: '深色' },
+            { k: 'light' as const, l: tr('settings.light') },
+            { k: 'dark' as const, l: tr('settings.dark') },
           ]).map(({ k, l }) => (
             <button
               key={k}
@@ -201,7 +226,7 @@ export function SettingsModal({
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}
         >
-          <span style={{ color: t.textSecondary, fontSize: 13 }}>SolidWorks 连接</span>
+          <span style={{ color: t.textSecondary, fontSize: 13 }}>{tr('settings.swConnection')}</span>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <StatusDot connected={swStatus.connected} />
             <span
@@ -211,14 +236,14 @@ export function SettingsModal({
               }}
             >
               {swStatus.connected
-                ? `已连接${swStatus.version ? ' · ' + swStatus.version : ''}`
-                : '未检测到'}
+                ? `${tr('settings.connected')}${swStatus.version ? ' · ' + swStatus.version : ''}`
+                : tr('settings.notDetected')}
             </span>
           </div>
         </div>
 
         {/* Protocol */}
-        <label style={labelStyle}>API 协议</label>
+        <label style={labelStyle}>{tr('settings.protocol')}</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
           {(['anthropic', 'openai'] as const).map((p) => (
             <button
@@ -233,7 +258,7 @@ export function SettingsModal({
                 transition: 'all 0.15s',
               }}
             >
-              {p === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容'}
+              {p === 'anthropic' ? 'Anthropic' : tr('settings.openaiCompat')}
             </button>
           ))}
         </div>
@@ -249,7 +274,7 @@ export function SettingsModal({
         {draft.protocol === 'openai' && (
           <div style={{ marginBottom: 16 }}>
             <p style={{ color: t.textMuted, fontSize: 11, margin: '4px 1px 6px' }}>
-              兼容服务商快捷填充:
+              {tr('settings.quickFill')}
             </p>
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               {OPENAI_COMPATIBLE_PROVIDERS.map((p) => (
@@ -271,7 +296,7 @@ export function SettingsModal({
         )}
         {draft.protocol === 'anthropic' && (
           <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 16px 1px' }}>
-            默认使用 Anthropic 官方端点
+            {tr('settings.anthropicDefault')}
           </p>
         )}
 
@@ -298,7 +323,7 @@ export function SettingsModal({
         </div>
 
         {/* Model */}
-        <label style={labelStyle}>模型</label>
+        <label style={labelStyle}>{tr('settings.model')}</label>
         <select
           value={selectValue}
           onChange={(e) => handleSelectModel(e.target.value)}
@@ -319,19 +344,19 @@ export function SettingsModal({
           <input
             value={customModel}
             onChange={(e) => update('model', e.target.value)}
-            placeholder="如 deepseek-chat, qwen-coder-plus, MiniMax-Text-01"
+            placeholder={tr('settings.customModelPlaceholder')}
             style={{ ...fieldStyle, marginBottom: 16 }}
           />
         )}
 
         {/* System Prompt */}
         <label style={labelStyle}>
-          系统提示词 <span style={{ color: t.textMuted, fontWeight: 400 }}>(可选)</span>
+          {tr('settings.systemPrompt')} <span style={{ color: t.textMuted, fontWeight: 400 }}>{tr('settings.optional')}</span>
         </label>
         <textarea
           value={draft.systemPrompt ?? ''}
           onChange={(e) => update('systemPrompt', e.target.value)}
-          placeholder="留空使用内置默认提示词(SolidWorks 自动化专家)"
+          placeholder={tr('settings.systemPromptPlaceholder')}
           rows={3}
           style={{
             ...fieldStyle,
@@ -381,12 +406,12 @@ export function SettingsModal({
             }}
           >
             {testStatus.kind === 'testing'
-              ? '测试中…'
+              ? tr('settings.testing')
               : testStatus.kind === 'success'
-              ? '✓ 连接成功'
+              ? tr('settings.testSuccess')
               : testStatus.kind === 'error'
-              ? '✕ 连接失败'
-              : '测试连接'}
+              ? tr('settings.testFail')
+              : tr('settings.test')}
           </button>
           <button
             onClick={handleSave}
@@ -399,7 +424,7 @@ export function SettingsModal({
               fontSize: 13, fontWeight: 500, fontFamily: 'inherit',
             }}
           >
-            {saving ? '保存中…' : '保存'}
+            {saving ? tr('settings.saving') : tr('settings.save')}
           </button>
         </div>
       </div>

@@ -6,6 +6,7 @@
 
 import type { ChatMessage as ChatMsg, ScriptResult } from '../../shared/types';
 import type { ThemeTokens } from '../themes';
+import { useT } from '../i18n/LocaleContext';
 
 interface Props {
   msg: ChatMsg;
@@ -26,6 +27,7 @@ export function ChatMessage({
   onRunScript,
   onCopyCode,
 }: Props) {
+  const tr = useT();
   const isUser = msg.role === 'user';
 
   return (
@@ -62,7 +64,7 @@ export function ChatMessage({
             }}
           >
             <span style={{ color: t.textSecondary, fontSize: 11, fontWeight: 600 }}>
-              调用工具:
+              {tr('msg.toolCalls')}
             </span>
             <div style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {msg.toolCalls.map((tc, i) => (
@@ -124,7 +126,7 @@ export function ChatMessage({
                         fontFamily: 'inherit',
                       }}
                     >
-                      复制
+                      {tr('msg.copy')}
                     </button>
                   )}
                   {onRunScript && msg.codeLanguage && (
@@ -143,7 +145,7 @@ export function ChatMessage({
                         fontFamily: 'inherit',
                       }}
                     >
-                      {isExecuting ? '执行中…' : '执行'}
+                      {isExecuting ? tr('msg.running') : tr('msg.run')}
                     </button>
                   )}
                 </div>
@@ -163,8 +165,8 @@ export function ChatMessage({
               >
                 {execResult.success ? '✓ ' : '✕ '}
                 {execResult.success
-                  ? `执行完成 (${execResult.duration} ms)`
-                  : execResult.error ?? '执行失败'}
+                  ? tr('msg.execDone', { ms: execResult.duration })
+                  : execResult.error ?? tr('msg.execFail')}
                 {execResult.output && (
                   <pre
                     style={{

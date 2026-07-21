@@ -19,6 +19,7 @@ import type {
   ScriptResult,
   ScriptValidation,
   ThemeName,
+  LocaleName,
 } from '../shared/types';
 
 const api = {
@@ -29,6 +30,10 @@ const api = {
   theme: {
     load: (): Promise<ThemeName> => ipcRenderer.invoke('theme:load'),
     save: (theme: ThemeName) => ipcRenderer.invoke('theme:save', theme),
+  },
+  locale: {
+    load: (): Promise<LocaleName> => ipcRenderer.invoke('locale:load'),
+    save: (locale: LocaleName) => ipcRenderer.invoke('locale:save', locale),
   },
   sw: {
     connect: (): Promise<{ ok: boolean; status: SWStatus }> =>
