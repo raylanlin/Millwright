@@ -1,17 +1,18 @@
 // src/main/llm/context-window.ts
 //
-// 对话上下文窗口管理。
-// 在发送给 LLM 之前，对消息列表做截断，避免超出模型 token 上限。
+// Conversation context-window management.
+// Before sending to the LLM, truncate the message list so the request stays
+// within the model's token budget.
 //
-// 策略：
-// 1. 始终保留 system prompt
-// 2. 始终保留最后一轮用户消息
-// 3. 从旧到新保留尽可能多的历史消息
-// 4. 超出预算时移除最早的消息对
+// Strategy:
+// 1. Always keep the system prompt.
+// 2. Always keep the last user turn.
+// 3. Keep as much of the history as possible, oldest-to-newest.
+// 4. When the budget is exceeded, drop the oldest message pairs first.
 
 import type { ChatMessage } from '../../shared/types';
 
-/** 不同模型的 token 上限（保守估计，预留输出空间） */
+/** Per-model token budgets (conservative — leaves room for output) */
 const MODEL_TOKEN_BUDGETS: Record<string, number> = {
   'claude-sonnet-4': 150_000,
   'claude-opus-4': 150_000,
@@ -21,7 +22,7 @@ const MODEL_TOKEN_BUDGETS: Record<string, number> = {
   'gpt-4.1': 900_000,
   'deepseek-chat': 50_000,
   'qwen-coder-plus': 100_000,
-  // 扩展覆盖更多模型名称
+  // Extended coverage for more model aliases
   'claude-sonnet': 150_000,
   'deepseek-v3': 50_000,
   'qwen': 100_000,
@@ -29,44 +30,45 @@ const MODEL_TOKEN_BUDGETS: Record<string, number> = {
   'glm': 100_000,
 };
 
-/** 默认 token 预算（如果模型不在上表中） */
+/** Default token budget (used when the model is not listed above) */
 const DEFAULT_BUDGET = 30_000;
 
-/** 预留给模型输出的 token 空间 */
+/** Tokens reserved for the model's output */
 const OUTPUT_RESERVE = 4_096;
 
 /**
- * 粗略估算文本的 token 数。
- * 中文约 1.5 token/字，英文约 0.75 token/word，混合文本取折中。
- * 不追求精确，只需要量级正确以避免超限。
+ * Rough token-count estimator.
+ * Chinese ≈ 1.5 tokens per character, English ≈ 0.75 tokens per word;
+ * mixed text uses a blended approximation.
+ * Intentionally imprecise — only the order of magnitude matters.
  */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
 
-  // 统计中文字符数
+  // Count CJK characters
   const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-  // 统计英文单词数（粗略）
+  // Count English words (rough)
   const englishWords = text.replace(/[\u4e00-\u9fff]/g, '').split(/\s+/).filter(Boolean).length;
-  // 代码字符数（非中文非空白）—— 代码 token 密度高，按 0.5 计
+  // Count code-like characters (non-CJK, non-whitespace) — code is token-dense, weight 0.5
   const codeChars = text.replace(/[\u4e00-\u9fff\s]/g, '').length;
 
   return Math.ceil(chineseChars * 1.5 + englishWords * 0.75 + codeChars * 0.5);
 }
 
 /**
- * 对消息列表做截断，确保不超出 token 预算。
+ * Truncate a message list so it fits within the token budget.
  *
- * @param messages - 完整消息列表（不含 system prompt）
- * @param systemPrompt - system prompt 文本
- * @param model - 模型名称（用于查找 token 预算）
- * @returns 截断后的消息列表
+ * @param messages - the full message list (without the system prompt)
+ * @param systemPrompt - system prompt text
+ * @param model - model name (used to look up the token budget)
+ * @returns the truncated message list
  */
 export function truncateMessages(
   messages: ChatMessage[],
   systemPrompt: string = '',
   model: string = '',
 ): ChatMessage[] {
-  // 查找模型预算
+  // Look up the model's budget
   const budgetKey = Object.keys(MODEL_TOKEN_BUDGETS).find((k) =>
     model.toLowerCase().includes(k.toLowerCase()),
   );
@@ -76,11 +78,11 @@ export function truncateMessages(
   let availableTokens = totalBudget - systemTokens;
 
   if (availableTokens <= 0) {
-    // system prompt 本身就超限了，只保留最后一条消息
+    // The system prompt alone exceeds the budget; keep only the most recent message.
     return messages.slice(-1);
   }
 
-  // 从后往前累加，直到超出预算
+  // Accumulate from the tail backwards until we exceed the budget
   const result: ChatMessage[] = [];
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
@@ -90,7 +92,7 @@ export function truncateMessages(
     result.unshift(msg);
   }
 
-  // 至少保留最后一条用户消息
+  // Always retain the most recent user message as a hard floor
   if (result.length === 0 && messages.length > 0) {
     result.push(messages[messages.length - 1]);
   }

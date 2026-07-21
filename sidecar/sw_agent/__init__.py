@@ -1,1 +1,1 @@
-"""sw_agent —— SolidWorks agent 边车包。"""
+"""sw_agent — SolidWorks agent sidecar package."""

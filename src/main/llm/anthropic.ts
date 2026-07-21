@@ -1,10 +1,12 @@
 // src/main/llm/anthropic.ts
 //
-// Anthropic Messages API 适配器
-// 采用 fetch + 手写 SSE 解析(避免 SDK 的额外重量;两家协议结构差异大,统一用 fetch 更清晰)
+// Anthropic Messages API adapter.
+// Uses raw `fetch` + hand-written SSE parsing (avoids the SDK overhead; the two
+// protocols are structurally different enough that a uniform `fetch`-based path
+// is easier to read).
 //
-// 文档:https://docs.claude.com/en/api/messages
-//      https://docs.claude.com/en/api/messages-streaming
+// Docs: https://docs.claude.com/en/api/messages
+//       https://docs.claude.com/en/api/messages-streaming
 
 import { BaseLLMAdapter } from './adapter';
 import { resolveSystemPrompt } from './prompts';
@@ -59,8 +61,8 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       'Content-Type': 'application/json',
       'anthropic-version': ANTHROPIC_VERSION,
     };
-    // 检测是否走 Bearer auth（如 MiniMax 的 Anthropic 兼容端点）
-    // 判断标准：baseURL 包含 /anthropic 或使用非官方 Anthropic 域名
+    // Detect whether to use Bearer auth (e.g. MiniMax's Anthropic-compatible endpoint).
+    // Heuristic: baseURL contains "/anthropic" OR uses a non-official Anthropic domain.
     const isBearerAuth =
       this.config.baseURL.includes('/anthropic') ||
       (!this.config.baseURL.includes('api.anthropic.com') && !this.config.baseURL.includes('anthropic.com'));
@@ -142,7 +144,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       if (!res.body) throw new Error('Anthropic 流式响应缺少 body');
 
       for await (const ev of parseSSE(res.body)) {
-        // Anthropic 事件种类: message_start, content_block_start, content_block_delta,
+        // Anthropic event types: message_start, content_block_start, content_block_delta,
         //                    content_block_stop, message_delta, message_stop, ping, error
         if (!ev.data || ev.data === '[DONE]') continue;
         let payload: any;
@@ -196,7 +198,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   }
 
   async test(signal?: AbortSignal): Promise<boolean> {
-    // 最小开销:max_tokens=1 + "hi"
+    // Minimal-cost probe: max_tokens=1 + "hi"
     const { signal: s, cleanup } = this.withTimeout(signal);
     try {
       const res = await fetch(`${this.getBaseURL()}/v1/messages`, {

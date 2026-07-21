@@ -1,13 +1,20 @@
 // src/main/scripts/vba-macro-writer.ts
 //
-// 将 VBA 宏代码转换为可通过 cscript.exe 执行的 VBScript (.vbs)。
+// Convert VBA macro code to VBScript (.vbs) executable via cscript.exe.
 //
-// v0.2.1 重写 —— 修复「假成功」问题。
+// TODO: delete — legacy VBS translation path retained only as a fallback when
+// the Python sidecar is unavailable. The P3 agent loop (agent-loop-sidecar.ts)
+// is the primary path; this file should be removed in v0.3.0 once the sidecar
+// is required at install time. See memory/2026-07-21 (session B) and
+// docs/VERIFY-ISSUES.md for context.
 //
-// 旧版的三个致命缺陷:
-// 1. GetObject 失败时 fallback 到 CreateObject("SldWorks.Application"),
-//    会启动一个全新的【隐形】SolidWorks 实例 —— 脚本在看不见的实例里
-//    "成功"执行,用户的可见窗口毫无变化,UI 却显示执行完成。
+// v0.2.1 rewrite — fixes the 'silent success' issue.
+//
+// The legacy version had three fatal flaws:
+// 1. When GetObject failed it fell back to CreateObject("SldWorks.Application"),
+//    which launches a brand-new INVISIBLE SolidWorks instance — the script
+//    'succeeds' in the hidden instance while the user's visible window shows
+//    nothing, yet the UI displays 'execution complete'.
 // 2. 把 Sub main() 展开为顶层代码,导致 Exit Sub 非法,只能替换成
 //    WScript.Quit 0 —— 前置条件不满足(无活动文档/不在草图中)时以
 //    成功码退出且不写结果文件,engine 误判为成功。

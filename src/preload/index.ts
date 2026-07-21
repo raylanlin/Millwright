@@ -1,7 +1,8 @@
 // src/preload/index.ts
 //
-// Preload 脚本:在 contextIsolation 下安全暴露 IPC 接口给渲染进程。
-// 渲染进程通过 window.api.xxx(...) 调用,看起来像普通函数,底层走 IPC。
+// Preload script: safely exposes IPC interfaces to the renderer under `contextIsolation`.
+// The renderer invokes them via `window.api.xxx(...)` — they look like plain function
+// calls but are wired through IPC under the hood.
 
 import { contextBridge, ipcRenderer } from 'electron';
 import { IpcChannels } from '../shared/ipc-channels';

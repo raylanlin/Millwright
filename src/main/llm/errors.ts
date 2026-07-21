@@ -3,14 +3,14 @@
 import type { ErrorCode, LLMErrorInfo } from '../../shared/types';
 
 /**
- * 把 HTTP 状态码映射到内部错误码。
- * 参考 Anthropic 和 OpenAI 的常见错误:
- *  - 401 认证失败
- *  - 403 权限/区域限制(按认证失败处理)
- *  - 408 超时
- *  - 429 限流
- *  - 4xx 其他 → 请求错误
- *  - 5xx    → 服务端错误
+ * Map an HTTP status code to an internal error code.
+ * Based on the common errors returned by Anthropic and OpenAI:
+ *  - 401: authentication failed
+ *  - 403: permission / region restriction (treated as authentication failure)
+ *  - 408: timeout
+ *  - 429: rate limited
+ *  - other 4xx: client-side request error
+ *  - 5xx:    server-side error
  */
 export function httpStatusToCode(status: number): ErrorCode {
   if (status === 401 || status === 403) return 'LLM_AUTH_FAILED';
@@ -21,7 +21,7 @@ export function httpStatusToCode(status: number): ErrorCode {
   return 'LLM_UNKNOWN';
 }
 
-/** Node 网络错误码集合,用于识别连接类错误 */
+/** Set of Node network error codes used to identify connection-class failures */
 const NETWORK_ERROR_CODES = new Set([
   'ENOTFOUND',
   'ECONNREFUSED',
@@ -34,10 +34,10 @@ const NETWORK_ERROR_CODES = new Set([
 ]);
 
 /**
- * 把任意异常转成 LLMErrorInfo。永远不抛。
+ * Convert any thrown value into an `LLMErrorInfo`. Never throws.
  */
 export function toLLMError(err: unknown, context?: string): LLMErrorInfo {
-  // 我们自己抛的 LLMHttpError
+  // Errors we threw ourselves
   if (err instanceof LLMHttpError) {
     return {
       code: httpStatusToCode(err.status),
@@ -58,7 +58,7 @@ export function toLLMError(err: unknown, context?: string): LLMErrorInfo {
     }
   }
 
-  // Node fetch undici 风格的网络错误
+  // Node-fetch / undici style network errors
   if (err && typeof err === 'object') {
     const e = err as any;
     const cause = e.cause;
@@ -84,7 +84,7 @@ export function toLLMError(err: unknown, context?: string): LLMErrorInfo {
 }
 
 /**
- * 包装 HTTP 响应里的错误,方便上层统一处理。
+ * Wrap an HTTP response error so upper layers can handle it uniformly.
  */
 export class LLMHttpError extends Error {
   constructor(
@@ -98,8 +98,8 @@ export class LLMHttpError extends Error {
 }
 
 /**
- * 从 Anthropic/OpenAI 错误 body 里抽出用户友好的消息。
- * 两家都用类似 { error: { message: "..." } } 的结构,或纯文本。
+ * Extract a user-friendly message from an Anthropic/OpenAI error body.
+ * Both providers use a `{ error: { message: "..." } }` shape, or plain text.
  */
 export function extractErrorMessage(body: string, fallback: string): string {
   try {
@@ -107,7 +107,7 @@ export function extractErrorMessage(body: string, fallback: string): string {
     const msg = parsed?.error?.message ?? parsed?.message ?? parsed?.error;
     if (typeof msg === 'string' && msg.length > 0) return msg;
   } catch {
-    // 不是 JSON,返回原文本(截断避免过长)
+    // Not JSON — return the raw text (truncated to avoid bloat)
   }
   const trimmed = body.slice(0, 500);
   return trimmed.length > 0 ? trimmed : fallback;

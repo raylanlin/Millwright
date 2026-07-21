@@ -1,18 +1,20 @@
 // src/main/com/vbs-writer.ts
 //
-// VBScript 文件写入工具 —— 解决中文编码问题。
+// VBScript file writer — solves the Chinese encoding problem.
 //
-// cscript.exe 在中文 Windows 上需要 UTF-16LE + BOM 才能正确读取
-// 包含中文字符的 VBScript 文件。直接写 UTF-8 会导致：
-//    Microsoft VBScript 编译错误: 未找到字符串常量
+// On a Chinese-locale Windows, cscript.exe requires UTF-16LE + BOM to read VBScript
+// files that contain CJK characters. Writing plain UTF-8 results in:
 //
-// 方案：用 UTF-16LE + BOM 写文件，这是 Windows Script Host 原生支持的格式。
+//    Microsoft VBScript compilation error: Statement expected / Expected literal constant
+//
+// Solution: write the file as UTF-16LE + BOM — the format natively supported by
+// Windows Script Host.
 
 import * as fs from 'fs';
 
 /**
- * 将 VBScript 代码写入临时文件，返回文件路径。
- * 自动使用 UTF-16LE + BOM 编码，兼容中文注释和字符串。
+ * Write VBScript code to a temporary file and return the file path.
+ * Automatically uses UTF-16LE + BOM encoding so Chinese comments and strings work correctly.
  */
 export function writeVBSFile(scriptCode: string, prefix: string = 'sw_vbs'): string {
   const ts = Date.now();
@@ -27,11 +29,11 @@ export function writeVBSFile(scriptCode: string, prefix: string = 'sw_vbs'): str
 }
 
 /**
- * 将 VBScript 代码写入指定路径。
- * 自动使用 UTF-16LE + BOM 编码。
+ * Write VBScript code to a specific path.
+ * Automatically uses UTF-16LE + BOM encoding.
  */
 export function writeVBSFileTo(scriptPath: string, scriptCode: string): string {
-  // UTF-16LE BOM + 内容
+  // UTF-16LE BOM + body
   const buf = Buffer.concat([
     Buffer.from([0xFF, 0xFE]), // BOM
     Buffer.from(scriptCode, 'ucs2'),
@@ -41,7 +43,7 @@ export function writeVBSFileTo(scriptPath: string, scriptCode: string): string {
 }
 
 /**
- * 安全删除临时文件。
+ * Safely delete a temporary file (silently ignores errors).
  */
 export function safeUnlink(p: string): void {
   try { fs.unlinkSync(p); } catch { /* ignore */ }

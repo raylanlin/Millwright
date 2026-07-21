@@ -1,8 +1,12 @@
-"""sw_agent.tools.feature —— 特征：拉伸/切除/旋转/圆角/倒角/抽壳/孔/阵列/镜像 + 特征树操作。
+"""sw_agent.tools.feature — features: extrude/cut/revolve/fillet/chamfer/shell/hole/pattern/mirror + feature tree ops.
 
-多参特征 API（拉伸/切除/旋转/阵列/镜像）用命名调用比 VBS 按位安全，但参数位仍可能跨版本
-不同，逐个标了 # VERIFY —— 建议在目标 SolidWorks 版本用宏录制器核对一次。
-chamfer 已修正原 VBS 版本的“距离塞进角度位、参数少两个”的 bug。
+Multi-argument feature APIs (extrude/cut/revolve/pattern/mirror) are safer
+in named-call Python than in positional VBS, but the slot positions can
+still shift across SolidWorks versions. Each one is marked with a
+# VERIFY comment so you can re-check it against the target version via
+the macro recorder.
+chamfer has been fixed to correct the original VBS bug where the distance
+was stuffed into the angle slot and two parameters were missing.
 """
 from __future__ import annotations
 
@@ -26,86 +30,86 @@ def _find_feature(ctx: Context, name: str):
 
 
 @tool(
-    "extrude", "把当前草图拉伸为实体",
+    "extrude", "Extrude the current sketch into a solid",
     params={
-        "depth": {"type": "number", "desc": "拉伸深度(mm)"},
-        "both_dir": {"type": "boolean", "desc": "双向等距", "default": False},
+        "depth": {"type": "number", "desc": "Extrusion depth (mm)"},
+        "both_dir": {"type": "boolean", "desc": "Equal-distance both-direction extrusion", "default": False},
     },
     category="feature",
 )
 def extrude(ctx: Context, depth: float, both_dir: bool = False):
     _exit_sketch_if_open(ctx)
     d = units.mm(depth)
-    # VERIFY: FeatureExtrusion3 参数位（24 参）建议宏录制器核对
+    # VERIFY: FeatureExtrusion3 parameter slots (24 args) — verify against macro recorder for the target version
     feat = ctx.feat_mgr.FeatureExtrusion3(
         True, False, bool(both_dir), 0, 0, d, d if both_dir else 0,
         False, False, False, False, 0, 0, False, False, False, False,
         True, True, True, 0, 0, False,
     )
     if feat is None:
-        raise SWError("拉伸失败：请确认存在闭合草图。")
+        raise SWError("extrude failed: make sure there is a closed sketch.")
     return {"feature": feat.Name, "depth_mm": depth}
 
 
 @tool(
-    "cut_extrude", "以当前草图切除料",
+    "cut_extrude", "Cut material using the current sketch",
     params={
-        "depth": {"type": "number", "desc": "切除深度(mm)"},
-        "through_all": {"type": "boolean", "desc": "完全贯穿", "default": False},
+        "depth": {"type": "number", "desc": "Cut depth (mm)"},
+        "through_all": {"type": "boolean", "desc": "Cut through all", "default": False},
     },
     category="feature", destructive=True,
 )
 def cut_extrude(ctx: Context, depth: float, through_all: bool = False):
     _exit_sketch_if_open(ctx)
     d = units.mm(depth)
-    # VERIFY: FeatureCut4 参数位（25 参）
+    # VERIFY: FeatureCut4 parameter slots (25 args)
     feat = ctx.feat_mgr.FeatureCut4(
         True, False, False, 1 if through_all else 0, 0, d, 0,
         False, False, False, False, 0, 0, False, False, False, False,
         True, True, True, True, 0, 0, False, False,
     )
     if feat is None:
-        raise SWError("切除失败：请确认草图与实体相交。")
+        raise SWError("cut failed: make sure the sketch intersects a solid body.")
     return {"feature": feat.Name, "depth_mm": depth, "through_all": through_all}
 
 
 @tool(
-    "revolve", "旋转特征（需草图含轮廓 + 一条中心线作轴）",
-    params={"angle": {"type": "number", "desc": "旋转角度(度)", "default": 360}},
+    "revolve", "Revolve feature (sketch must contain a profile plus a centerline as the axis)",
+    params={"angle": {"type": "number", "desc": "Revolve angle (degrees)", "default": 360}},
     category="feature",
 )
 def revolve(ctx: Context, angle: float = 360):
     _exit_sketch_if_open(ctx)
     a = units.deg(angle)
-    # VERIFY: FeatureRevolve2 参数位
+    # VERIFY: FeatureRevolve2 parameter slots
     feat = ctx.feat_mgr.FeatureRevolve2(
         True, True, False, False, False, False, 0, 0, a, 0,
         False, False, 0, 0, 0, 0, 0, True, True, True,
     )
     if feat is None:
-        raise SWError("旋转失败：请确认有闭合轮廓和一条中心线。")
+        raise SWError("revolve failed: make sure there is a closed profile and a centerline.")
     return {"feature": feat.Name, "angle_deg": angle}
 
 
 @tool(
-    "fillet_edges", "对当前选中的边倒圆角（需先在 SW 里选边）",
-    params={"radius": {"type": "number", "desc": "圆角半径(mm)"}},
+    "fillet_edges", "Fillet the currently selected edges (select edges in SolidWorks first)",
+    params={"radius": {"type": "number", "desc": "Fillet radius (mm)"}},
     category="feature",
 )
 def fillet_edges(ctx: Context, radius: float):
     if ctx.selected_count() < 1:
-        raise SWError("请先选中要倒圆角的边。")
+        raise SWError("please select edges to fillet first.")
     r = units.mm(radius)
-    # VERIFY: FeatureFillet3 参数位（不同版本略异）
+    # VERIFY: FeatureFillet3 parameter slots (slight differences across versions)
     feat = ctx.feat_mgr.FeatureFillet3(195, r, 0, 0, 0, 0, 0)
     if feat is None:
-        raise SWError("倒圆角失败：请确认所选边有效。")
+        raise SWError("fillet failed: make sure the selected edges are valid.")
     return {"feature": feat.Name, "radius_mm": radius}
 
 
 @tool(
-    "fillet_all", "把模型里所有圆角特征改成统一半径（可靠：走 GetDefinition/ModifyDefinition）",
-    params={"radius": {"type": "number", "desc": "统一半径(mm)"}},
+    "fillet_all", "Rescale every existing fillet feature to a uniform radius (reliable: uses GetDefinition/ModifyDefinition)",
+    params={"radius": {"type": "number", "desc": "Uniform radius (mm)"}},
     category="feature",
 )
 def fillet_all(ctx: Context, radius: float):
@@ -126,105 +130,106 @@ def fillet_all(ctx: Context, radius: float):
 
 
 @tool(
-    "chamfer", "对当前选中的边倒角（等距）——已修正旧版参数错位 bug（需先选边）",
-    params={"distance": {"type": "number", "desc": "倒角距离(mm)"}},
+    "chamfer", "Chamfer the selected edges (equal-distance) — fixed from the old positional-arg bug; select edges first",
+    params={"distance": {"type": "number", "desc": "Chamfer distance (mm)"}},
     category="feature",
 )
 def chamfer(ctx: Context, distance: float):
     if ctx.selected_count() < 1:
-        raise SWError("请先选中要倒角的边。")
+        raise SWError("please select edges to chamfer first.")
     d = units.mm(distance)
-    # 修正：正确的 8 参签名 (Type, PropagationFlag, Width, Angle, OtherDist, Vc1, Vc2, Vc3)。
-    # 等距倒角：Width=距离, Angle=0。旧 VBS 版本把距离塞进了 Angle 位且只给 6 参 → 错。
-    # VERIFY: Type 枚举(此处 1=距离-距离)建议宏录制器核对目标版本。
+    # Corrected: the proper 8-arg signature is (Type, PropagationFlag, Width, Angle, OtherDist, Vc1, Vc2, Vc3).
+    # For an equal-distance chamfer: Width=distance, Angle=0. The old VBS version stuffed distance into the
+    # angle slot and only supplied 6 args — wrong.
+    # VERIFY: Type enum (here 1 = distance-distance) — verify against macro recorder for the target version.
     feat = ctx.feat_mgr.InsertFeatureChamfer(1, 1, d, 0, 0, 0, 0, 0)
     if feat is None:
-        raise SWError("倒角失败：请确认所选边有效。")
+        raise SWError("chamfer failed: make sure the selected edges are valid.")
     return {"feature": feat.Name, "distance_mm": distance}
 
 
 @tool(
-    "shell", "抽壳（挖空实体，保留壁厚）——若要开口需先选中要移除的面",
+    "shell", "Shell the body (hollow it out while keeping a wall thickness) — pre-select faces to remove them as openings",
     params={
-        "thickness": {"type": "number", "desc": "壁厚(mm)"},
-        "outward": {"type": "boolean", "desc": "向外加厚", "default": False},
+        "thickness": {"type": "number", "desc": "Wall thickness (mm)"},
+        "outward": {"type": "boolean", "desc": "Add thickness outward", "default": False},
     },
     category="feature", destructive=True,
 )
 def shell(ctx: Context, thickness: float, outward: bool = False):
     t = units.mm(thickness)
-    # VERIFY: InsertShell 归属/签名（多为 IModelDoc2::InsertShell(thickness, outward)）
+    # VERIFY: InsertShell owner / signature (commonly IModelDoc2::InsertShell(thickness, outward))
     ok = ctx.model.InsertShell(t, bool(outward))
     if not ok:
-        raise SWError("抽壳失败。")
+        raise SWError("shell failed.")
     return {"shell_thickness_mm": thickness, "outward": outward}
 
 
 @tool(
-    "linear_pattern", "线性阵列已选中的特征（需先选特征 + 方向边/轴）",
+    "linear_pattern", "Linearly pattern the selected features (pre-select the features + a direction edge/axis)",
     params={
-        "count": {"type": "number", "desc": "总数量（含原始）"},
-        "spacing": {"type": "number", "desc": "间距(mm)"},
+        "count": {"type": "number", "desc": "Total count (including the original)"},
+        "spacing": {"type": "number", "desc": "Spacing (mm)"},
     },
     category="feature",
 )
 def linear_pattern(ctx: Context, count: int, spacing: float):
     if ctx.selected_count() < 2:
-        raise SWError("请先选中要阵列的特征 + 方向参考（边/轴）。")
-    # VERIFY: FeatureLinearPattern5 参数位
+        raise SWError("please select the features to pattern plus the direction reference (edge/axis) first.")
+    # VERIFY: FeatureLinearPattern5 parameter slots
     feat = ctx.feat_mgr.FeatureLinearPattern5(
         int(count), units.mm(spacing), 1, 0.01, False, False, "NULL", "NULL",
         False, False, False, False, False, False, True, True, False, False, 0, 0,
     )
     if feat is None:
-        raise SWError("线性阵列失败。")
+        raise SWError("linear pattern failed.")
     return {"feature": feat.Name, "count": int(count), "spacing_mm": spacing}
 
 
 @tool(
-    "circular_pattern", "圆周阵列已选中的特征（需先选特征 + 一条轴）",
+    "circular_pattern", "Circular pattern the selected features (pre-select the features + one axis)",
     params={
-        "count": {"type": "number", "desc": "总数量（含原始）"},
-        "angle": {"type": "number", "desc": "总分布角度(度)", "default": 360},
-        "equal_spacing": {"type": "boolean", "desc": "等间距铺满", "default": True},
+        "count": {"type": "number", "desc": "Total count (including the original)"},
+        "angle": {"type": "number", "desc": "Total sweep angle (degrees)", "default": 360},
+        "equal_spacing": {"type": "boolean", "desc": "Distribute evenly across the sweep", "default": True},
     },
     category="feature",
 )
 def circular_pattern(ctx: Context, count: int, angle: float = 360, equal_spacing: bool = True):
     if ctx.selected_count() < 2:
-        raise SWError("请先选中要阵列的特征 + 一条基准轴。")
-    # VERIFY: FeatureCircularPattern5 参数位
+        raise SWError("please select the features to pattern plus a reference axis first.")
+    # VERIFY: FeatureCircularPattern5 parameter slots
     feat = ctx.feat_mgr.FeatureCircularPattern5(
         int(count), units.deg(angle), bool(equal_spacing), "NULL",
         False, True, False, False, False, False,
     )
     if feat is None:
-        raise SWError("圆周阵列失败。")
+        raise SWError("circular pattern failed.")
     return {"feature": feat.Name, "count": int(count), "angle_deg": angle}
 
 
 @tool(
-    "mirror_feature", "以基准面镜像已选中的特征（需先选特征）",
-    params={"plane": {"type": "string", "enum": ["front", "top", "right"], "desc": "对称面"}},
+    "mirror_feature", "Mirror the selected features across a reference plane (pre-select the features)",
+    params={"plane": {"type": "string", "enum": ["front", "top", "right"], "desc": "Symmetry plane"}},
     category="feature",
 )
 def mirror_feature(ctx: Context, plane: str):
     if ctx.selected_count() < 1:
-        raise SWError("请先选中要镜像的特征。")
-    ctx.select_plane(plane, append=True, mark=2)  # 追加镜像面
-    # VERIFY: InsertMirrorFeature2 参数
+        raise SWError("please select features to mirror first.")
+    ctx.select_plane(plane, append=True, mark=2)  # append the mirror plane to the selection
+    # VERIFY: InsertMirrorFeature2 parameters
     feat = ctx.feat_mgr.InsertMirrorFeature2(False, False, False, False, 0)
     if feat is None:
-        raise SWError("镜像失败。")
+        raise SWError("mirror failed.")
     return {"feature": feat.Name, "plane": plane}
 
 
 @tool(
-    "modify_dimension", "修改某特征的尺寸参数",
+    "modify_dimension", "Modify a feature's dimension parameter",
     params={
-        "feature": {"type": "string", "desc": "特征名，如 Boss-Extrude1"},
-        "dimension": {"type": "string", "desc": "尺寸名，如 D1"},
-        "value": {"type": "number", "desc": "新值(mm)"},
+        "feature": {"type": "string", "desc": "Feature name, e.g. Boss-Extrude1"},
+        "dimension": {"type": "string", "desc": "Dimension name, e.g. D1"},
+        "value": {"type": "number", "desc": "New value (mm)"},
     },
     category="feature",
 )
@@ -232,24 +237,24 @@ def modify_dimension(ctx: Context, feature: str, dimension: str, value: float):
     full = f"{dimension}@{feature}"
     dim = ctx.model.Parameter(full)
     if dim is None:
-        raise SWError(f"找不到尺寸：{full}")
-    dim.SetSystemValue3(units.mm(value), 1, None)  # 1 = 所有配置
+        raise SWError(f"dimension not found: {full}")
+    dim.SetSystemValue3(units.mm(value), 1, None)  # 1 = apply to all configurations
     ctx.rebuild()
     return {"dimension": full, "value_mm": value}
 
 
-# ---- 特征树操作 ----
+# ---- Feature tree operations ----
 
 def _select_feature(ctx: Context, name: str):
     feat = _find_feature(ctx, name)
     if feat is None:
-        raise SWError(f"找不到特征：{name}")
+        raise SWError(f"feature not found: {name}")
     feat.Select2(False, -1)
     return feat
 
 
-@tool("suppress_feature", "压缩指定特征",
-      params={"name": {"type": "string", "desc": "特征名"}},
+@tool("suppress_feature", "Suppress the specified feature",
+      params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature")
 def suppress_feature(ctx: Context, name: str):
     _select_feature(ctx, name)
@@ -257,8 +262,8 @@ def suppress_feature(ctx: Context, name: str):
     return {"suppressed": name}
 
 
-@tool("unsuppress_feature", "解除压缩指定特征",
-      params={"name": {"type": "string", "desc": "特征名"}},
+@tool("unsuppress_feature", "Unsuppress the specified feature",
+      params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature")
 def unsuppress_feature(ctx: Context, name: str):
     _select_feature(ctx, name)
@@ -266,8 +271,8 @@ def unsuppress_feature(ctx: Context, name: str):
     return {"unsuppressed": name}
 
 
-@tool("delete_feature", "删除指定特征",
-      params={"name": {"type": "string", "desc": "特征名"}},
+@tool("delete_feature", "Delete the specified feature",
+      params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature", destructive=True)
 def delete_feature(ctx: Context, name: str):
     _select_feature(ctx, name)
@@ -275,12 +280,12 @@ def delete_feature(ctx: Context, name: str):
     return {"deleted": name}
 
 
-@tool("rename_feature", "重命名特征",
-      params={"old": {"type": "string", "desc": "原名"}, "new": {"type": "string", "desc": "新名"}},
+@tool("rename_feature", "Rename a feature",
+      params={"old": {"type": "string", "desc": "Old name"}, "new": {"type": "string", "desc": "New name"}},
       category="feature")
 def rename_feature(ctx: Context, old: str, new: str):
     feat = _find_feature(ctx, old)
     if feat is None:
-        raise SWError(f"找不到特征：{old}")
+        raise SWError(f"feature not found: {old}")
     feat.Name = new
     return {"renamed": {"from": old, "to": new}}

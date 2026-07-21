@@ -6,8 +6,9 @@ import { AnthropicAdapter } from './anthropic';
 import { OpenAIAdapter } from './openai';
 
 /**
- * 根据配置创建适配器。
- * 这里刻意不缓存 —— 每次 config 可能变,创建成本极低(就是存一下 config 对象)。
+ * Create an adapter from configuration.
+ * Intentionally NOT cached — config can change between calls, and construction
+ * is cheap (it just stores the config object).
  */
 export function createAdapter(config: LLMConfig): LLMAdapter {
   switch (config.protocol) {
@@ -16,31 +17,31 @@ export function createAdapter(config: LLMConfig): LLMAdapter {
     case 'openai':
       return new OpenAIAdapter(config);
     default:
-      // 类型系统应该能挡住,但保险起见运行期也报错
-      throw new Error(`不支持的协议: ${(config as any).protocol}`);
+      // The type system should make this unreachable, but guard at runtime too.
+      throw new Error(`Unsupported protocol: ${(config as any).protocol}`);
   }
 }
 
-/** 校验配置是否完整到可发请求的程度 */
+/** Validate that a config has everything needed to send a request */
 export function validateConfig(config: Partial<LLMConfig>): {
   valid: boolean;
   issues: string[];
 } {
   const issues: string[] = [];
-  if (!config.protocol) issues.push('缺少协议 (protocol)');
-  if (!config.baseURL) issues.push('缺少 Base URL');
-  if (!config.apiKey) issues.push('缺少 API Key');
-  if (!config.model) issues.push('缺少模型名');
+  if (!config.protocol) issues.push('Missing `protocol`');
+  if (!config.baseURL) issues.push('Missing `baseURL`');
+  if (!config.apiKey) issues.push('Missing `apiKey`');
+  if (!config.model) issues.push('Missing `model`');
 
   if (config.baseURL) {
     try {
-      // 允许 http:// 和 https:// (Ollama 本地是 http)
+      // Both `http://` and `https://` are allowed (Ollama on localhost uses `http://`).
       const u = new URL(config.baseURL);
       if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-        issues.push(`Base URL 协议不支持: ${u.protocol}`);
+        issues.push(`Unsupported base URL protocol: ${u.protocol}`);
       }
     } catch {
-      issues.push('Base URL 格式无效');
+      issues.push('`baseURL` is not a valid URL');
     }
   }
 

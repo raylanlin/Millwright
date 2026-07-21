@@ -8,24 +8,24 @@ import type {
 } from '../../shared/types';
 
 /**
- * LLM 适配器接口 —— Anthropic 和 OpenAI 兼容协议都实现它。
+ * LLM adapter interface — implemented by both the Anthropic and OpenAI-compatible protocols.
  *
- * 设计约定:
- * - chat() 一次性返回完整响应,内部不做流式(即使服务端支持也合并)
- * - chatStream() 流式返回,通过 AsyncIterable 逐块 yield 事件
- * - 所有网络/解析错误都通过抛出 LLMErrorInfo 结构(不抛原始 Error)
- * - 取消通过 AbortSignal 实现
+ * Design conventions:
+ * - `chat()` returns the full response in one shot; no internal streaming (even when the server supports it).
+ * - `chatStream()` streams events back via an `AsyncIterable`.
+ * - All network/parsing errors are surfaced by throwing an `LLMErrorInfo` (never a raw `Error`).
+ * - Cancellation is implemented via `AbortSignal`.
  */
 export interface LLMAdapter {
   /**
-   * 一次性聊天,等完整响应后返回。
+   * One-shot chat; waits for the complete response before returning.
    * @throws LLMErrorInfo
    */
   chat(messages: ChatMessage[], signal?: AbortSignal): Promise<LLMResponse>;
 
   /**
-   * 流式聊天,返回事件异步迭代器。
-   * 消费方负责处理 delta/done/error 事件。
+   * Streaming chat; returns an async iterator of events.
+   * Consumers are responsible for handling `delta` / `done` / `error` events.
    */
   chatStream(
     messages: ChatMessage[],
@@ -34,15 +34,17 @@ export interface LLMAdapter {
   ): AsyncIterable<LLMStreamEvent>;
 
   /**
-   * 轻量测试连接 —— 发一个最短的 "ping" 请求,验证 URL/Key/模型是否可用。
-   * 成功返回 true,失败抛 LLMErrorInfo。
+   * Lightweight connectivity test — sends a minimal "ping" request to verify
+   * that the URL/key/model are usable.
+   * Returns `true` on success; throws an `LLMErrorInfo` on failure.
    */
   test(signal?: AbortSignal): Promise<boolean>;
 }
 
 /**
- * 适配器的基类,提供两端共用的工具方法。
- * 各协议实现只需要重写 chat/chatStream/test,可以复用 getBaseURL/getHeaders/doFetch 等。
+ * Base class for adapters — provides shared utility methods.
+ * Concrete protocol implementations only need to override `chat` / `chatStream` / `test`;
+ * helpers like `getBaseURL`, `getHeaders`, and `doFetch` can be reused as-is.
  */
 export abstract class BaseLLMAdapter implements LLMAdapter {
   constructor(protected readonly config: LLMConfig) {}
@@ -57,12 +59,12 @@ export abstract class BaseLLMAdapter implements LLMAdapter {
 
   abstract test(signal?: AbortSignal): Promise<boolean>;
 
-  /** baseURL 去掉尾部斜杠,拼接路径时更稳定 */
+  /** Strip trailing slashes from `baseURL` for stable path concatenation */
   protected getBaseURL(): string {
     return this.config.baseURL.replace(/\/+$/, '');
   }
 
-  /** 组合 AbortSignal + 超时 */
+  /** Combine an external `AbortSignal` with an internal timeout */
   protected withTimeout(external?: AbortSignal): {
     signal: AbortSignal;
     cleanup: () => void;
@@ -87,8 +89,9 @@ export abstract class BaseLLMAdapter implements LLMAdapter {
   }
 
   /**
-   * 把消息数组中 role=system 的内容过滤出来合并,其余留给 messages 字段。
-   * Anthropic 用 system 参数,OpenAI 用首条 system 消息。
+   * Filter out all `role: "system"` messages from the array, concatenate them,
+   * and leave the rest for the `messages` field.
+   * Anthropic uses a top-level `system` parameter; OpenAI uses the first system message.
    */
   protected splitSystem(messages: ChatMessage[]): {
     system: string;

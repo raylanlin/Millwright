@@ -1,7 +1,8 @@
-"""sw_agent.tools.view —— 视图控制 + 截屏（视觉理解的基础）。
+"""sw_agent.tools.view — view control + screenshot (the basis of visual understanding).
 
-让 agent 能像人一样：转到某个方位 / 旋转 / 缩放 / 切换显示模式，然后截屏观察当前状态。
-这些是视觉分析闭环的“手”和“眼”。
+Lets the agent act like a human operator: orient to a standard view, rotate,
+zoom, switch display modes, then capture a screenshot of the current state.
+These are the "hands" and "eyes" of the visual analysis loop.
 """
 from __future__ import annotations
 import os
@@ -16,13 +17,13 @@ _VIEWS = {
     "front": 1, "back": 2, "left": 3, "right": 4, "top": 5, "bottom": 6,
     "isometric": 7, "trimetric": 8, "dimetric": 9,
 }
-_VIEW_ALIAS = {"iso": "isometric", "前视": "front", "等轴测": "isometric", "上视": "top"}
+_VIEW_ALIAS = {"iso": "isometric", "front": "front", "isometric": "isometric", "top": "top"}
 
 
 @tool(
     "set_view_orientation",
-    "把视图切到标准方位（前/后/左/右/上/下/等轴测），便于观察或截屏。",
-    params={"orientation": {"type": "string", "desc": "方位",
+    "Switch the view to a standard orientation (front/back/left/right/top/bottom/isometric) for inspection or screenshot.",
+    params={"orientation": {"type": "string", "desc": "Orientation",
                            "enum": ["front", "back", "left", "right", "top", "bottom",
                                     "isometric", "trimetric", "dimetric"]}},
     category="view",
@@ -30,9 +31,9 @@ _VIEW_ALIAS = {"iso": "isometric", "前视": "front", "等轴测": "isometric", 
 def set_view_orientation(ctx: Context, orientation: str):
     key = _VIEW_ALIAS.get(orientation, orientation).lower()
     if key not in _VIEWS:
-        raise SWError(f"未知方位：{orientation}")
+        raise SWError(f"unknown orientation: {orientation}")
     model = ctx.model
-    # ShowNamedView2(名称, ID)；用标准 ID 最稳
+    # ShowNamedView2(name, ID); using the standard IDs is the most stable approach
     model.ShowNamedView2("", _VIEWS[key])
     model.ViewZoomtofit2()
     return {"orientation": key}
@@ -40,17 +41,17 @@ def set_view_orientation(ctx: Context, orientation: str):
 
 @tool(
     "rotate_view",
-    "以当前视角为基准增量旋转视图（度）。用于从别的角度观察零件。",
+    "Incrementally rotate the view (in degrees) from the current viewpoint. Useful for inspecting the part from another angle.",
     params={
-        "yaw_deg": {"type": "number", "desc": "绕竖直轴左右旋转(度)", "default": 30},
-        "pitch_deg": {"type": "number", "desc": "绕水平轴上下旋转(度)", "default": 0},
+        "yaw_deg": {"type": "number", "desc": "Yaw around the vertical axis (degrees)", "default": 30},
+        "pitch_deg": {"type": "number", "desc": "Pitch around the horizontal axis (degrees)", "default": 0},
     },
     category="view",
 )
 def rotate_view(ctx: Context, yaw_deg: float = 30, pitch_deg: float = 0):
     view = ctx.model.ActiveView
     if view is None:
-        raise SWError("没有活动视图")
+        raise SWError("no active view")
     # IModelView.RotateAboutCenter(longitudeRad, latitudeRad)
     view.RotateAboutCenter(units.deg(yaw_deg), units.deg(pitch_deg))
     return {"yaw_deg": yaw_deg, "pitch_deg": pitch_deg}
@@ -58,7 +59,7 @@ def rotate_view(ctx: Context, yaw_deg: float = 30, pitch_deg: float = 0):
 
 @tool(
     "zoom_to_fit",
-    "缩放使整个模型充满视图。",
+    "Zoom so that the entire model fills the view.",
     params={},
     category="view",
 )
@@ -77,7 +78,7 @@ _DISPLAY = {
 
 
 def _edges(model, on: bool):
-    # 上色模式下是否显示边线：swViewDisplayMode_e 通过 ActiveView 可调；此处尽量不报错
+    # Whether to show edges in shaded mode: swViewDisplayMode_e can be tweaked via ActiveView; swallow errors here
     try:
         model.ActiveView.DisplayMode = 3 if on else 2  # 3=ShadedWithEdges, 2=Shaded
     except Exception:  # noqa: BLE001
@@ -86,30 +87,30 @@ def _edges(model, on: bool):
 
 @tool(
     "set_display_mode",
-    "切换显示模式：带边上色/上色/线框/消隐/可见隐藏线。",
+    "Switch the display mode: shaded with edges / shaded / wireframe / hidden lines removed / hidden lines visible.",
     params={"mode": {"type": "string", "enum": list(_DISPLAY.keys()),
-                     "desc": "显示模式", "default": "shaded_edges"}},
+                     "desc": "Display mode", "default": "shaded_edges"}},
     category="view",
 )
 def set_display_mode(ctx: Context, mode: str = "shaded_edges"):
     fn = _DISPLAY.get(mode)
     if fn is None:
-        raise SWError(f"未知显示模式：{mode}")
+        raise SWError(f"unknown display mode: {mode}")
     fn(ctx.model)
     return {"mode": mode}
 
 
 @tool(
     "capture_view",
-    "截取当前 SolidWorks 视图为图像并返回路径，供你（多模态）做视觉分析。"
-    "配合 set_view_orientation / rotate_view 可从多个角度观察零件。",
+    "Capture the current SolidWorks view as an image and return the path for multimodal visual analysis."
+    "Combine with set_view_orientation / rotate_view to inspect the part from multiple angles.",
     params={
-        "width": {"type": "number", "desc": "像素宽", "default": 1280},
-        "height": {"type": "number", "desc": "像素高", "default": 960},
-        "fit": {"type": "boolean", "desc": "截屏前先缩放充满", "default": True},
+        "width": {"type": "number", "desc": "Width in pixels", "default": 1280},
+        "height": {"type": "number", "desc": "Height in pixels", "default": 960},
+        "fit": {"type": "boolean", "desc": "Zoom to fit before capturing", "default": True},
     },
     category="vision",
-    internal=True,  # 机制类：由 Node 的 analyze_view 内部调用，不直接暴露给主模型
+    internal=True,  # Plumbing tool: invoked internally by Node's analyze_view, not exposed to the main model
 )
 def capture_view(ctx: Context, width: int = 1280, height: int = 960, fit: bool = True):
     model = ctx.model
@@ -118,8 +119,8 @@ def capture_view(ctx: Context, width: int = 1280, height: int = 960, fit: bool =
     bmp = os.path.join(tempfile.gettempdir(), f"swcp_view_{os.getpid()}.bmp")
     ok = model.SaveBMP(bmp, int(width), int(height))
     if not ok or not os.path.exists(bmp):
-        raise SWError("截屏失败：SaveBMP 未生成文件。")
-    # 尽量转 PNG（体积更小、多模态更通用）；无 PIL 则回退 BMP，Node 侧用 nativeImage 兜底
+        raise SWError("screenshot failed: SaveBMP did not produce a file.")
+    # Prefer PNG (smaller, more universal for multimodal); fall back to BMP if PIL is unavailable — Node side uses nativeImage as a fallback
     out, fmt = bmp, "bmp"
     try:
         from PIL import Image  # noqa

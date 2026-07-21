@@ -5,7 +5,7 @@ import { AUTOMATIONS } from './automations-data';
 
 interface Props {
   t: ThemeTokens;
-  /** 用户点击某个模板后的处理 —— 通常上层会把 prompt 填入输入框并切回 chat */
+  /** Handler invoked when the user clicks a template — the parent usually fills the prompt into the input box and switches back to the chat tab */
   onPick: (prompt: string, label: string) => void;
 }
 

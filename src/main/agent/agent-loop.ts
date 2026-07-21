@@ -1,9 +1,9 @@
 // src/main/agent/agent-loop.ts
-// P1.1 优化版：修复审查报告中的 HIGH/MED 问题。
-//   HIGH-1 备份：runAgentLoop 开始时对活动文档备份一次，路径经 onEvent 通知 UI
-//   MED-2  截断：每轮 chatWithTools 前截断 history；单条工具结果限长
-//   MED-3  确认门：工具带 requiresConfirmation 时经 onEvent 暂停等待批准
-// 覆盖仓库同名文件。依赖：backupActiveDocument(bridge) 与 truncateMessages 已存在。
+// P1.1 polish: addresses the HIGH/MED findings from the code review.
+//   HIGH-1 Backup: back up the active document once at the start of runAgentLoop and surface the path via onEvent to the UI.
+//   MED-2  Truncation: truncate history before each round's chatWithTools call; cap individual tool result length.
+//   MED-3  Confirmation gate: tools marked requiresConfirmation pause via onEvent until the user approves.
+// Overrides the repo file of the same name. Dependencies: backupActiveDocument(bridge) and truncateMessages already exist.
 
 import type { OpenAIAdapter } from '../llm/openai';
 import type { ChatMessage, ToolCall } from '../../shared/types';
@@ -26,16 +26,16 @@ export interface AgentOptions {
   maxRounds?: number;
   signal?: AbortSignal;
   onEvent?: (ev: AgentEvent) => void;
-  /** 执行前备份：传入现有 backup.ts 的封装，失败不阻塞但会告知 UI */
+  /** Pre-execution backup: a wrapper around the existing `backup.ts`; failures do not block but are surfaced to the UI */
   backup?: () => Promise<string | null>;
-  /** MED-3：需人工确认的工具，返回 Promise<boolean>（UI 批准/拒绝）。不传则直接执行 */
+  /** MED-3: tools that require human confirmation; returns Promise<boolean> (UI approve/reject). If omitted, the tool is executed directly */
   confirmTool?: (call: ToolCall) => Promise<boolean>;
-  /** 需要确认的工具名单（默认含破坏性操作） */
+  /** Whitelist of tools that need confirmation (defaults to destructive operations) */
   confirmList?: Set<string>;
 }
 
 const DEFAULT_CONFIRM = new Set(['cut_extrude', 'create_fillet', 'modify_dimensions', 'delete_feature']);
-const TOOL_RESULT_MAX_CHARS = 4000; // MED-2：单条工具结果限长，防上下文爆炸
+const TOOL_RESULT_MAX_CHARS = 4000; // MED-2: cap each tool result's length to prevent context explosion
 
 function clip(s: string): string {
   return s.length > TOOL_RESULT_MAX_CHARS
@@ -69,7 +69,7 @@ export async function runAgentLoop(
   let history: ChatMessage[] = [...messages];
   let finalText = '';
 
-  // HIGH-1：会话级备份（整轮回滚点）。失败不阻塞，但明确告知 UI。
+  // HIGH-1: session-level backup (rollback point for the whole loop). Failures do not block, but are surfaced to the UI.
   let backupPath: string | null = null;
   if (opts.backup) {
     try { backupPath = await opts.backup(); } catch { backupPath = null; }
@@ -79,7 +79,7 @@ export async function runAgentLoop(
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
 
-    // MED-2：每轮发送前截断（保 system + 最近往返）
+    // MED-2: truncate before each round (keep system prompt + most recent exchanges)
     history = truncateMessages(history);
 
     const resp = await adapter.chatWithTools(history, opts.signal);
@@ -98,7 +98,7 @@ export async function runAgentLoop(
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
 
-      // MED-3：破坏性工具确认门
+      // MED-3: confirmation gate for destructive tools
       let resultText: string;
       if (confirmList.has(call.name) && opts.confirmTool) {
         opts.onEvent?.({ type: 'confirm_request', toolCall: call });

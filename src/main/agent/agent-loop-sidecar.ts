@@ -1,12 +1,14 @@
 // src/main/agent/agent-loop-sidecar.ts
 //
-// 成熟版 agent 循环：工具单一真源 = 边车 list_tools()，执行 = 边车 call()。
-// 相比旧 agent-loop（调 generators 生成 VBS）：
-//   - 工具 schema 自描述、原生注入主模型（tools 参数）
-//   - 每步返回结构化 JSON，模型可观测/自纠
-//   - 内置视觉双路径：analyze_view（图生文 / 直喂多模态主模型）
+// Mature agent loop: the single source of truth for tools is `sidecar.list_tools()`,
+// and execution happens via `sidecar.call()`.
+// Compared with the legacy agent-loop (which calls generators to produce VBS):
+//   - Tool schema is self-describing and natively injected into the main model (via the `tools` parameter)
+//   - Every step returns structured JSON that the model can observe and self-correct from
+//   - Built-in dual-path vision: `analyze_view` (image-to-text via a dedicated vision model /
+//     direct multimodal input to the main model)
 //
-// 依赖注入（handlers 提供），便于测试与解耦。
+// Dependency injection (provided by handlers) keeps it testable and decoupled.
 
 import type { OpenAIAdapter } from '../llm/openai';
 import type { ChatMessage, ToolCall, VisionConfig } from '../../shared/types';
@@ -27,12 +29,12 @@ export interface SidecarAgentOptions {
   maxRounds?: number;
   signal?: AbortSignal;
   onEvent?: (ev: AgentEvent) => void;
-  /** 破坏性工具确认 */
+  /** Confirmation gate for destructive tools */
   confirmTool?: (call: ToolCall) => Promise<boolean>;
-  /** 视觉：独立视觉模型（图生文）。为空则尝试主模型多模态 */
+  /** Vision: dedicated vision model (image-to-text). When unset, fall back to main-model multimodal input */
   visionConfig?: VisionConfig;
   mainModelVision?: boolean;
-  /** 把边车返回的本地图片路径转 data URL（handlers 用 electron nativeImage 实现） */
+  /** Convert a local image path returned by the sidecar into a data URL (handlers implement this via Electron's nativeImage) */
   imageToDataUrl: (imagePath: string, format: string) => string;
 }
 
@@ -74,7 +76,7 @@ export async function runSidecarAgent(
   let finalText = '';
 
   await sidecar.start();
-  // 工具清单：边车工具（过滤 internal）+ 虚拟视觉工具，原生注入主模型
+  // Tool list: sidecar tools (filtered to exclude `internal`) + virtual vision tool, natively injected into the main model
   const sidecarTools = await sidecar.listTools(false);
   const tools = [...VIRTUAL_TOOLS, ...sidecarTools];
   const destructive = new Set(
@@ -86,9 +88,10 @@ export async function runSidecarAgent(
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
     history = truncateMessages(history);
-    // BUGFIX: 截断保留的是最新一段后缀，可能把某轮的 assistant(tool_calls) 砍掉却留下它的
-    // 工具结果 → OpenAI/DeepSeek 会因“role:tool/工具结果缺少前置 tool_calls”报 400。
-    // 剥掉开头的孤儿工具结果，保证首条不是悬空的工具结果。
+    // BUGFIX: `truncateMessages` keeps the latest suffix, which can drop an assistant(tool_calls)
+    // turn while leaving its tool results behind → OpenAI/DeepSeek then return 400 because
+    // a "role:tool/tool-result" message has no preceding tool_calls.
+    // Strip orphaned tool results from the head so the first message is never a dangling tool result.
     while (
       history.length > 0 &&
       history[0].role === 'system' &&
@@ -113,19 +116,19 @@ export async function runSidecarAgent(
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
 
-      // 视觉工具单独处理
+      // Handle the vision tool on its own path
       if (call.name === 'analyze_view') {
         const { resultText, imageMessage } = await handleAnalyzeView(call, sidecar, opts);
         call.result = resultText;
         opts.onEvent?.({ type: 'tool_result', toolCall: call });
-        // 先压工具结果（紧跟 assistant.tool_calls，满足 OpenAI 配对要求），
-        // 再把图像作为独立 user 消息压入 —— 绝不能插在 tool_calls 与其结果之间（否则 400）。
+        // Push the tool result first (must immediately follow assistant.tool_calls to satisfy OpenAI pairing),
+        // then push the image as a standalone user message — never between tool_calls and its result (would 400).
         history.push({ role: 'system', content: resultText, toolCalls: [{ ...call, result: resultText }] });
         if (imageMessage) history.push(imageMessage);
         continue;
       }
 
-      // 破坏性确认门
+      // Destructive-tool confirmation gate
       if (destructive.has(call.name) && opts.confirmTool) {
         opts.onEvent?.({ type: 'confirm_request', toolCall: call });
         const ok = await opts.confirmTool(call);
@@ -153,11 +156,11 @@ export async function runSidecarAgent(
 
 interface AnalyzeViewResult {
   resultText: string;
-  /** 路径 B：图像作为独立 user 消息，由调用方压在工具结果“之后” */
+  /** Path B: image as a standalone user message; the caller pushes it after the tool result */
   imageMessage?: ChatMessage;
 }
 
-/** analyze_view：截屏 → 图生文(独立视觉模型) 或 直喂多模态主模型。 */
+/** analyze_view: capture the screen → image-to-text (dedicated vision model) or direct multimodal main model. */
 async function handleAnalyzeView(
   call: ToolCall,
   sidecar: SWSidecar,
@@ -173,7 +176,7 @@ async function handleAnalyzeView(
     return { resultText: `图像读取失败：${e instanceof Error ? e.message : String(e)}` };
   }
 
-  // 路径 A：独立视觉模型（图生文，prompt = 主模型自拟的 question）
+  // Path A: dedicated vision model (image-to-text, prompt = the main model's `question`)
   if (opts.visionConfig) {
     try {
       const desc = await analyzeImage({ question, imageDataUrl: dataUrl, config: opts.visionConfig, signal: opts.signal });
@@ -184,7 +187,7 @@ async function handleAnalyzeView(
     }
   }
 
-  // 路径 B：主模型本身多模态 → 图像作为独立 user 消息返回（调用方压在工具结果之后）
+  // Path B: main model is itself multimodal → return image as a standalone user message (caller pushes it after the tool result)
   if (opts.mainModelVision) {
     opts.onEvent?.({ type: 'image' });
     return {

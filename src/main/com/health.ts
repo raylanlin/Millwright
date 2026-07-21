@@ -4,8 +4,9 @@ import type { SolidWorksBridge } from './sw-bridge';
 import type { SWStatus } from '../../shared/types';
 
 /**
- * 心跳监控器。
- * 定时查 SolidWorks 连接状态,状态变化时回调。
+ * Heartbeat monitor.
+ * Polls the SolidWorks connection status on a timer and invokes the callback
+ * whenever the status changes.
  */
 export class SWHealthMonitor {
   private timer: NodeJS.Timeout | null = null;
@@ -19,7 +20,7 @@ export class SWHealthMonitor {
 
   start(): void {
     if (this.timer) return;
-    // 立即先检测一次
+    // Run an initial check immediately
     this.tick();
     this.timer = setInterval(() => this.tick(), this.intervalMs);
   }

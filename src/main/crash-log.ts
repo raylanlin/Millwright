@@ -1,5 +1,6 @@
 // src/main/crash-log.ts
-// 必须在所有业务模块之前加载，确保 uncaughtException 在 require 链之前注册
+// Must be loaded BEFORE any business modules, so that `uncaughtException` is
+// registered ahead of any `require` chain.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -12,13 +13,13 @@ function init(): void {
     CRASH_LOG = path.join(app.getPath('userData'), 'crash.log');
     fs.mkdirSync(path.dirname(CRASH_LOG), { recursive: true });
   } catch {
-    // 备用：写到临时目录
+    // Fallback: write to the OS temp directory
     try {
       const tmp = process.env.TEMP || process.env.TMP || '/tmp';
       CRASH_LOG = path.join(tmp, 'sw-copilot-crash.log');
       fs.mkdirSync(path.dirname(CRASH_LOG), { recursive: true });
     } catch {
-      CRASH_LOG = ''; // 彻底放弃
+      CRASH_LOG = ''; // give up entirely
     }
   }
 }
@@ -28,7 +29,7 @@ init();
 function write(msg: string): void {
   if (!CRASH_LOG) return;
   try {
-    // LOW：>256KB 自动清空，避免反复写入后越胀越大
+    // LOW: auto-truncate when the file exceeds 256 KB, to keep it from growing unbounded
     if (fs.existsSync(CRASH_LOG) && fs.statSync(CRASH_LOG).size > 256 * 1024) {
       fs.truncateSync(CRASH_LOG, 0);
     }
@@ -40,7 +41,7 @@ write(`crash-log init, electron ${process.versions.electron}, userData: ${CRASH_
 
 process.on('uncaughtException', (err) => {
   write(`UNCAUGHT: ${err.stack || err.message}`);
-  // 不 quit，让 Electron 默认处理
+  // Do not quit — let Electron handle it by default
 });
 
 process.on('unhandledRejection', (reason: any) => {

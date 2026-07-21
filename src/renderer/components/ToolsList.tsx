@@ -135,7 +135,7 @@ export function ToolsList({ t }: Props) {
   );
 }
 
-// —— 预览 modal ——
+// —— Preview modal ——
 
 interface PreviewProps {
   t: ThemeTokens;

@@ -1,13 +1,14 @@
 // src/renderer/components/automations-data.ts
 //
-// 快捷自动化模板的展示数据。
-// 点击后把 prompt 送入聊天输入框,让 AI 基于 prompt 生成脚本。
+// Display data for the quick-automation templates.
+// When a template is clicked, its prompt is pushed into the chat input box and
+// the AI generates a script based on it.
 
 export interface AutomationTemplate {
   icon: string;
   label: string;
   desc: string;
-  /** 点击后发送给 AI 的提示词 */
+  /** Prompt that will be sent to the AI when the template is clicked */
   prompt: string;
 }
 

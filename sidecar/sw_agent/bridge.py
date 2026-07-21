@@ -1,9 +1,11 @@
-"""sw_agent.bridge — SolidWorks COM 连接与执行上下文。
+"""sw_agent.bridge — SolidWorks COM connection and execution context.
 
-关键约定：
-- 只用 GetActiveObject 连接**已运行**的实例，绝不 CreateObject（否则会起一个隐形 SW，
-  后续所有操作都对着看不见的实例“成功”执行）。
-- 所有工具通过 Context 拿 app / model / 各 Manager，统一在这里处理“没连上 / 没文档”。
+Key conventions:
+- Use GetActiveObject to connect to an **already-running** instance. Never
+  CreateObject (that would spawn a hidden SolidWorks, and every subsequent
+  operation would silently succeed against an invisible target).
+- All tools obtain app / model / the various Managers via Context. The
+  "no connection / no document" error handling lives here, in one place.
 """
 from __future__ import annotations
 from typing import Any
@@ -15,34 +17,34 @@ DOC_DRAWING = 3
 DOC_TYPE_NAME = {DOC_PART: "part", DOC_ASSEMBLY: "assembly", DOC_DRAWING: "drawing"}
 
 _PLANES = {
-    "front": ("Front Plane", "前视基准面"),
-    "top": ("Top Plane", "上视基准面"),
-    "right": ("Right Plane", "右视基准面"),
+    "front": ("Front Plane", "Front Plane"),
+    "top": ("Top Plane", "Top Plane"),
+    "right": ("Right Plane", "Right Plane"),
 }
 
 
 class SWError(Exception):
-    """面向 agent 的可读错误。str(e) 会作为 JSON-RPC error 返回。"""
+    """Agent-facing, human-readable error. str(e) is returned as the JSON-RPC error field."""
 
 
 class Context:
-    """一次会话的执行上下文，持久驻留（跨多步工具调用复用同一 COM 连接）。"""
+    """Per-session execution context. Long-lived so multi-step tool calls reuse the same COM connection."""
 
     def __init__(self) -> None:
         self._app = None
-        self.scratch: dict[str, Any] = {}  # 供工具间传值（如上一步创建的特征名）
+        self.scratch: dict[str, Any] = {}  # Inter-tool scratchpad (e.g. the feature name created in the previous step)
 
-    # ---- 连接 ----
+    # ---- Connection ----
     @property
     def sw(self):
         if self._app is None:
             try:
-                import win32com.client  # 延迟导入，非 Windows 环境也能 import 本模块
+                import win32com.client  # Lazy import so the module loads on non-Windows hosts too
                 self._app = win32com.client.GetActiveObject("SldWorks.Application")
             except Exception as e:  # noqa: BLE001
                 raise SWError(
-                    "无法连接 SolidWorks：请确认 SolidWorks 已启动并至少打开过一次。"
-                    f"（{e}）"
+                    "Cannot connect to SolidWorks: make sure SolidWorks is running and has been opened at least once. "
+                    f"({e})"
                 )
         return self._app
 
@@ -54,16 +56,16 @@ class Context:
     def model(self):
         m = self.sw.ActiveDoc
         if m is None:
-            raise SWError("没有打开的文档，请先在 SolidWorks 中新建或打开一个文档。")
+            raise SWError("No document is open. Please create or open a document in SolidWorks first.")
         return m
 
     def require(self, doc_type: int, label: str):
         m = self.model
         if m.GetType() != doc_type:
-            raise SWError(f"当前操作要求{label}文档。")
+            raise SWError(f"This operation requires a {label} document.")
         return m
 
-    # ---- 常用 Manager ----
+    # ---- Common Managers ----
     @property
     def feat_mgr(self):
         return self.model.FeatureManager
@@ -76,7 +78,7 @@ class Context:
     def sel_mgr(self):
         return self.model.SelectionManager
 
-    # ---- 选择辅助 ----
+    # ---- Selection helpers ----
     def clear_selection(self):
         self.model.ClearSelection2(True)
 
@@ -89,19 +91,19 @@ class Context:
         )
 
     def select_plane(self, which: str, append=False, mark=0) -> bool:
-        """选基准面，自动兼容中/英文模板。"""
+        """Select a reference plane; auto-handles both English and localized templates."""
         key = (which or "").lower()
         if key not in _PLANES:
-            raise SWError(f"未知基准面：{which}（应为 front/top/right）")
+            raise SWError(f"unknown plane: {which} (expected front/top/right)")
         en, zh = _PLANES[key]
         before = self.selected_count()
         if self.select_by_id(en, "PLANE", append=append, mark=mark):
             return True
-        if self.selected_count() <= before:  # 英文名没选中 → 试中文
+        if self.selected_count() <= before:  # English name didn't hit → try the localized name
             return self.select_by_id(zh, "PLANE", append=append, mark=mark)
         return True
 
-    # ---- 重建 ----
+    # ---- Rebuild ----
     def rebuild(self, top_only=False):
         self.model.ForceRebuild3(top_only)
 

@@ -1,59 +1,60 @@
 # SW Agent Sidecar
 
-一个常驻的 Python 进程，通过 stdio JSON-RPC 暴露一组**结构化**的 SolidWorks 工具给 Electron 主进程 / LLM agent。
+A long-running Python process that exposes a **structured** set of SolidWorks tools to the Electron main process / LLM agent over stdio JSON-RPC.
 
-## 为什么是它（相对旧的 cscript/VBS 路径）
+## Why this design (vs. the old cscript/VBS path)
 
-| 维度 | 旧：生成 VBA→译 VBS→cscript | 新：Python 边车 |
+| Dimension | Old: generate VBA → translate to VBS → cscript | New: Python sidecar |
 |---|---|---|
-| 进程 | 每次调用起一个 cscript，无状态 | 常驻，持有 COM 指针，可跨步事务 |
-| 返回 | MsgBox 弹窗，无结构化数据 | `{"ok":true,"data":{...}}` JSON，agent 可观测/自纠 |
-| 参数 | 27 参按位、错一位静默返回 null | 命名参数 + 包装函数 |
-| 语言雷 | VBScript 保留字/正则翻译 | 无翻译层 |
-| 视觉 | 无 | 内置截屏 → 返回图像给多模态模型 |
-| 工具真源 | sw-tools.ts / generators / schema 三处 | 边车 `list_tools()` 单一真源 |
+| Process | A new cscript per call; stateless | Long-running, holds the COM pointer, can run multi-step transactions |
+| Return | MsgBox popups; no structured data | `{"ok":true,"data":{...}}` JSON — the agent can observe and self-correct |
+| Parameters | 27 positional args; one wrong slot silently returns null | Named parameters + wrapper functions |
+| Language pitfalls | VBScript reserved words / regex translation | No translation layer |
+| Vision | None | Built-in screenshot → image returned to the multimodal model |
+| Source of truth | sw-tools.ts / generators / schema — three places | Sidecar `list_tools()` is the single source of truth |
 
-## 运行
+## Running
 
 ```bash
-# 依赖（在 SolidWorks 所在的 Windows 上）
+# Dependencies (on the Windows host where SolidWorks runs)
 pip install pywin32 pillow
 
-# 手动自测（SolidWorks 需已打开）
-python -m sw_agent            # 进入 JSON-RPC 循环，读 stdin 写 stdout
+# Manual smoke test (SolidWorks must already be open)
+python -m sw_agent            # enters the JSON-RPC loop, reads stdin / writes stdout
 ```
 
-Electron 主进程通过 `sw-sidecar.ts` spawn 它，不需要手动启动。
+The Electron main process spawns it via `sw-sidecar.ts`; you don't need to launch it manually.
 
-## 协议（stdio，逐行 JSON）
+## Protocol (stdio, line-delimited JSON)
 
-请求：`{"id":1,"method":"list_tools"}`
-　　　`{"id":2,"method":"call","params":{"name":"extrude","args":{"depth_mm":20}}}`
-　　　`{"id":3,"method":"ping"}`
+Request: `{"id":1,"method":"list_tools"}`
+         `{"id":2,"method":"call","params":{"name":"extrude","args":{"depth_mm":20}}}`
+         `{"id":3,"method":"ping"}`
 
-响应：`{"id":1,"ok":true,"data":[<tool schema>...]}`
-　　　`{"id":2,"ok":false,"error":"没有打开的文档"}`
+Response: `{"id":1,"ok":true,"data":[<tool schema>...]}`
+          `{"id":2,"ok":false,"error":"no document is open"}`
 
-## 目录
+## Layout
 
 ```
 sw_agent/
-├── __main__.py     进入 server 循环
-├── server.py       stdio JSON-RPC 分发
-├── registry.py     @tool 装饰器 + 自描述 schema + call 分发
-├── bridge.py       COM 连接（GetActiveObject，绝不 CreateObject）
+├── __main__.py     enters the server loop
+├── server.py       stdio JSON-RPC dispatcher
+├── registry.py     @tool decorator + self-describing schema + call dispatch
+├── bridge.py       COM connection (GetActiveObject, never CreateObject)
 ├── units.py        mm→m / deg→rad
 └── tools/
-    ├── view.py     视图方位/旋转/缩放/显示模式 + capture 截屏
-    ├── document.py 新建/打开/保存/材料/重建/属性/配置
-    ├── sketch.py   进入草图 + 矩形/圆/线/弧/多边形/圆角/关系/尺寸
-    ├── feature.py  拉伸/切除/旋转/圆角/倒角(已修正)/抽壳/孔/阵列/镜像
-    ├── reference.py 基准面/基准轴/点
-    ├── assembly.py 插入/配合/阵列/镜像/压缩/移动
-    ├── export.py   STEP/PDF/STL/DXF
-    └── query.py    质量属性/干涉/测量/包络/列特征/列零部件
+    ├── view.py     view orientation / rotate / zoom / display mode + capture screenshot
+    ├── document.py new / open / save / material / rebuild / properties / configurations
+    ├── sketch.py   enter sketch + rectangle / circle / line / arc / polygon / fillet / relations / dimensions
+    ├── feature.py  extrude / cut / revolve / fillet / chamfer (fixed) / shell / hole / pattern / mirror
+    ├── reference.py reference planes / axes / points
+    ├── assembly.py insert / mate / pattern / mirror / suppress / move
+    ├── export.py   STEP / PDF / STL / DXF
+    └── query.py    mass properties / interference / measure / bounding box / list features / list components
 ```
 
-## ⚠ 需在目标 SolidWorks 版本用宏录制器核对的调用
-少数多参特征 API（sweep/loft/rib/draft/circular_pattern 的部分参数位）跨版本可能不同。
-这些函数在 `feature.py` 里都带 `# VERIFY:` 注释，核对后删注释即可。命名调用比 VBS 按位安全得多，但仍建议实测。
+## ⚠ Calls that need verification against the target SolidWorks version
+
+A handful of multi-argument feature APIs (sweep / loft / rib / draft / some slots of circular_pattern) may differ across SolidWorks versions.
+Each of those functions carries a `# VERIFY:` comment in `feature.py` — verify and remove the comment once confirmed. Named-argument calls are far safer than positional VBS, but real testing is still recommended.

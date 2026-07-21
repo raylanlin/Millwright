@@ -1,8 +1,8 @@
 // src/main/index.ts
 //
-// Electron 主进程入口
+// Electron main-process entry point.
 
-import './crash-log'; // ⚠️ 必须在所有业务 import 之前，确保 crash 捕获最先注册
+import './crash-log'; // ⚠️ MUST come before any business import, so the crash handler is registered first
 
 import { app, BrowserWindow, shell, Menu } from 'electron';
 import * as path from 'path';
@@ -88,7 +88,7 @@ app.whenReady().then(async () => {
     const { SW_TOOLS } = require('../shared/sw-tools');
     const cov = checkCoverage(SW_TOOLS);
     if (cov.missing.length > 0) {
-      console.warn('[SW Copilot] 生成器覆盖率不全,缺少:', cov.missing);
+      console.warn('[SW Copilot] generator coverage incomplete; missing:', cov.missing);
     }
     crashLog('generators ok');
   } catch (err) {
@@ -130,6 +130,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   abortAllRequests();
   healthMonitor?.stop();
-  getSidecar().stop(); // P3：退出时关掉 python 进程
+  getSidecar().stop(); // P3: stop the python sidecar process on quit
   getBridge().disconnect();
 });

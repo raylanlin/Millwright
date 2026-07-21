@@ -1,1 +1,1 @@
-"""sw_agent.tools —— 工具模块集合。导入即注册。"""
+"""sw_agent.tools — collection of tool modules. Importing registers them."""

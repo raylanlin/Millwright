@@ -1,11 +1,12 @@
 // src/main/store/config.ts
 //
-// 配置持久化。
-// 使用 electron-store 存储普通字段,但 API Key 用 Electron 的 safeStorage
-// 加密后再存(safeStorage 在 Windows 上使用 DPAPI,macOS 使用 Keychain,
-// Linux 使用 libsecret)。
+// Configuration persistence.
+// Plain fields are stored via `electron-store`, but the API key is encrypted with
+// Electron's `safeStorage` before persistence (`safeStorage` uses DPAPI on Windows,
+// Keychain on macOS, and libsecret on Linux).
 //
-// electron-store 是动态 import 的 ESM,我们在主进程 commonjs 下用 dynamic import。
+// `electron-store` is dynamically imported as ESM, since the main process runs
+// under CommonJS.
 
 import { safeStorage } from 'electron';
 import type { LLMConfig, ThemeName } from '../../shared/types';
@@ -14,16 +15,16 @@ import { loadEnvFallback } from './env-fallback';
 
 export interface StoredConfig {
   llm: Omit<LLMConfig, 'apiKey'>;
-  /** 加密后的 base64,没配置过是 "" */
+  /** Base64 of the encrypted API key; empty string when nothing is configured yet */
   encryptedApiKey: string;
   theme: ThemeName;
-  /** 对话历史持久化版本号,后续迁移用 */
+  /** Persistence schema version; reserved for future migrations */
   schemaVersion: number;
 }
 
 const SCHEMA_VERSION = 1;
 
-// 把 DEFAULT_CONFIG 里的 apiKey 拆掉 —— StoredConfig.llm 是 Omit<LLMConfig, 'apiKey'>
+// Strip `apiKey` out of DEFAULT_CONFIG — StoredConfig.llm is `Omit<LLMConfig, 'apiKey'>`
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const { apiKey: _unusedDefaultKey, ...DEFAULT_LLM_WITHOUT_KEY } = DEFAULT_CONFIG;
 
@@ -45,7 +46,7 @@ let storePromise: Promise<StoreInstance> | null = null;
 async function getStore(): Promise<StoreInstance> {
   if (!storePromise) {
     storePromise = (async () => {
-      // electron-store v8+ 是 ESM
+      // `electron-store` v8+ is ESM-only
       const { default: Store } = await import('electron-store');
       return new Store<StoredConfig>({
         name: 'sw-copilot-config',
@@ -57,12 +58,12 @@ async function getStore(): Promise<StoreInstance> {
 }
 
 /**
- * 加载完整 LLMConfig(含解密后的 apiKey)。
+ * Load the full `LLMConfig` (with the decrypted `apiKey`).
  *
- * 解析优先级:
- *   1. electron-store 里保存的配置(UI 设置过)
- *   2. .env / process.env 的 fallback(开发体验)
- *   3. DEFAULT_CONFIG(无 apiKey)
+ * Resolution priority:
+ *   1. Config persisted in `electron-store` (set via the UI).
+ *   2. `.env` / `process.env` fallback (developer experience).
+ *   3. `DEFAULT_CONFIG` (no API key).
  */
 export async function loadConfig(): Promise<LLMConfig> {
   const store = await getStore();
@@ -74,12 +75,12 @@ export async function loadConfig(): Promise<LLMConfig> {
     try {
       apiKey = safeStorage.decryptString(Buffer.from(encryptedApiKey, 'base64'));
     } catch {
-      // 解密失败(比如在另一台机器上、或 Key 被撤销),静默返回空
+      // Decryption failure (e.g. running on a different machine, or the OS key was revoked) — silently return empty
       apiKey = '';
     }
   }
 
-  // 如果 electron-store 里没有 apiKey,尝试从 env 读取 fallback
+  // If electron-store has no API key, try the env-based fallback
   if (!apiKey) {
     const envFallback = loadEnvFallback();
     if (envFallback) {
@@ -94,7 +95,7 @@ export async function loadConfig(): Promise<LLMConfig> {
 }
 
 /**
- * 保存 LLMConfig。apiKey 会被加密存储;其它字段直接存。
+ * Save an `LLMConfig`. The API key is encrypted; all other fields are persisted as-is.
  */
 export async function saveConfig(config: LLMConfig): Promise<void> {
   const store = await getStore();
@@ -105,9 +106,9 @@ export async function saveConfig(config: LLMConfig): Promise<void> {
     if (safeStorage.isEncryptionAvailable()) {
       encryptedApiKey = safeStorage.encryptString(apiKey).toString('base64');
     } else {
-      // 非常规情况(比如 Linux 上没装 libsecret):降级为明文存储,并在日志里警告。
-      // TODO: 考虑在这种情况下拒绝保存,改用内存配置。
-      console.warn('safeStorage 不可用,API Key 将以明文存储');
+      // Unusual environment (e.g. Linux without libsecret): fall back to plaintext storage and warn in the log.
+      // TODO: consider refusing to save in this case and keeping the config in memory instead.
+      console.warn('safeStorage unavailable; API key will be stored in plaintext');
       encryptedApiKey = Buffer.from(apiKey, 'utf8').toString('base64');
     }
   }

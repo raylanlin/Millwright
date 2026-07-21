@@ -1,4 +1,4 @@
-"""python -m sw_agent —— 启动 JSON-RPC 边车。"""
+"""python -m sw_agent — launch the JSON-RPC sidecar."""
 from .server import serve
 
 if __name__ == "__main__":

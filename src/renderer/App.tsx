@@ -1,7 +1,8 @@
 // src/renderer/App.tsx
 //
-// App 现在是纯编排层:挂 hook、拼组件、路由标签。
-// 每个子组件只关心自己职责。脚本执行作为新增能力在这里集成。
+// `App` is now a pure orchestration layer: mount hooks, glue components together, switch tabs.
+// Each child component only worries about its own concern. Script execution is wired in here
+// as a new capability.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, LLMConfig, ScriptResult } from '../shared/types';
@@ -29,22 +30,22 @@ const INITIAL_MESSAGES: ChatMessage[] = [
 export default function App() {
   const { theme, setTheme, toggle, tokens: t } = useTheme();
 
-  // —— 配置 ——
+  // —— Config ——
   const [config, setConfig] = useState<LLMConfig>(DEFAULT_CONFIG);
   useEffect(() => {
     window.api.config.load().then(setConfig);
   }, []);
 
-  // —— SW 状态 ——
+  // —— SolidWorks status ——
   const { status: swStatus, loading: swLoading, reconnect } = useSWStatus();
 
-  // —— 聊天 ——
+  // —— Chat ——
   const { messages, isGenerating, error: llmError, send, cancel, reset, setMessages } = useLLM({
     config,
     initial: INITIAL_MESSAGES,
   });
 
-  // —— 对话历史持久化 ——
+  // —— Conversation-history persistence ——
   const {
     sessions,
     currentId: currentSessionId,
@@ -54,27 +55,27 @@ export default function App() {
     remove: removeSession,
   } = useChatSessions();
 
-  // 错误横幅状态
+  // Error banner visibility
   const [dismissedError, setDismissedError] = useState(false);
-  // 新错误出现时重新显示
+  // Re-display the banner whenever a new error appears
   const prevErrorRef = useRef(llmError);
   if (llmError !== prevErrorRef.current) {
     prevErrorRef.current = llmError;
     if (llmError) setDismissedError(false);
   }
 
-  // —— 视图状态 ——
+  // —— View state ——
   const [input, setInput] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('chat');
   const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<ChatInputHandle>(null);
 
-  // —— 脚本执行 ——
-  // execResults 按消息索引存执行结果
+  // —— Script execution ——
+  // `execResults` is keyed by message index
   const [execResults, setExecResults] = useState<Record<number, ScriptResult>>({});
   const [executingIndex, setExecutingIndex] = useState<number | null>(null);
 
-  // 对话变化后自动持久化(仅在生成结束后、且有真实对话时)
+  // Auto-persist whenever the conversation changes (only after generation finishes, and only when there is real content)
   useEffect(() => {
     if (isGenerating) return;
     if (messages.length <= INITIAL_MESSAGES.length) return;
@@ -98,7 +99,7 @@ export default function App() {
     setExecutingIndex(null);
   }, [reset, startNewSession]);
 
-  // 新建对话:开新会话 + 重置到欢迎语
+  // "New chat" — open a fresh session and reset to the greeting message
   const handleNewChat = useCallback(() => {
     startNewSession();
     setMessages(INITIAL_MESSAGES);
@@ -107,7 +108,7 @@ export default function App() {
     setActiveTab('chat');
   }, [startNewSession, setMessages]);
 
-  // 选中历史会话:加载其完整消息
+  // Selecting a historical session — load its full messages
   const handleSelectSession = useCallback(
     async (id: string) => {
       const s = await loadSession(id);
@@ -121,7 +122,7 @@ export default function App() {
     [loadSession, setMessages],
   );
 
-  // 删除历史会话:若删的是当前会话,重置视图
+  // Deleting a historical session — if it's the active one, reset the view
   const handleDeleteSession = useCallback(
     async (id: string) => {
       await removeSession(id);
@@ -134,20 +135,20 @@ export default function App() {
     [removeSession, currentSessionId, setMessages],
   );
 
-  // 用户点了自动化模板:切回 chat 标签,填入输入框并聚焦
+  // User clicked an automation template — switch back to the chat tab, fill the input, and focus it
   const handlePickAutomation = useCallback((prompt: string) => {
     setActiveTab('chat');
     setInput(prompt);
-    // 等 chat 标签挂载完再 focus
+    // Wait for the chat tab to mount before focusing
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
 
-  // 点击消息里的"执行"按钮
+  // User clicked the "Run" button on a message
   const handleRunScript = useCallback(
     async (msgIndex: number, code: string, lang: 'vba' | 'python') => {
-      if (executingIndex !== null) return; // 串行执行,避免同时改 SolidWorks 状态
+      if (executingIndex !== null) return; // run serially to avoid mutating SolidWorks state concurrently
 
-      // 执行前先做一次安全校验(主进程已经做过,这里是拦截用户已确认前的意外)
+      // Run a safety check before execution (the main process already does this; the second pass here is a belt-and-suspenders guard)
       const validation = await window.api.script.validate(code, lang);
       if (!validation.safe) {
         const confirmed = window.confirm(
@@ -169,7 +170,7 @@ export default function App() {
 
   const handleCopyCode = useCallback((code: string) => {
     navigator.clipboard.writeText(code).catch(() => {
-      // 环境可能不支持 clipboard(比如测试渲染),忽略即可
+      // The environment may not expose a clipboard (e.g. during tests) — silently ignore
     });
   }, []);
 
@@ -215,7 +216,7 @@ export default function App() {
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-        {/* 错误横幅 */}
+        {/* Error banner */}
         {!dismissedError && (
           <ErrorBanner
             t={t}

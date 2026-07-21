@@ -1,7 +1,7 @@
 // src/shared/types.ts
-// 主进程与渲染进程共享的类型定义
+// Shared type definitions for the main and renderer processes.
 
-// ===== LLM 相关 =====
+// ===== LLM =====
 
 export type LLMProtocol = 'anthropic' | 'openai';
 
@@ -14,17 +14,17 @@ export interface LLMConfig {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
-  /** 可选:网络代理 */
+  /** Optional: network proxy */
   proxyURL?: string;
-  /** 请求超时(毫秒),默认 60_000 */
+  /** Request timeout in milliseconds (default 120_000) */
   timeoutMs?: number;
-  /** P3：独立视觉模型配置（图生文，与主模型解耦）。空 → 尝试主模型多模态 */
+  /** P3: dedicated vision-model configuration (image-to-text, decoupled from the main model). When unset, fall back to the main model's multimodal input */
   visionModel?: VisionConfig;
-  /** P3：主模型本身是否支持视觉输入（true 时 analyze_view 会把截图喂给主模型） */
+  /** P3: whether the main model itself supports visual input (when `true`, `analyze_view` will feed the screenshot to the main model) */
   mainModelVision?: boolean;
 }
 
-/** P3：独立视觉模型（OpenAI 兼容多模态）的配置 */
+/** P3: configuration for a dedicated vision model (OpenAI-compatible multimodal) */
 export interface VisionConfig {
   baseURL: string;
   apiKey: string;
@@ -47,11 +47,11 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
   code?: string;
   codeLanguage?: 'vba' | 'python';
-  /** 可选:消息唯一 id,渲染侧用作 React key */
+  /** Optional: unique message id, used as the React `key` in the renderer */
   id?: string;
-  /** 可选:unix ms 时间戳 */
+  /** Optional: unix-ms timestamp */
   timestamp?: number;
-  /** 可选:附加图片 URL / data URL（多模态消息，主模型支持视觉时使用） */
+  /** Optional: attached image URLs / data URLs (multimodal message, used when the main model supports vision) */
   images?: string[];
 }
 
@@ -64,14 +64,14 @@ export interface LLMResponse {
   content: string;
   toolCalls?: ToolCall[];
   usage?: LLMUsage;
-  /** 提取出的代码块(如果有) */
+  /** Extracted code block (if any) */
   code?: string;
   codeLanguage?: 'vba' | 'python';
-  /** 结束原因 */
+  /** Reason the response finished */
   finishReason?: 'stop' | 'length' | 'tool_use' | 'error' | 'cancelled';
 }
 
-/** 流式输出的增量事件 */
+/** Incremental event emitted by streaming responses */
 export type LLMStreamEvent =
   | { type: 'start'; requestId: string }
   | { type: 'delta'; requestId: string; chunk: string }
@@ -79,14 +79,14 @@ export type LLMStreamEvent =
   | { type: 'done'; requestId: string; response: LLMResponse }
   | { type: 'error'; requestId: string; error: LLMErrorInfo };
 
-// ===== 错误码 =====
+// ===== Error codes =====
 
 export type ErrorCode =
-  // SolidWorks 相关
+  // SolidWorks-related
   | 'SW_NOT_FOUND'
   | 'SW_NO_DOCUMENT'
   | 'SW_COM_ERROR'
-  // LLM 相关
+  // LLM-related
   | 'LLM_AUTH_FAILED'
   | 'LLM_RATE_LIMIT'
   | 'LLM_NETWORK_ERROR'
@@ -96,7 +96,7 @@ export type ErrorCode =
   | 'LLM_CANCELLED'
   | 'LLM_UNKNOWN'
   | 'AGENT_ERROR'
-  // 脚本相关
+  // Script-related
   | 'SCRIPT_UNSAFE'
   | 'SCRIPT_EXEC_FAILED'
   | 'SCRIPT_TIMEOUT';
@@ -104,13 +104,13 @@ export type ErrorCode =
 export interface LLMErrorInfo {
   code: ErrorCode;
   message: string;
-  /** 底层原始错误信息,便于调试 */
+  /** Underlying raw error info, useful for debugging */
   raw?: string;
-  /** HTTP 状态码(如果有) */
+  /** HTTP status code, if any */
   status?: number;
 }
 
-// ===== 脚本执行 =====
+// ===== Script execution =====
 
 export type ScriptLanguage = 'vba' | 'python';
 
@@ -119,9 +119,9 @@ export interface ScriptResult {
   output: string;
   error?: string;
   duration: number;
-  /** 结构化结果数据（从结果文件回传） */
+  /** Structured result data (read back from the result file) */
   data?: Record<string, any>;
-  /** 执行前备份的文件路径（如果有） */
+  /** Path of the pre-execution backup, if any */
   backupPath?: string;
 }
 
@@ -130,7 +130,7 @@ export interface ScriptValidation {
   issues: string[];
 }
 
-// ===== SolidWorks 状态 =====
+// ===== SolidWorks status =====
 
 export type SWDocumentType = 'part' | 'assembly' | 'drawing' | null;
 
@@ -143,7 +143,7 @@ export interface SWStatus {
   hasDoc?: boolean;
 }
 
-/** 文档上下文（用于注入 AI system prompt） */
+/** Document context (injected into the AI's system prompt) */
 export interface SWDocumentContext {
   fileName: string;
   filePath: string;
@@ -157,18 +157,18 @@ export interface SWDocumentContext {
   material?: string;
 }
 
-// ===== 模型预设 =====
+// ===== Model presets =====
 
 export interface ModelPreset {
   label: string;
   value: string;
 }
 
-// ===== 主题 =====
+// ===== Theme =====
 
 export type ThemeName = 'light' | 'dark';
 
-// ===== 对话会话 =====
+// ===== Chat sessions =====
 
 export interface ChatSession {
   id: string;

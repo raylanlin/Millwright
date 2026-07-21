@@ -17,7 +17,7 @@ interface Props {
   swStatus: SWStatus;
   onReconnectSW: () => void;
   swLoading: boolean;
-  /** 对话历史 */
+  /** Conversation history */
   sessions: ChatSessionMeta[];
   currentSessionId: string | null;
   onSelectSession: (id: string) => void;
@@ -49,7 +49,7 @@ export function Sidebar({
   onNewChat,
 }: Props) {
   const isConfigured = !!(config.apiKey && config.apiKey.length > 5);
-  // 模型名过长时截断显示
+  // Truncate overly long model names for display
   const modelLabel =
     config.model.length > 22 ? `${config.model.slice(0, 22)}…` : config.model;
 
@@ -65,7 +65,7 @@ export function Sidebar({
         transition: 'background 0.25s',
       }}
     >
-      {/* Logo 区 */}
+      {/* Logo area */}
       <div style={{ padding: '18px 16px 14px', borderBottom: `1px solid ${t.sidebarBorder}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <div
@@ -84,7 +84,7 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* 状态条 */}
+      {/* Status bar */}
       <div style={{ padding: '10px 16px', borderBottom: `1px solid ${t.sidebarBorder}` }}>
         <div
           style={{
@@ -142,7 +142,7 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* FEATURE: 当前文档卡片 —— 3 秒轮询后自动反映用户切文档/进零件 */}
+      {/* FEATURE: current-document card — automatically reflects the user's document/part switches thanks to the 3-second poll */}
       <div style={{ padding: '0 16px 10px' }}>
         {swStatus.connected && swStatus.hasDoc && swStatus.activeDocumentTitle && (
           <div
@@ -191,7 +191,7 @@ export function Sidebar({
         )}
       </div>
 
-      {/* 标签切换 */}
+      {/* Tab switcher */}
       <nav style={{ padding: '10px 10px 0' }}>
         {TABS.map((tab) => {
           const active = activeTab === tab.key;
@@ -226,7 +226,7 @@ export function Sidebar({
 
       <div style={{ flex: 1 }} />
 
-      {/* 对话历史(仅在对话标签下显示) */}
+      {/* Conversation history (only shown on the chat tab) */}
       {activeTab === 'chat' && (
         <div
           style={{
@@ -338,7 +338,7 @@ export function Sidebar({
         </div>
       )}
 
-      {/* 底部操作 */}
+      {/* Bottom actions */}
       <div style={{ padding: '8px 10px 14px', borderTop: `1px solid ${t.sidebarBorder}` }}>
         <button
           onClick={onToggleTheme}

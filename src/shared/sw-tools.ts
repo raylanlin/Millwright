@@ -1,21 +1,21 @@
 // src/shared/sw-tools.ts
 //
-// AI 可调用的 SolidWorks 原子工具清单。
-// 这是纯数据(没有执行逻辑),main 和 renderer 都需要引用:
-//   - main:  可能作为 system prompt 能力清单 / Phase 3 function calling 入口
-//   - renderer:  "工具列表" 标签页展示
+// Catalog of the atomic SolidWorks tools the AI can invoke.
+// This file is pure data (no execution logic); both the main and renderer processes need it:
+//   - main:  serves as the system-prompt capability list / Phase-3 function-calling entry point
+//   - renderer: shown on the "Tools" tab
 
 export interface SWToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, string>;
   category: 'document' | 'sketch' | 'feature' | 'assembly' | 'export' | 'batch' | 'query';
-  /** 用于"试用/预览"时填充的示例参数。不提供表示无参或生成器自行处理缺省 */
+  /** Example parameters pre-filled for "try/preview". Omit when the tool takes no arguments or the generator handles defaults itself */
   exampleParams?: Record<string, any>;
 }
 
 export const SW_TOOLS: SWToolDefinition[] = [
-  // —— 文档管理 ——
+  // —— Document management ——
   { name: 'create_part', description: '创建新零件文档', parameters: {}, category: 'document' },
   { name: 'create_assembly', description: '创建新装配体', parameters: {}, category: 'document' },
   {
@@ -26,7 +26,7 @@ export const SW_TOOLS: SWToolDefinition[] = [
     exampleParams: {},
   },
 
-  // —— 草图 ——
+  // —— Sketches ——
   {
     name: 'create_sketch',
     description: '在指定平面创建草图',
@@ -60,7 +60,7 @@ export const SW_TOOLS: SWToolDefinition[] = [
     exampleParams: { x1: 0, y1: 0, x2: 50, y2: 30 },
   },
 
-  // —— 特征 ——
+  // —— Features ——
   {
     name: 'extrude_feature',
     description: '拉伸特征',
@@ -118,7 +118,7 @@ export const SW_TOOLS: SWToolDefinition[] = [
     exampleParams: { featureName: 'Boss-Extrude1', dimName: 'D1', value: 30 },
   },
 
-  // —— 装配体 ——
+  // —— Assemblies ——
   {
     name: 'insert_component',
     description: '插入零部件',
@@ -134,7 +134,7 @@ export const SW_TOOLS: SWToolDefinition[] = [
     exampleParams: { type: 'coincident' },
   },
 
-  // —— 导出 ——
+  // —— Export ——
   {
     name: 'export_step',
     description: '导出 STEP',
@@ -164,7 +164,7 @@ export const SW_TOOLS: SWToolDefinition[] = [
     exampleParams: { outputPath: 'C:\\output\\part.dxf' },
   },
 
-  // —— 批量 ——
+  // —— Batch ——
   {
     name: 'batch_rename',
     description: '批量重命名',
@@ -173,7 +173,7 @@ export const SW_TOOLS: SWToolDefinition[] = [
     exampleParams: { pattern: 'Part', replacement: 'REV_A_Part' },
   },
 
-  // —— 查询 ——
+  // —— Query ——
   { name: 'check_interference', description: '干涉检查', parameters: {}, category: 'query' },
   { name: 'mass_properties', description: '获取质量属性', parameters: {}, category: 'query' },
   {

@@ -1,17 +1,20 @@
 // src/main/llm/tools-schema.ts
 //
-// 把 SW_TOOLS（26 个原子工具的元数据）转换成大模型 function-calling 需要的
-// JSON-Schema 工具定义。这是 P1 的关键桥梁：让模型"知道"这些工具的存在。
+// Converts `SW_TOOLS` (metadata for the 26 atomic tools) into the JSON-Schema
+// tool definitions expected by model function-calling APIs. This is the key
+// bridge for P1: it makes the model "aware" that these tools exist.
 //
-// - OpenAI 兼容（DeepSeek / Kimi / MiniMax / GPT）: { type:'function', function:{name,description,parameters} }
-// - Anthropic: { name, description, input_schema }
+// - OpenAI-compatible (DeepSeek / Kimi / MiniMax / GPT):
+//     { type:'function', function:{ name, description, parameters } }
+// - Anthropic:
+//     { name, description, input_schema }
 //
-// SW_TOOLS 里的 parameters 是 "字段名 -> 人类可读类型串"（如 'number (mm)'）。
-// 我们把它启发式映射成 JSON-Schema 类型。
+// The `parameters` entries in `SW_TOOLS` are "field name → human-readable type
+// string" (e.g. `'number (mm)'`). We heuristically map them to JSON-Schema types.
 
 import { SW_TOOLS, type SWToolDefinition } from '../../shared/sw-tools';
 
-/** P1 只先接通这几个工具，跑通闭环后再放开全部 26 个 */
+/** P1 only wires up these tools initially; the full set of 26 will be unlocked once the loop is proven end-to-end. */
 export const P1_TOOL_ALLOWLIST = new Set<string>([
   'create_part',
   'create_sketch',
@@ -29,7 +32,7 @@ interface JSONSchema {
   required: string[];
 }
 
-/** 把 'number (mm)' / 'Front | Top | Right' / 'string (可选)' 解析为 JSON-Schema 属性 */
+/** Parse specs like `'number (mm)'` / `'Front | Top | Right'` / `'string (可选)'` (optional) into JSON-Schema properties */
 function paramToSchema(name: string, spec: string): {
   schema: { type: string; description?: string; enum?: string[] };
   required: boolean;
@@ -37,7 +40,7 @@ function paramToSchema(name: string, spec: string): {
   const lower = spec.toLowerCase();
   const optional = lower.includes('可选') || lower.includes('optional');
 
-  // 枚举: "a | b | c"
+  // Enum: "a | b | c"
   if (spec.includes('|')) {
     const enumVals = spec
       .split('|')

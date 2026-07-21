@@ -1,7 +1,8 @@
 // src/main/com/tools.ts
 //
-// 保留此文件作为主进程的工具入口。实际数据已迁到 shared/sw-tools.ts,
-// 让 renderer 也能复用。这里直接 re-export 以保持模块路径稳定。
+// Kept as the main-process entry point for tools. The actual data has been moved
+// to `shared/sw-tools.ts` so the renderer can reuse it. This file simply
+// re-exports from there to keep the module path stable.
 
 export {
   SW_TOOLS,

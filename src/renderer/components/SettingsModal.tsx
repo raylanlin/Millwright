@@ -1,10 +1,10 @@
 // src/renderer/components/SettingsModal.tsx
 //
-// 设置面板:协议 / Base URL / API Key / Model / System Prompt。
-// 关键改进:
-//   - 测试连接走真 IPC(window.api.llm.test),不再 setTimeout 假装
-//   - 保存时持久化到 main 的 electron-store(safeStorage 加密 apiKey)
-//   - 自定义模型输入(当 select=custom 时才显示)
+// Settings panel: protocol / Base URL / API Key / Model / System Prompt.
+// Key improvements:
+//   - "Test connection" now uses real IPC (`window.api.llm.test`) — no more `setTimeout` fake-out
+//   - Save persists to the main process's `electron-store` (with `safeStorage`-encrypted `apiKey`)
+//   - Custom model input (shown only when the select is set to `custom`)
 
 import { useEffect, useMemo, useState } from 'react';
 import type { LLMConfig, LLMErrorInfo, ThemeName, SWStatus } from '../../shared/types';
@@ -31,18 +31,18 @@ interface Props {
 export function SettingsModal({
   t, config, onConfigChange, onClose, swStatus, theme, onThemeChange,
 }: Props) {
-  // 本地草稿,保存时才写回。取消关闭不影响外部状态。
+  // Local draft — only committed back on save. Closing without saving leaves the external state untouched.
   const [draft, setDraft] = useState<LLMConfig>(config);
   const [showKey, setShowKey] = useState(false);
   const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
   const [saving, setSaving] = useState(false);
 
-  // 当外部 config 变(比如异步加载完成)同步一次草稿
+  // Re-sync the draft when the external config changes (e.g. after the initial async load).
   useEffect(() => {
     setDraft(config);
   }, [config]);
 
-  // 下拉选项:如果当前 model 不在预设里,显示为 "custom"
+  // Dropdown options: if the current model is not in the preset list, show it as "custom"
   const presets = MODEL_PRESETS[draft.protocol];
   const modelIsPreset = presets.some((p) => p.value === draft.model);
   const selectValue = modelIsPreset ? draft.model : 'custom';
@@ -67,7 +67,7 @@ export function SettingsModal({
 
   const handleSelectModel = (value: string) => {
     if (value === 'custom') {
-      // 切成自定义,清空 model 让用户填
+      // Switching to "custom" — clear `model` so the user can fill it in
       setDraft((d) => ({ ...d, model: '' }));
     } else {
       setDraft((d) => ({ ...d, model: value }));
@@ -130,7 +130,7 @@ export function SettingsModal({
       role="dialog"
       aria-modal="true"
       onMouseDown={(e) => {
-        // 点击遮罩关闭
+        // Click on the backdrop to close
         if (e.target === e.currentTarget) onClose();
       }}
       style={{
@@ -169,7 +169,7 @@ export function SettingsModal({
           </button>
         </div>
 
-        {/* 主题 */}
+        {/* Theme */}
         <label style={labelStyle}>外观主题</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           {([
@@ -193,7 +193,7 @@ export function SettingsModal({
           ))}
         </div>
 
-        {/* SW 状态 */}
+        {/* SolidWorks status */}
         <div
           style={{
             background: t.cardAlt, borderRadius: 8, padding: '12px 16px', marginBottom: 20,
@@ -217,7 +217,7 @@ export function SettingsModal({
           </div>
         </div>
 
-        {/* 协议 */}
+        {/* Protocol */}
         <label style={labelStyle}>API 协议</label>
         <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
           {(['anthropic', 'openai'] as const).map((p) => (
@@ -342,7 +342,7 @@ export function SettingsModal({
           }}
         />
 
-        {/* 测试状态信息 */}
+        {/* Test status info */}
         {testStatus.kind === 'error' && (
           <div
             style={{

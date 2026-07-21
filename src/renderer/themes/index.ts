@@ -1,7 +1,8 @@
 // src/renderer/themes/index.ts
 //
-// 浅色 / 深色主题 token。
-// 原型里是内联在 App 里的对象,这里拆到独立文件便于组件按需引入。
+// Light / dark theme tokens.
+// Originally these objects were inlined inside `App`; we split them out here so
+// components can import them on demand.
 
 import type { ThemeName } from '../../shared/types';
 
@@ -43,7 +44,7 @@ export interface ThemeTokens {
   selectBg: string;
   placeholder: string;
   dot: string;
-  // 语义状态色(执行结果 / 错误横幅),随主题切换避免深色模式下的浅色碎片
+  // Semantic state colors (execution results / error banners) — switch with the theme to avoid jarring pale patches in dark mode
   successBg: string;
   successText: string;
   dangerBg: string;

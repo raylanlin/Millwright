@@ -1,12 +1,14 @@
 // src/main/com/sw-sidecar.ts
 //
-// 常驻 Python 边车客户端。spawn `python -m sw_agent`，通过 stdio 逐行 JSON-RPC 通信。
-// 这是新架构的执行核心：取代“每次起 cscript 跑 VBS”。
+// Long-lived Python sidecar client. Spawns `python -m sw_agent` and exchanges
+// line-delimited JSON-RPC over stdio. This is the execution core of the new
+// architecture, replacing "spawn cscript + run VBS on every call".
 //
-// 协议（每行一个 JSON）：
+// Protocol (one JSON per line):
 //   → {"id":N,"method":"list_tools"|"call"|"ping"|"reconnect","params":{...}}
 //   ← {"id":N,"ok":true,"data":...} | {"id":N,"ok":false,"error":"..."}
-//   边车启动时先推一条 {"id":null,"ok":true,"data":{"ready":true,...}} 握手。
+//   On startup the sidecar pushes one handshake message
+//     {"id":null,"ok":true,"data":{"ready":true,...}}.
 
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import * as path from 'path';
@@ -25,11 +27,11 @@ interface Pending {
 }
 
 export interface SidecarOptions {
-  /** python 可执行文件；默认按平台猜 */
+  /** Python executable; defaults are inferred from the current platform */
   pythonPath?: string;
-  /** sidecar 包所在目录（含 sw_agent/）；默认 resources/sidecar */
+  /** Directory that contains the sidecar package (must contain `sw_agent/`); defaults to `resources/sidecar` */
   cwd?: string;
-  /** 单次调用超时(ms) */
+  /** Per-call timeout in milliseconds */
   callTimeoutMs?: number;
   onLog?: (line: string) => void;
 }
@@ -52,7 +54,7 @@ export class SWSidecar {
     };
   }
 
-  /** 启动边车进程并等待 ready 握手。可重复调用（已启动则直接返回）。 */
+  /** Start the sidecar process and wait for the `ready` handshake. Safe to call repeatedly (returns immediately if already started). */
   async start(): Promise<void> {
     if (this.proc) return;
     const proc = spawn(this.opts.pythonPath, ['-m', 'sw_agent'], {
@@ -67,7 +69,7 @@ export class SWSidecar {
     proc.stderr.on('data', (b) => this.opts.onLog?.(`[sidecar:err] ${b}`));
     proc.on('exit', (code) => {
       this.opts.onLog?.(`[sidecar] 退出 code=${code}`);
-      if (this.proc === proc) this.proc = null; // BUGFIX: 允许下次 start() 重新拉起（崩溃自愈）
+      if (this.proc === proc) this.proc = null; // BUGFIX: allow a future start() to respawn the process (crash self-heal)
       this.cleanup(new Error(`边车进程退出 (code=${code})`));
     });
     proc.on('error', (e) => {
@@ -75,7 +77,7 @@ export class SWSidecar {
       this.cleanup(new Error(`边车启动失败：${e.message}`));
     });
 
-    // 等 ready 握手（10s 超时）
+    // Wait for the `ready` handshake (10s timeout)
     await new Promise<void>((resolve, reject) => {
       if (this.ready) return resolve();
       const t = setTimeout(() => reject(new Error('边车握手超时（python / pywin32 未就绪？）')), 10_000);
@@ -93,10 +95,10 @@ export class SWSidecar {
     try {
       msg = JSON.parse(s);
     } catch {
-      this.opts.onLog?.(`[sidecar:log] ${s}`); // 非 JSON 当日志
+      this.opts.onLog?.(`[sidecar:log] ${s}`); // treat non-JSON lines as log output
       return;
     }
-    // 握手
+    // Handshake
     if (msg.id == null && msg.data && msg.data.ready) {
       this.ready = true;
       this.readyWaiters.splice(0).forEach((fn) => fn());
@@ -124,15 +126,15 @@ export class SWSidecar {
     });
   }
 
-  /** 取工具清单（OpenAI function schema）。已过滤 internal 工具（如 capture_view）。 */
+  /** Fetch the tool catalog (OpenAI function schema). Internal tools (e.g. `capture_view`) are filtered out. */
   async listTools(includeInternal = false): Promise<any[]> {
     const r = await this.rpc('list_tools');
-    if (!r.ok) throw new Error(r.error || 'list_tools 失败');
+    if (!r.ok) throw new Error(r.error || 'list_tools failed');
     const tools: any[] = r.data || [];
     return includeInternal ? tools : tools.filter((t) => !t.x_meta?.internal);
   }
 
-  /** 调用一个工具，返回结构化结果。 */
+  /** Invoke a tool and return its structured result. */
   call(name: string, args?: Record<string, any>): Promise<SidecarResult> {
     return this.rpc('call', { name, args: args ?? {} });
   }
@@ -164,7 +166,7 @@ export class SWSidecar {
       p.resolve({ ok: false, error: err.message });
     }
     this.pending.clear();
-    this.readyWaiters.splice(0).forEach((fn) => fn()); // 解除 start() 的等待
+    this.readyWaiters.splice(0).forEach((fn) => fn()); // unblock any pending start() calls
   }
 }
 

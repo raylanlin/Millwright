@@ -1,17 +1,22 @@
 // src/main/com/sw-bridge.ts
 //
-// SolidWorks COM 桥接层。
+// SolidWorks COM bridge layer.
 /* eslint-disable no-useless-escape */
 //
-// 通过 cscript.exe 运行 VBScript 实现 COM 操作，完全不依赖 winax 原生模块。
-// 这样在 Windows 上总是可用（cscript 自带），且无需处理原生模块编译问题。
+// COM operations are implemented by running VBScript through `cscript.exe`, removing the
+// need for any native `winax` module. This works everywhere on Windows (cscript ships
+// with the OS) and avoids native module build issues.
 //
-// 所有 COM 调用通过临时 .vbs 文件 + child_process.exec 执行，结果通过 stdout 回传。
+// Every COM call is dispatched by writing a temporary `.vbs` file and invoking
+// `child_process.exec`; results come back over stdout.
 //
-// 关键设计:
-// 1. 所有 VBS 调用有超时保护（默认 10 秒），防止 SolidWorks 无响应导致主进程卡死
-// 2. 非 Windows 平台直接返回未连接，不执行任何操作
-// 3. getRawApp() 不再可用（跨进程无法传递 COM 指针），context-collector 改用 VBS 采集
+// Key design points:
+// 1. Every VBS call has a timeout guard (default 15 seconds) so a hung SolidWorks
+//    instance cannot freeze the main process.
+// 2. On non-Windows platforms we short-circuit and report "not connected"
+//    without performing any work.
+// 3. `getRawApp()` is no longer available (COM pointers cannot cross processes);
+//    `context-collector` collects context via dedicated VBS scripts instead.
 
 import * as fs from 'fs';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -25,11 +30,11 @@ const VBS_TIMEOUT_MS = 15_000;
 export class SolidWorksBridge {
   private cachedStatus: SWStatus = { connected: false };
   private lastCheck = 0;
-  private checkInterval = 3_000; // 3 秒内缓存状态不刷新
+  private checkInterval = 3_000; // cached status is not refreshed within this window
 
   /**
-   * 检查 SolidWorks 是否正在运行。
-   * 通过 GetObject 尝试连接到已有实例（不启动新进程）。
+   * Check whether SolidWorks is running.
+   * Uses `GetObject` to attach to an already-running instance — never starts a new process.
    */
   async connect(): Promise<boolean> {
     if (process.platform !== 'win32') {
@@ -51,8 +56,9 @@ export class SolidWorksBridge {
   }
 
   /**
-   * FEATURE: 取当前真实文档状态（不走连接流程，供轮询/每次对话前调用）。
-   * 总是 fetch —— 调用方应自己控制频率。
+   * FEATURE: fetch the real current document state (does not run the connection flow;
+   * meant to be polled / called before each conversation turn).
+   * Always fetches — the caller is responsible for throttling.
    */
   async refresh(): Promise<SWStatus> {
     if (process.platform !== 'win32') {
@@ -67,14 +73,14 @@ export class SolidWorksBridge {
   }
 
   /**
-   * 心跳检查 —— 快速判断 SolidWorks 是否还活着。
-   * 利用缓存避免频繁创建临时文件。
+   * Heartbeat check — quickly tells whether SolidWorks is still alive.
+   * Uses the cache to avoid spawning temp files too often.
    */
   isConnected(): boolean {
     if (Date.now() - this.lastCheck < this.checkInterval) {
       return this.cachedStatus.connected;
     }
-    // 异步刷新（不阻塞）
+    // Refresh asynchronously (do not block)
     this.checkConnection().then((ok) => {
       if (!ok) {
         this.cachedStatus = { connected: false };
@@ -88,7 +94,7 @@ export class SolidWorksBridge {
     return this.cachedStatus.version;
   }
 
-  /** 不再返回 COM 对象，返回文档路径和类型信息 */
+  /** No longer returns a COM object; returns document path and type info instead */
   getActiveDocumentInfo(): { path?: string; type: SWDocumentType } | null {
     return this.cachedStatus.connected
       ? {
@@ -106,26 +112,26 @@ export class SolidWorksBridge {
     return this.cachedStatus.activeDocumentPath;
   }
 
-  /** 聚合状态 */
+  /** Aggregated status */
   getStatus(): SWStatus {
     return this.cachedStatus;
   }
 
   /**
-   * getRawApp() 不再可用 —— cscript 跨进程无法返回 COM 指针。
-   * context-collector 和 backup 改用专用的 VBS 采集方法。
+   * `getRawApp()` is no longer available — cscript cannot return COM pointers across processes.
+   * `context-collector` and `backup` use dedicated VBS-based collection methods instead.
    */
   getRawApp(): never {
     throw new Error('getRawApp() is no longer supported (cscript/VBS-based COM)');
   }
 
   /**
-   * 执行 VBS 脚本采集当前文档的上下文信息。
-   * 返回 JSON 给 context-collector 使用。
+   * Execute a VBS script that collects context info for the current document.
+   * Returns JSON for `context-collector` to consume.
    */
   async collectDocumentFeatures(): Promise<DocumentFeatures> {
     if (process.platform !== 'win32') return emptyFeatures();
-    // FIX-vbs-line47：VBS 任何失败都降级为空特征上下文，绝不拖垮聊天流
+    // FIX-vbs-line47: any VBS failure is degraded to an empty feature context so the chat stream never breaks
     try {
       const vbs = buildCollectFeaturesVBS();
       const stdout = await runVBS(vbs);
@@ -137,7 +143,7 @@ export class SolidWorksBridge {
   }
 
   /**
-   * 执行 VBS 脚本备份当前文档。
+   * Execute a VBS script that backs up the current document.
    */
   async backupDocument(backupPath: string, originalPath?: string): Promise<boolean> {
     if (process.platform !== 'win32') return false;
@@ -151,14 +157,14 @@ export class SolidWorksBridge {
     }
   }
 
-  // ===== 私有方法 =====
+  // ===== Private methods =====
 
   private async checkConnection(): Promise<boolean> {
-    // 只用 GetObject 连接已运行实例。
-    // 绝不 CreateObject —— 那会启动一个隐形的新 SolidWorks 进程,
-    // 后续所有脚本都会连到看不见的实例里“成功”执行。
-    // 注意: GetObject 失败时 swApp 是 Empty 而非 Nothing,
-    // 必须用 Err.Number + IsObject 判断,不能用 Is Nothing。
+    // Only use `GetObject` to attach to an already-running instance.
+    // Never use `CreateObject` — that would spin up an invisible new SolidWorks process,
+    // and every subsequent script would "succeed" against that hidden instance.
+    // Note: when `GetObject` fails, `swApp` is `Empty` (not `Nothing`),
+    // so we must check via `Err.Number` + `IsObject` instead of `Is Nothing`.
     const vbs = `
 On Error Resume Next
 Dim swApp
@@ -177,9 +183,9 @@ End If`;
   }
 
   private async fetchStatus(): Promise<SWStatus> {
-    // FEATURE: 逐字段容错，任何可选调用失败都不清空核心字段；
-    // hasDoc/activeDocumentTitle 让 UI 能正确显示当前文档（即使未保存）。
-    // 注意：变量名避开 VBScript 保留字（dim/date/type 等），用 dt/dtStr/dp/title/ver。
+    // FEATURE: per-field error tolerance — any optional call failure must not blank out core fields;
+    // `hasDoc` / `activeDocumentTitle` let the UI display the current document correctly (even when unsaved).
+    // Note: variable names avoid VBScript reserved words (`dim`/`date`/`type`/etc.) — we use `dt`/`dtStr`/`dp`/`title`/`ver`.
     const vbs = `
 On Error Resume Next
 Dim swApp, doc
@@ -226,13 +232,13 @@ End Function`;
       if (!stdout) return { connected: true };
       return JSON.parse(stdout);
     } catch {
-      // 即使 VBS 挂了也保持 connected 状态（避免 UI 把短暂 VBS 错误误判为断连）
+      // Even if VBS fails, keep `connected: true` so the UI does not misread a brief VBS error as a disconnect
       return { connected: true };
     }
   }
 }
 
-// ===== VBS 执行器 =====
+// ===== VBS executor =====
 
 function runVBS(scriptCode: string): Promise<string> {
   if (process.platform !== 'win32') {
@@ -257,7 +263,7 @@ function runVBS(scriptCode: string): Promise<string> {
 }
 
 
-// ===== VBS 脚本生成 =====
+// ===== VBS script generators =====
 
 export interface DocumentFeatures {
   features: Array<{ name: string; type: string; suppressed: boolean }>;
@@ -462,7 +468,7 @@ End Function`;
 }
 
 function buildBackupVBS(backupPath: string, originalPath?: string): string {
-  // VBS 字符串没有反斜杠转义,路径直接嵌入即可(旧版的 \\\\ 双写是多余的)
+  // VBS strings have no backslash escaping, so the path can be embedded directly (the legacy "\\\\" doubling is unnecessary)
   const restore = originalPath
     ? `\n' 恢复原文档（SaveAs3 会改变活动文档路径）\nswApp.OpenDoc7 "${originalPath}", "", 1, ""`
     : '';
@@ -480,7 +486,7 @@ If Err.Number <> 0 Then WScript.Quit 1${restore}
 WScript.Quit 0`;
 }
 
-// ===== 单例 =====
+// ===== Singleton =====
 
 let instance: SolidWorksBridge | null = null;
 export function getBridge(): SolidWorksBridge {

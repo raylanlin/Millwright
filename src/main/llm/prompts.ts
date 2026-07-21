@@ -1,12 +1,12 @@
 // src/main/llm/prompts.ts
 
 /**
- * 默认系统提示词。
- * 设计原则:
- * - 明确角色(SolidWorks 自动化助手)
- * - 规定输出格式(代码块语言标记)
- * - 提示常用 API 要点,降低 hallucination
- * - 内置安全规则
+ * Default system prompt.
+ * Design principles:
+ * - Clearly state the role (SolidWorks automation assistant).
+ * - Enforce an output format (fenced code blocks with language tags).
+ * - Cover commonly-used API points to reduce hallucination.
+ * - Embed safety rules.
  */
 export const DEFAULT_SYSTEM_PROMPT = `你是一个 SolidWorks 自动化专家助手。
 
@@ -60,8 +60,8 @@ export const DEFAULT_SYSTEM_PROMPT = `你是一个 SolidWorks 自动化专家助
 `;
 
 /**
- * 合并用户自定义提示词与默认提示词。
- * 如果用户自定义提示词非空,覆盖默认;否则使用默认。
+ * Merge a user-supplied system prompt with the default one.
+ * If the user's prompt is non-empty, it overrides the default; otherwise the default is used.
  */
 export function resolveSystemPrompt(custom?: string): string {
   const trimmed = custom?.trim();

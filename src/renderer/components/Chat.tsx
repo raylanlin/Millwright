@@ -1,7 +1,8 @@
 // src/renderer/components/Chat.tsx
 //
-// 消息列表 + 自动滚动。
-// 输入框、执行逻辑由上层 App 传入 —— Chat 不关心业务,只负责展示 + 滚动。
+// Message list + auto-scroll.
+// The input box and execution logic are owned by the parent `App` — `Chat` does
+// not know about business logic, it just renders the messages and scrolls.
 
 import { useEffect, useRef } from 'react';
 import type { ChatMessage as ChatMsg, ScriptResult } from '../../shared/types';
@@ -12,7 +13,7 @@ interface Props {
   t: ThemeTokens;
   messages: ChatMsg[];
   isGenerating: boolean;
-  /** 每条消息的执行结果(按消息索引存) */
+  /** Execution result for each message (keyed by message index) */
   execResults: Record<number, ScriptResult>;
   executingIndex: number | null;
   onRunScript: (index: number, code: string, lang: 'vba' | 'python') => void;
@@ -30,8 +31,9 @@ export function Chat({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 消息变化时自动滚到底:直接设容器 scrollTop = scrollHeight,
-  // 避免流式输出时逐 token 触发页面整体滚动抖动。
+  // When the message list changes, auto-scroll to the bottom: directly set
+  // `container.scrollTop = scrollHeight` to avoid whole-page scroll jank caused
+  // by per-token scrolling during streaming.
   useEffect(() => {
     const el = containerRef.current;
     if (el) el.scrollTop = el.scrollHeight;

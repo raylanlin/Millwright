@@ -1,9 +1,10 @@
 // src/main/llm/openai.ts
 //
-// OpenAI 兼容协议适配器
-// 覆盖 OpenAI、DeepSeek、阿里百炼、MiniMax、硅基流动、Ollama 等。
+// OpenAI-compatible protocol adapter.
+// Covers OpenAI, DeepSeek, Alibaba Bailian, MiniMax, SiliconFlow, Ollama, and others.
 //
-// 所有服务都实现 /chat/completions,请求体结构基本一致,流式都是标准 SSE:
+// All services implement `/chat/completions` with a near-identical request body,
+// and streaming uses the standard SSE format:
 //   data: {"choices":[{"delta":{"content":"..."}}]}
 //   data: [DONE]
 
@@ -47,7 +48,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       [this.config.systemPrompt, convoSystem].filter(Boolean).join('\n\n'),
     );
 
-    // 首条必须是 system;其余原样透传
+    // The first message must be the system prompt; the rest are passed through unchanged
     const finalMessages = [
       { role: 'system', content: systemPrompt },
       ...rest.map((m) => ({ role: m.role, content: m.content })),
@@ -163,7 +164,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         if (choice?.finish_reason) {
           finishReason = mapFinishReason(choice.finish_reason);
         }
-        // 部分服务商(如 DeepSeek)会在最后一条事件带 usage
+        // Some providers (e.g. DeepSeek) include `usage` on the final event
         if (payload.usage) {
           usage = {
             inputTokens: payload.usage.prompt_tokens,
@@ -213,7 +214,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     }
   }
 
-  // —— P1: Function Calling / Agent 模式 ——
+  // —— P1: Function Calling / Agent mode ——
 
   private buildToolBody(openAIMessages: any[], tools: any[]) {
     return {
@@ -227,7 +228,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     };
   }
 
-  // 把内部 ChatMessage[] 转成 OpenAI 线格式，正确还原 tool_calls / role:'tool'
+  // Convert internal `ChatMessage[]` to the OpenAI wire format, faithfully preserving `tool_calls` / `role:'tool'`.
   private buildToolMessages(messages: ChatMessage[]): any[] {
     const { system } = this.splitSystem(
       messages.filter((m) => !(m.role === 'system' && m.toolCalls)),
@@ -238,7 +239,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     const out: any[] = [{ role: 'system', content: systemPrompt }];
 
     for (const m of messages) {
-      // 承载工具"结果"的消息（agent-loop 用 role:'system' + toolCalls[0].result 承载）
+      // Message carrying a tool "result" (agent-loop uses role:'system' + toolCalls[0].result for this)
       if (m.role === 'system' && m.toolCalls && m.toolCalls[0]?.result != null) {
         const tc = m.toolCalls[0];
         out.push({
@@ -248,7 +249,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         });
         continue;
       }
-      // 助手发起工具调用的消息
+      // Message where the assistant initiates tool calls
       if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
         out.push({
           role: 'assistant',
@@ -261,14 +262,14 @@ export class OpenAIAdapter extends BaseLLMAdapter {
         });
         continue;
       }
-      // 普通的 system 已在开头合并，跳过
+      // Plain `system` messages were already merged into the leading system message; skip
       if (m.role === 'system') continue;
       out.push({ role: m.role, content: this.contentOf(m) });
     }
     return out;
   }
 
-  /** P3：user 消息带 images → OpenAI 多模态 content（text + image_url 列表） */
+  /** P3: user messages carrying `images` → OpenAI multimodal content (text + image_url list) */
   private contentOf(m: ChatMessage): any {
     if (!m.images?.length) return m.content;
     return [
@@ -284,7 +285,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
   ): Promise<LLMResponse> {
     const { signal: s, cleanup } = this.withTimeout(signal);
     try {
-      // P3：外部传入 tools（边车 listTools 注入）；未传则退回内置全量
+      // P3: external `tools` argument (injected from `sidecar.listTools`); fall back to the built-in full set when omitted
       const toolDefs = tools ?? buildOpenAITools(false);
       const body = this.buildToolBody(this.buildToolMessages(messages), toolDefs);
       const res = await fetch(`${this.getBaseURL()}/chat/completions`, {

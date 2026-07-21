@@ -1,11 +1,11 @@
 // src/main/com/context-collector.ts
 //
-// 从当前打开的 SolidWorks 文档中采集上下文信息。
-// 采集的信息会注入到 AI 的 system prompt 中，
-// 让 AI 知道用户当前在操作什么文件、有哪些特征和尺寸。
+// Collects context information from the currently open SolidWorks document.
+// The collected information is injected into the AI's system prompt so it
+// knows which file the user is editing and which features/dimensions exist.
 //
-// 所有 COM 调用通过 sw-bridge 的 VBScript 代理完成，
-// 不再直接调用 COM API（winax 依赖已移除）。
+// All COM calls go through the VBScript proxy exposed by `sw-bridge`; we no
+// longer call COM APIs directly (the `winax` dependency has been removed).
 
 import type { SolidWorksBridge } from './sw-bridge';
 
@@ -23,8 +23,8 @@ export interface SWDocumentContext {
 }
 
 /**
- * 从当前活动文档采集上下文。
- * 如果没有打开文档或 SolidWorks 未连接，返回 null。
+ * Collect context from the currently active document.
+ * Returns null when no document is open or SolidWorks is not connected.
  */
 export async function collectDocumentContext(
   bridge: SolidWorksBridge,
@@ -32,11 +32,11 @@ export async function collectDocumentContext(
   const status = bridge.getStatus();
   if (!status.connected) return null;
 
-  // 采集文档特征信息
+  // Collect feature information from the document
   const features = await bridge.collectDocumentFeatures();
   if (!features) return null;
 
-  // FEATURE：用 activeDocumentTitle 优先作为显示名（未保存时 SW 也会返回“零件1”等占位标题）
+  // FEATURE: prefer `activeDocumentTitle` as the display name (SW returns placeholder titles like "Part1" for unsaved docs)
   const filePath =
     status.activeDocumentPath && status.activeDocumentPath !== '(未保存)'
       ? status.activeDocumentPath
@@ -45,10 +45,10 @@ export async function collectDocumentContext(
     status.activeDocumentTitle ||
     (filePath ? filePath.split('\\').pop()! : '(未命名文档)');
 
-  // docType 不再瞎猜 part —— SW 实际返回什么就什么
+  // docType is no longer guessed as `part` — whatever SW actually reports is what we return
   const docType = status.activeDocumentType ?? null;
 
-  // 没文档时给一个明确的占位对象，别让下游 model 误判
+  // When no document is open, return an explicit placeholder object so downstream models don't misjudge the state
   if (!status.hasDoc || !docType) {
     return {
       fileName: '(当前无打开文档)',
@@ -77,7 +77,7 @@ export async function collectDocumentContext(
 }
 
 /**
- * 将上下文格式化为可嵌入 system prompt 的文本。
+ * Format the context as text that can be embedded in the system prompt.
  */
 export async function formatContextForPromptAsync(
   bridge: SolidWorksBridge,
@@ -88,8 +88,8 @@ export async function formatContextForPromptAsync(
 }
 
 /**
- * 将上下文格式化为可嵌入 system prompt 的文本。
- * 同步版本，直接从缓存读取（不触发 VBS 调用）。
+ * Format the context as text that can be embedded in the system prompt.
+ * Synchronous version that reads from cache directly (does not trigger any VBS call).
  */
 export function formatContextForPrompt(ctx: SWDocumentContext): string {
   const lines: string[] = [
@@ -108,7 +108,7 @@ export function formatContextForPrompt(ctx: SWDocumentContext): string {
     lines.push(`- SolidWorks 版本: ${ctx.swVersion}`);
   }
 
-  // 特征树
+  // Feature tree
   if (ctx.features.length > 0) {
     lines.push('', '### 特征树');
     for (const f of ctx.features) {
@@ -120,7 +120,7 @@ export function formatContextForPrompt(ctx: SWDocumentContext): string {
     }
   }
 
-  // 尺寸
+  // Dimensions
   if (ctx.dimensions.length > 0) {
     lines.push('', '### 主要尺寸');
     for (const d of ctx.dimensions) {
@@ -131,7 +131,7 @@ export function formatContextForPrompt(ctx: SWDocumentContext): string {
     }
   }
 
-  // 装配体组件
+  // Assembly components
   if (ctx.components && ctx.components.length > 0) {
     lines.push('', '### 装配体组件');
     for (const c of ctx.components) {
@@ -143,7 +143,7 @@ export function formatContextForPrompt(ctx: SWDocumentContext): string {
     }
   }
 
-  // 自定义属性
+  // Custom properties
   const propKeys = Object.keys(ctx.customProperties);
   if (propKeys.length > 0) {
     lines.push('', '### 自定义属性');

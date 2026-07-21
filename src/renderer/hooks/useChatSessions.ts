@@ -1,15 +1,16 @@
 // src/renderer/hooks/useChatSessions.ts
 //
-// 对话历史会话管理 hook。
-// 把主进程的 chat-store(window.api.chat.*)封装成 React 友好的状态:
-//   - sessions: 侧边栏列表用的会话元数据(按更新时间降序)
-//   - currentId: 当前会话 id(null = 尚未落库的新会话)
-//   - save:    保存当前会话内容(无 currentId 自动新建);只在有真实用户对话时落库
-//   - select:  加载某会话的完整消息(供调用方 setMessages)
-//   - startNew: 开新会话(清空 currentId,调用方负责重置消息)
-//   - remove:  删除会话
+// Hook for managing chat-history sessions.
+// Wraps the main-process `chat-store` (`window.api.chat.*`) into React-friendly state:
+//   - `sessions`:   metadata used by the sidebar list (sorted by `updatedAt` desc)
+//   - `currentId`:  current session id (`null` for a brand-new session not yet persisted)
+//   - `save`:       persist the current session content (auto-creates an id if missing);
+//                   only writes when the conversation actually contains user input
+//   - `select`:     load a session's full messages (caller feeds them into `setMessages`)
+//   - `startNew`:   open a new session (clears `currentId`; caller resets the message list)
+//   - `remove`:     delete a session
 //
-// 设计:createdAt 用 ref 跟踪,避免重复保存时把原始创建时间冲掉。
+// Design note: `createdAt` is tracked via a ref so repeated saves don't overwrite the original timestamp.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, ChatSession, ChatSessionMeta } from '../../shared/types';
@@ -23,7 +24,7 @@ export function useChatSessions() {
     try {
       setSessions(await window.api.chat.list());
     } catch {
-      // 列表加载失败不阻塞使用
+      // A failed list load must not block the rest of the app
     }
   }, []);
 
@@ -32,8 +33,9 @@ export function useChatSessions() {
   }, [refresh]);
 
   /**
-   * 保存当前会话内容。无 currentId 时自动创建一个 id。
-   * 只有当消息里出现过用户输入才落库 —— 避免只有欢迎语的初始态生成空会话。
+   * Persist the current session content. Auto-creates an id when `currentId` is unset.
+   * The session is only persisted when the messages include at least one user turn —
+   * this avoids writing empty sessions that only contain the greeting message.
    */
   const save = useCallback(
     async (messages: ChatMessage[]) => {
@@ -49,7 +51,7 @@ export function useChatSessions() {
 
       const session: ChatSession = {
         id,
-        title: '', // 主进程 saveSession 会从首条用户消息派生标题
+        title: '', // the main-process `saveSession` derives the title from the first user message
         messages,
         createdAt: createdAtRef.current,
         updatedAt: Date.now(),
@@ -59,13 +61,13 @@ export function useChatSessions() {
         await window.api.chat.save(session);
         await refresh();
       } catch {
-        // 保存失败不影响当前对话
+        // A save failure must not interrupt the current conversation
       }
     },
     [currentId, refresh],
   );
 
-  /** 加载某会话完整数据,返回给调用方用于 setMessages。 */
+  /** Load a session's full record and return it to the caller for `setMessages`. */
   const select = useCallback(async (id: string): Promise<ChatSession | null> => {
     try {
       const s = await window.api.chat.get(id);
@@ -79,13 +81,13 @@ export function useChatSessions() {
     }
   }, []);
 
-  /** 开新会话:清空 currentId,调用方负责重置消息列表。 */
+  /** Start a new session — clears `currentId`; the caller is responsible for resetting the message list. */
   const startNew = useCallback(() => {
     setCurrentId(null);
     createdAtRef.current = Date.now();
   }, []);
 
-  /** 删除会话。若删的是当前会话,顺带清空 currentId。 */
+  /** Delete a session. If it was the current one, `currentId` is also cleared. */
   const remove = useCallback(
     async (id: string) => {
       try {
@@ -96,7 +98,7 @@ export function useChatSessions() {
         }
         await refresh();
       } catch {
-        // 删除失败忽略
+        // Swallow delete failures silently
       }
     },
     [currentId, refresh],

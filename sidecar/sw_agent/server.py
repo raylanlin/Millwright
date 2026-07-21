@@ -1,8 +1,9 @@
-"""sw_agent.server — stdio JSON-RPC 循环。
+"""sw_agent.server — stdio JSON-RPC loop.
 
-逐行读 stdin 的 JSON 请求，逐行写 stdout 的 JSON 响应。
-方法：ping / list_tools / call。
-导入 tools.* 会触发 @tool 装饰器完成注册。
+Reads line-delimited JSON requests from stdin and writes line-delimited
+JSON responses to stdout.
+Methods: ping / list_tools / call.
+Importing tools.* triggers @tool decorator registration.
 """
 from __future__ import annotations
 import json
@@ -11,7 +12,7 @@ import sys
 from . import registry
 from .bridge import Context
 
-# 触发工具注册（顺序即分类展示顺序）
+# Trigger tool registration (the import order also defines category display order)
 from .tools import (  # noqa: F401  E402
     view,
     document,
@@ -31,7 +32,7 @@ def _write(obj: dict) -> None:
 
 def serve() -> None:
     ctx = Context()
-    # 就绪信号（Node 侧握手用）
+    # Readiness signal (used by the Node side for handshake)
     _write({"id": None, "ok": True, "data": {"ready": True, "tool_count": len(registry.TOOLS)}})
     for raw in sys.stdin:
         raw = raw.strip()
@@ -40,7 +41,7 @@ def serve() -> None:
         try:
             req = json.loads(raw)
         except json.JSONDecodeError:
-            _write({"id": None, "ok": False, "error": "无效 JSON"})
+            _write({"id": None, "ok": False, "error": "invalid JSON"})
             continue
         rid = req.get("id")
         method = req.get("method")
@@ -56,7 +57,7 @@ def serve() -> None:
                 ctx.reconnect()
                 data = {"reconnected": True}
             else:
-                raise ValueError(f"未知方法：{method}")
+                raise ValueError(f"unknown method: {method}")
             _write({"id": rid, "ok": True, "data": data})
-        except Exception as e:  # noqa: BLE001 —— 任何工具异常都归一化为结构化错误回给 agent
+        except Exception as e:  # noqa: BLE001 — normalize any tool exception into a structured error for the agent
             _write({"id": rid, "ok": False, "error": str(e)})

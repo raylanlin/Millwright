@@ -1,7 +1,8 @@
 // src/renderer/components/ChatMessage.tsx
 //
-// 单条消息气泡。
-// 职责仅限展示,不管状态更新。执行/复制等动作通过 props 回调。
+// Single message bubble.
+// Its only responsibility is rendering; state changes live elsewhere.
+// Run/copy actions are wired through prop callbacks.
 
 import type { ChatMessage as ChatMsg, ScriptResult } from '../../shared/types';
 import type { ThemeTokens } from '../themes';
@@ -9,9 +10,9 @@ import type { ThemeTokens } from '../themes';
 interface Props {
   msg: ChatMsg;
   t: ThemeTokens;
-  /** 脚本执行结果(成功/失败提示) */
+  /** Script execution result (success / failure banner) */
   execResult?: ScriptResult;
-  /** 是否正在执行这段代码 */
+  /** Whether this code block is currently being executed */
   isExecuting?: boolean;
   onRunScript?: (code: string, lang: 'vba' | 'python') => void;
   onCopyCode?: (code: string) => void;
@@ -52,7 +53,7 @@ export function ChatMessage({
           wordBreak: 'break-word',
         }}
       >
-        {/* 工具调用标签 */}
+        {/* Tool-call tag */}
         {!isUser && msg.toolCalls && msg.toolCalls.length > 0 && (
           <div
             style={{
@@ -81,7 +82,7 @@ export function ChatMessage({
           </div>
         )}
 
-        {/* 代码块 */}
+        {/* Code block */}
         {msg.code && (
           <div style={{ marginBottom: 9 }}>
             <div
@@ -150,7 +151,7 @@ export function ChatMessage({
               {msg.code}
             </div>
 
-            {/* 执行结果 */}
+            {/* Execution result */}
             {execResult && (
               <div
                 style={{

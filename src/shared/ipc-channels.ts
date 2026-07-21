@@ -1,5 +1,5 @@
 // src/shared/ipc-channels.ts
-// IPC 频道常量 — 主进程与渲染进程共用
+// IPC channel constants — shared between main and renderer processes
 
 export const IpcChannels = {
   // SolidWorks
@@ -16,13 +16,13 @@ export const IpcChannels = {
   LLM_CANCEL: 'llm:cancel',
   LLM_TEST: 'llm:test',
 
-  // 脚本
+  // Scripts
   SCRIPT_GENERATE: 'script:generate',
   SCRIPT_VALIDATE: 'script:validate',
   SCRIPT_RUN: 'script:run',
   SCRIPT_RESULT: 'script:result',
 
-  // 配置
+  // Config
   CONFIG_SAVE: 'config:save',
   CONFIG_LOAD: 'config:load',
 
@@ -32,7 +32,7 @@ export const IpcChannels = {
   AGENT_CONFIRM_REQUEST: 'agent:confirm-request',
   AGENT_CONFIRM_REPLY: 'agent:confirm-reply',
 
-  // 对话历史
+  // Conversation history
   CHAT_LIST: 'chat:list',
   CHAT_GET: 'chat:get',
   CHAT_SAVE: 'chat:save',

@@ -1,7 +1,9 @@
-"""sw_agent.tools.sketch —— 草图：进入/退出 + 图元 + 关系/尺寸。
+"""sw_agent.tools.sketch — sketch: enter/exit + entities + relations/dimensions.
 
-坐标/尺寸入参一律 mm，内部 units.mm() 转米。多数图元方法（CreateCornerRectangle /
-CreateCircle / CreateLine / CreateArc / CreatePolygon）跨版本稳定，签名明确。
+All coordinate / dimension inputs are in mm; internally units.mm() converts
+to meters. Most entity methods (CreateCornerRectangle / CreateCircle /
+CreateLine / CreateArc / CreatePolygon) are stable across SolidWorks
+versions with well-defined signatures.
 """
 from __future__ import annotations
 
@@ -12,23 +14,23 @@ from .. import units
 
 def _require_sketch(ctx: Context):
     if ctx.sketch_mgr.ActiveSketch is None:
-        raise SWError("当前不在草图中，请先 start_sketch。")
+        raise SWError("not currently editing a sketch; call start_sketch first.")
 
 
 @tool(
-    "start_sketch", "在指定基准面新建草图并进入编辑",
-    params={"plane": {"type": "string", "enum": ["front", "top", "right"], "desc": "基准面"}},
+    "start_sketch", "Start a new sketch on the specified reference plane and enter edit mode",
+    params={"plane": {"type": "string", "enum": ["front", "top", "right"], "desc": "Reference plane"}},
     category="sketch",
 )
 def start_sketch(ctx: Context, plane: str):
     ctx.clear_selection()
     if not ctx.select_plane(plane):
-        raise SWError(f"选择基准面失败：{plane}")
+        raise SWError(f"failed to select reference plane: {plane}")
     ctx.sketch_mgr.InsertSketch(True)
     return {"sketch_on": plane}
 
 
-@tool("exit_sketch", "退出当前草图", params={}, category="sketch")
+@tool("exit_sketch", "Exit the current sketch", params={}, category="sketch")
 def exit_sketch(ctx: Context):
     if ctx.sketch_mgr.ActiveSketch is not None:
         ctx.sketch_mgr.InsertSketch(True)
@@ -36,12 +38,12 @@ def exit_sketch(ctx: Context):
 
 
 @tool(
-    "sketch_rectangle", "画矩形（左下角 + 宽高）",
+    "sketch_rectangle", "Draw a rectangle (lower-left corner + width/height)",
     params={
-        "x": {"type": "number", "desc": "左下角X(mm)", "default": 0},
-        "y": {"type": "number", "desc": "左下角Y(mm)", "default": 0},
-        "width": {"type": "number", "desc": "宽(mm)"},
-        "height": {"type": "number", "desc": "高(mm)"},
+        "x": {"type": "number", "desc": "Lower-left X (mm)", "default": 0},
+        "y": {"type": "number", "desc": "Lower-left Y (mm)", "default": 0},
+        "width": {"type": "number", "desc": "Width (mm)"},
+        "height": {"type": "number", "desc": "Height (mm)"},
     },
     category="sketch",
 )
@@ -54,11 +56,11 @@ def sketch_rectangle(ctx: Context, width: float, height: float, x: float = 0, y:
 
 
 @tool(
-    "sketch_circle", "画圆（圆心 + 半径）",
+    "sketch_circle", "Draw a circle (center + radius)",
     params={
-        "x": {"type": "number", "desc": "圆心X(mm)", "default": 0},
-        "y": {"type": "number", "desc": "圆心Y(mm)", "default": 0},
-        "radius": {"type": "number", "desc": "半径(mm)"},
+        "x": {"type": "number", "desc": "Center X (mm)", "default": 0},
+        "y": {"type": "number", "desc": "Center Y (mm)", "default": 0},
+        "radius": {"type": "number", "desc": "Radius (mm)"},
     },
     category="sketch",
 )
@@ -69,10 +71,10 @@ def sketch_circle(ctx: Context, radius: float, x: float = 0, y: float = 0):
 
 
 @tool(
-    "sketch_line", "画直线段",
+    "sketch_line", "Draw a line segment",
     params={
-        "x1": {"type": "number", "desc": "起点X(mm)"}, "y1": {"type": "number", "desc": "起点Y(mm)"},
-        "x2": {"type": "number", "desc": "终点X(mm)"}, "y2": {"type": "number", "desc": "终点Y(mm)"},
+        "x1": {"type": "number", "desc": "Start X (mm)"}, "y1": {"type": "number", "desc": "Start Y (mm)"},
+        "x2": {"type": "number", "desc": "End X (mm)"}, "y2": {"type": "number", "desc": "End Y (mm)"},
     },
     category="sketch",
 )
@@ -83,10 +85,10 @@ def sketch_line(ctx: Context, x1: float, y1: float, x2: float, y2: float):
 
 
 @tool(
-    "sketch_centerline", "画中心线（旋转/镜像用）",
+    "sketch_centerline", "Draw a centerline (used for revolve/mirror)",
     params={
-        "x1": {"type": "number", "desc": "起点X(mm)"}, "y1": {"type": "number", "desc": "起点Y(mm)"},
-        "x2": {"type": "number", "desc": "终点X(mm)"}, "y2": {"type": "number", "desc": "终点Y(mm)"},
+        "x1": {"type": "number", "desc": "Start X (mm)"}, "y1": {"type": "number", "desc": "Start Y (mm)"},
+        "x2": {"type": "number", "desc": "End X (mm)"}, "y2": {"type": "number", "desc": "End Y (mm)"},
     },
     category="sketch",
 )
@@ -97,12 +99,12 @@ def sketch_centerline(ctx: Context, x1: float, y1: float, x2: float, y2: float):
 
 
 @tool(
-    "sketch_arc_center", "画圆心弧（圆心+起点+终点+方向）",
+    "sketch_arc_center", "Draw a center-arc (center + start + end + direction)",
     params={
-        "cx": {"type": "number", "desc": "圆心X(mm)"}, "cy": {"type": "number", "desc": "圆心Y(mm)"},
-        "sx": {"type": "number", "desc": "起点X(mm)"}, "sy": {"type": "number", "desc": "起点Y(mm)"},
-        "ex": {"type": "number", "desc": "终点X(mm)"}, "ey": {"type": "number", "desc": "终点Y(mm)"},
-        "direction": {"type": "number", "desc": "1 逆时针 / -1 顺时针", "default": 1},
+        "cx": {"type": "number", "desc": "Center X (mm)"}, "cy": {"type": "number", "desc": "Center Y (mm)"},
+        "sx": {"type": "number", "desc": "Start X (mm)"}, "sy": {"type": "number", "desc": "Start Y (mm)"},
+        "ex": {"type": "number", "desc": "End X (mm)"}, "ey": {"type": "number", "desc": "End Y (mm)"},
+        "direction": {"type": "number", "desc": "1 = counter-clockwise / -1 = clockwise", "default": 1},
     },
     category="sketch",
 )
@@ -117,19 +119,19 @@ def sketch_arc_center(ctx, cx, cy, sx, sy, ex, ey, direction=1):
 
 
 @tool(
-    "sketch_polygon", "画正多边形",
+    "sketch_polygon", "Draw a regular polygon",
     params={
-        "cx": {"type": "number", "desc": "中心X(mm)", "default": 0},
-        "cy": {"type": "number", "desc": "中心Y(mm)", "default": 0},
-        "radius": {"type": "number", "desc": "外接/内切半径(mm)"},
-        "sides": {"type": "number", "desc": "边数"},
-        "inscribed": {"type": "boolean", "desc": "True 内切 / False 外接", "default": True},
+        "cx": {"type": "number", "desc": "Center X (mm)", "default": 0},
+        "cy": {"type": "number", "desc": "Center Y (mm)", "default": 0},
+        "radius": {"type": "number", "desc": "Circumradius or inradius (mm)"},
+        "sides": {"type": "number", "desc": "Number of sides"},
+        "inscribed": {"type": "boolean", "desc": "True = inscribed / False = circumscribed", "default": True},
     },
     category="sketch",
 )
 def sketch_polygon(ctx, radius, sides, cx=0, cy=0, inscribed=True):
     _require_sketch(ctx)
-    # CreatePolygon(cx,cy,cz, xp,yp,zp, sides, inscribed)
+    # CreatePolygon(cx, cy, cz, xp, yp, zp, sides, inscribed)
     ctx.sketch_mgr.CreatePolygon(
         units.mm(cx), units.mm(cy), 0,
         units.mm(cx + radius), units.mm(cy), 0, int(sides), bool(inscribed),
@@ -138,30 +140,30 @@ def sketch_polygon(ctx, radius, sides, cx=0, cy=0, inscribed=True):
 
 
 @tool(
-    "sketch_fillet", "对当前草图中已选中的两条草图线段倒圆角（需先在 SW 里选中两段）",
-    params={"radius": {"type": "number", "desc": "圆角半径(mm)"}},
+    "sketch_fillet", "Fillet two selected sketch segments in the active sketch (select two segments in SolidWorks first)",
+    params={"radius": {"type": "number", "desc": "Fillet radius (mm)"}},
     category="sketch",
 )
 def sketch_fillet(ctx: Context, radius: float):
     _require_sketch(ctx)
     if ctx.selected_count() < 1:
-        raise SWError("请先选中要倒圆角的两条草图线段。")
-    # CreateFillet(radius, constrainCorners) 2=swConstrainCorners_Keep
+        raise SWError("please select two sketch segments to fillet first.")
+    # CreateFillet(radius, constrainCorners) — 2 = swConstrainCorners_Keep
     ctx.sketch_mgr.CreateFillet(units.mm(radius), 2)
     return {"sketch_fillet_r": radius}
 
 
 @tool(
-    "add_sketch_relation", "给已选中的草图实体添加几何关系",
+    "add_sketch_relation", "Add a geometric relation to the selected sketch entities",
     params={"relation": {"type": "string",
                         "enum": ["horizontal", "vertical", "coincident", "parallel",
                                  "perpendicular", "tangent", "equal", "concentric", "symmetric"],
-                        "desc": "关系类型"}},
+                        "desc": "Relation type"}},
     category="sketch",
 )
 def add_sketch_relation(ctx: Context, relation: str):
     if ctx.selected_count() < 1:
-        raise SWError("请先选中要添加关系的草图实体。")
+        raise SWError("please select sketch entities to add the relation to first.")
     key = {
         "horizontal": "sgHORIZONTAL2D", "vertical": "sgVERTICAL2D",
         "coincident": "sgCOINCIDENT", "parallel": "sgPARALLEL",
@@ -169,28 +171,28 @@ def add_sketch_relation(ctx: Context, relation: str):
         "equal": "sgEQUAL", "concentric": "sgCONCENTRIC", "symmetric": "sgSYMMETRIC",
     }.get(relation)
     if not key:
-        raise SWError(f"未知关系：{relation}")
+        raise SWError(f"unknown relation: {relation}")
     ctx.model.SketchAddConstraints(key)
     return {"relation": relation}
 
 
 @tool(
-    "add_dimension", "在指定位置为已选中的实体添加驱动尺寸",
+    "add_dimension", "Add a driving dimension at the given location for the selected entities",
     params={
-        "x": {"type": "number", "desc": "标注放置X(mm)"},
-        "y": {"type": "number", "desc": "标注放置Y(mm)"},
-        "value": {"type": "number", "desc": "尺寸值(mm)，省略则用当前几何值", "default": 0},
+        "x": {"type": "number", "desc": "Dimension placement X (mm)"},
+        "y": {"type": "number", "desc": "Dimension placement Y (mm)"},
+        "value": {"type": "number", "desc": "Dimension value (mm); omit to use the current geometric value", "default": 0},
     },
     category="sketch",
 )
 def add_dimension(ctx: Context, x: float, y: float, value: float = 0):
     if ctx.selected_count() < 1:
-        raise SWError("请先选中要标注的实体。")
+        raise SWError("please select entities to dimension first.")
     disp = ctx.model.AddDimension2(units.mm(x), units.mm(y), 0)
     if disp is None:
-        raise SWError("添加尺寸失败。")
+        raise SWError("failed to add dimension.")
     if value:
         d = disp.GetDimension2(0) if hasattr(disp, "GetDimension2") else disp.GetDimension()
-        d.SetSystemValue3(units.mm(value), 1, None)  # 1 = 所有配置
+        d.SetSystemValue3(units.mm(value), 1, None)  # 1 = apply to all configurations
         ctx.rebuild()
     return {"dimension_at": [x, y], "value_mm": value or None}

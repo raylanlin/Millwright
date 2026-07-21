@@ -1,25 +1,25 @@
 // src/main/llm/sse.ts
 //
-// SSE (Server-Sent Events) 解析器
-// Anthropic 和 OpenAI 流式都用 SSE:
+// SSE (Server-Sent Events) parser.
+// Both Anthropic and OpenAI stream over SSE, with the following wire format:
 //   event: xxx\n
 //   data: {...}\n
-//   \n            ← 空行结束一条事件
+//   \n            ← a blank line terminates one event
 //
-// 这里用一个简单的基于 ReadableStream 的异步生成器。
-// 不依赖 eventsource 包,避免跨平台 polyfill 问题。
+// This file implements a minimal `ReadableStream`-based async generator.
+// It intentionally avoids the `eventsource` package to sidestep cross-platform polyfill issues.
 
 export interface SSEEvent {
-  /** 事件名(可选),出现在 `event:` 行 */
+  /** Optional event name, taken from the `event:` line */
   event?: string;
-  /** 数据,出现在 `data:` 行,多个 data 会按换行拼接 */
+  /** Payload taken from the `data:` lines; multiple `data:` lines are joined with newlines */
   data: string;
-  /** id(可选) */
+  /** Optional `id` from the `id:` line */
   id?: string;
 }
 
 /**
- * 把 fetch 响应的 body(ReadableStream<Uint8Array>)解析成 SSE 事件流。
+ * Parse the `ReadableStream<Uint8Array>` body of a fetch response into a stream of SSE events.
  */
 export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<SSEEvent> {
   const reader = body.getReader();
@@ -32,7 +32,7 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // 按 "\n\n" 切分事件。兼容 "\r\n\r\n"。
+      // Split events on the "\n\n" boundary. Also tolerates "\r\n\r\n".
       let sepIdx: number;
       // eslint-disable-next-line no-cond-assign
       while ((sepIdx = findEventBoundary(buffer)) !== -1) {
@@ -43,7 +43,7 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
       }
     }
 
-    // 处理残余
+    // Flush any trailing bytes left in the buffer
     buffer += decoder.decode();
     if (buffer.trim()) {
       const parsed = parseEventBlock(buffer);
@@ -69,11 +69,11 @@ function parseEventBlock(block: string): SSEEvent | null {
   let id: string | undefined;
 
   for (const line of lines) {
-    if (!line || line.startsWith(':')) continue; // 空行 / 注释
+    if (!line || line.startsWith(':')) continue; // blank line / SSE comment
     const colon = line.indexOf(':');
     if (colon === -1) continue;
     const field = line.slice(0, colon);
-    // 规范允许冒号后跟一个可选空格
+    // The spec allows an optional space after the colon
     let value = line.slice(colon + 1);
     if (value.startsWith(' ')) value = value.slice(1);
 

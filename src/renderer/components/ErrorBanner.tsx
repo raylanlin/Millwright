@@ -1,6 +1,7 @@
 // src/renderer/components/ErrorBanner.tsx
 //
-// 顶部错误横幅，显示连接断开或 API 错误，带操作按钮。
+// Top-of-window error banner. Surfaces SolidWorks connection loss or LLM API
+// errors, with quick-action buttons.
 
 import type { LLMErrorInfo, SWStatus } from '../../shared/types';
 
@@ -21,7 +22,7 @@ export function ErrorBanner({
   onDismissError,
   onOpenSettings,
 }: ErrorBannerProps) {
-  // SW 断连
+  // SolidWorks disconnected
   if (!swStatus.connected) {
     return (
       <Banner t={t} type="warning">
@@ -31,7 +32,7 @@ export function ErrorBanner({
     );
   }
 
-  // LLM 错误
+  // LLM error
   if (llmError) {
     const isAuth = llmError.code === 'LLM_AUTH_FAILED';
     const isRate = llmError.code === 'LLM_RATE_LIMIT';

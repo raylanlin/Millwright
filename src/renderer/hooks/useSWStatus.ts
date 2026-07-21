@@ -1,8 +1,10 @@
 // src/renderer/hooks/useSWStatus.ts
 //
-// 订阅 SolidWorks 连接 + 当前文档状态。
-// P1.3：新增 3 秒轮询 —— 用户在 SW 里切换文档/进入零件时，UI 自动更新，
-// 无需手动点“刷新”。轮询调用 sw.status()，主进程侧已改为每次取真实当前文档。
+// Subscribe to SolidWorks connection state + the current document.
+// P1.3: added a 3-second poll — when the user switches documents or enters a
+// part in SW, the UI updates automatically without a manual refresh. The poll
+// calls `sw.status()`, which on the main-process side already returns the real
+// current document every time.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SWStatus } from '../../shared/types';
@@ -21,12 +23,12 @@ export function useSWStatus() {
         if (alive) setStatus(s);
       });
     };
-    pull(); // 立即拉一次
-    // 主进程若有 SW_STATUS 主动推送也照单接收
+    pull(); // pull once immediately
+    // Also accept any SW_STATUS pushes from the main process if they arrive
     const off = window.api.sw.onStatus((s) => {
       if (alive) setStatus(s);
     });
-    // 轮询：切换文档 / 进入零件后自动反映
+    // Poll: keeps the UI in sync after document/part switches
     timer.current = setInterval(pull, POLL_MS);
     return () => {
       alive = false;

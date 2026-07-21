@@ -1,18 +1,21 @@
 // src/renderer/hooks/useLLM.ts
 //
-// 聊天状态 hook（P1.2：接通 agent 工具循环）。
+// Chat-state hook (P1.2: wired up the agent tool loop).
 //
-// 关键修复：此前 send() 只调用旧的 chatStream/chat（纯聊天），P1 的
-// window.api.llm.agent() 从没被 UI 调用 —— 导致模型不知道有 26 个工具、
-// 也不驱动 SolidWorks，只会回答“我看不到你的 SolidWorks”。
+// Key fix: previously `send()` only called the legacy `chatStream`/`chat` (plain chat),
+// so P1's `window.api.llm.agent()` was never actually invoked by the UI —
+// the model had no idea 26 tools existed, never drove SolidWorks, and could only
+// answer "I can't see your SolidWorks".
 //
-// 现在：
-//   - OpenAI 兼容协议（DeepSeek / Kimi / MiniMax / GPT）→ 走 agent 循环，
-//     消费 tool_start / tool_result / confirm_request / text / done / error 事件，
-//     把工具调用过程实时渲染进助手消息。
-//   - Anthropic 协议 → 暂时仍走 chatStream（agent 目前只实现了 OpenAI 侧）。
+// Current behaviour:
+//   - OpenAI-compatible protocol (DeepSeek / Kimi / MiniMax / GPT) → goes through the
+//     agent loop, consumes `tool_start` / `tool_result` / `confirm_request` /
+//     `text` / `done` / `error` events, and renders the tool-call flow live
+//     inside the assistant message.
+//   - Anthropic protocol → still uses `chatStream` for now (the agent loop is
+//     currently only implemented on the OpenAI side).
 //
-// 使用方：Chat 组件。
+// Consumer: the `Chat` component.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
@@ -43,7 +46,7 @@ export function useLLM({ config, initial }: UseLLMOptions) {
   const [error, setError] = useState<LLMErrorInfo | null>(null);
   const currentRequestId = useRef<string | null>(null);
 
-  // 把一段文本追加进最后一条 assistant 消息
+  // Append a chunk of text to the trailing assistant message
   const appendToAssistant = useCallback((text: string) => {
     setMessages((prev) => {
       const last = prev[prev.length - 1];
@@ -60,7 +63,7 @@ export function useLLM({ config, initial }: UseLLMOptions) {
     });
   }, []);
 
-  // ===== 旧的流式事件订阅（anthropic 兜底路径用）=====
+  // ===== Legacy streaming-event subscription (used by the Anthropic fallback) =====
   useEffect(() => {
     const off = window.api.llm.onStreamEvent((ev: LLMStreamEvent) => {
       if (ev.requestId !== currentRequestId.current) return;
@@ -91,16 +94,16 @@ export function useLLM({ config, initial }: UseLLMOptions) {
     return off;
   }, [appendToAssistant]);
 
-  // ===== agent 事件订阅（OpenAI 兼容路径用）=====
+  // ===== Agent event subscription (used by the OpenAI-compatible path) =====
   useEffect(() => {
     const off = window.api.llm.onAgentEvent((ev: any) => {
       if (ev.requestId !== currentRequestId.current) return;
       switch (ev.type) {
         case 'start':
-          // 会话开始（含 backupPath）——可选提示，这里不打扰用户
+          // Session start (carries `backupPath`) — optional hint, kept quiet for now
           break;
         case 'text':
-          // 模型在某一轮输出的叙述文本，按到达顺序追加
+          // Narrative text emitted by the model in a given turn; appended in arrival order
           if (ev.text) appendToAssistant(ev.text);
           break;
         case 'tool_start': {
@@ -151,7 +154,7 @@ export function useLLM({ config, initial }: UseLLMOptions) {
       setIsGenerating(true);
       const payloadMessages = [...messages, userMsg];
 
-      // OpenAI 兼容协议 → agent 工具循环；anthropic → 旧流式兜底
+      // OpenAI-compatible protocol → agent tool loop; Anthropic → legacy streaming fallback
       const useAgent = config.protocol === 'openai';
 
       if (useAgent) {
@@ -164,11 +167,11 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           setIsGenerating(false);
           currentRequestId.current = null;
         }
-        // ok 分支由 onAgentEvent 的 done 事件收尾
+        // The `ok` branch is finalized by the `done` event from `onAgentEvent`
         return;
       }
 
-      // —— anthropic 兜底：流式 ——
+      // —— Anthropic fallback: streaming ——
       const res = await window.api.llm.chatStream(config, payloadMessages);
       if (!res.ok) {
         setError(res.error);

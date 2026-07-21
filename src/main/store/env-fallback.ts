@@ -1,12 +1,14 @@
 // src/main/store/env-fallback.ts
 //
-// .env 环境变量 → LLMConfig fallback。
+// `.env` environment variables → `LLMConfig` fallback.
 //
-// 当用户没在 UI 里配置 API Key,且 .env 里有对应协议的变量时,
-// 启动时用 env 值作为默认配置。保存 UI 配置会覆盖这个 fallback。
+// When the user has not yet configured an API key in the UI but the `.env` file
+// contains variables for one of the supported protocols, the env values are
+// used as the default config at startup. Saving the UI config overrides this fallback.
 //
-// 安全:env 里的值永远只在进程内存里用,不会写回 electron-store,
-// 因此不会意外持久化到 safeStorage 加密的存储里。
+// Security: env values only ever live in process memory; they are never written
+// back to `electron-store`, so they cannot accidentally leak into the
+// `safeStorage`-encrypted store.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -14,14 +16,14 @@ import type { LLMConfig, LLMProtocol } from '../../shared/types';
 import { DEFAULT_URLS } from '../../shared/presets';
 
 /**
- * 解析 .env 风格的文本。最小实现:
- *  - 支持 KEY=VALUE
- *  - 支持 KEY="VALUE" / KEY='VALUE'
- *  - 忽略 # 开头的注释行和空行
- *  - 不支持变量插值 ${OTHER}
- *  - 不支持多行 heredoc
+ * Parse `.env`-style text. Minimal implementation:
+ *   - Supports `KEY=VALUE`
+ *   - Supports `KEY="VALUE"` / `KEY='VALUE'`
+ *   - Ignores blank lines and lines starting with `#`
+ *   - Does not support variable interpolation (`${OTHER}`)
+ *   - Does not support multi-line heredocs
  *
- * 够用于 .env.example 里的简单格式,不引入 dotenv 依赖。
+ * Good enough for the simple format used in `.env.example`; avoids pulling in a `dotenv` dependency.
  */
 export function parseEnv(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -36,14 +38,14 @@ export function parseEnv(text: string): Record<string, string> {
     if (!/^[A-Z_][A-Z0-9_]*$/i.test(key)) continue;
 
     let value = line.slice(eq + 1).trim();
-    // 剥外层引号
+    // Strip surrounding quotes
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
       (value.startsWith("'") && value.endsWith("'"))
     ) {
       value = value.slice(1, -1);
     }
-    // 行尾注释(只在无引号值时)—— #之前加空格才算注释
+    // Trailing-line comment (only on unquoted values) — a `#` only counts as a comment when preceded by a space
     if (!line.slice(eq + 1).trim().startsWith('"') && !line.slice(eq + 1).trim().startsWith("'")) {
       const hashIdx = value.indexOf(' #');
       if (hashIdx !== -1) value = value.slice(0, hashIdx).trim();
@@ -54,14 +56,15 @@ export function parseEnv(text: string): Record<string, string> {
 }
 
 /**
- * 从给定的 env map 构造 LLMConfig fallback。按协议优先级:
- *   1. ANTHROPIC_*
- *   2. OPENAI_*  (直接 OpenAI)
- *   3. DEEPSEEK_*
- *   4. DASHSCOPE_* (阿里百炼)
- *   5. MINIMAX_*
+ * Build an `LLMConfig` fallback from the given env map. Protocol priority order:
+ *   1. `ANTHROPIC_*`
+ *   2. `OPENAI_*`   (direct OpenAI)
+ *   3. `DEEPSEEK_*`
+ *   4. `DASHSCOPE_*` (Alibaba Bailian)
+ *   5. `MINIMAX_*`
  *
- * 只要第一个拿到 API_KEY 的就用它。返回 null 表示 env 里没配任何 key。
+ * The first protocol that yields a usable `API_KEY` wins. Returns `null` when
+ * no key is configured in the env.
  */
 export function envToConfig(env: Record<string, string>): LLMConfig | null {
   type Candidate = {
@@ -114,7 +117,7 @@ export function envToConfig(env: Record<string, string>): LLMConfig | null {
     if (!apiKey) continue;
     const baseURL = (c.urlVar && env[c.urlVar]) || c.defaultURL!;
     const model = (c.modelVar && env[c.modelVar]) || '';
-    if (!model) continue; // 没 model 也不是有效 fallback
+    if (!model) continue; // missing model name → not a valid fallback
     return {
       protocol: c.protocol,
       baseURL,
@@ -130,12 +133,12 @@ export function envToConfig(env: Record<string, string>): LLMConfig | null {
 }
 
 /**
- * 读取 .env 文件(如果存在)并返回解析结果。
+ * Read the `.env` file (if present) and return its parsed contents.
  *
- * 查找路径优先级:
- *   1. process.env (Electron 启动时已经设置的环境变量)
- *   2. app.getAppPath() 下的 .env  (开发模式下一般是项目根)
- *   3. process.cwd() 下的 .env     (双重保险)
+ * Lookup priority order:
+ *   1. `process.env` (already populated by Electron when it launches)
+ *   2. `.env` under `app.getAppPath()`  (the project root in dev mode)
+ *   3. `.env` under `process.cwd()`     (belt-and-suspenders)
  */
 export function readEnvFile(): Record<string, string> {
   const merged: Record<string, string> = {};
@@ -147,14 +150,14 @@ export function readEnvFile(): Record<string, string> {
         Object.assign(merged, parseEnv(text));
       }
     } catch {
-      // 忽略权限/IO 错误,.env fallback 永远不应该阻塞启动
+      // Ignore permission/IO errors — `.env` fallback must never block startup
     }
   };
 
-  // cwd 优先级低于 appPath
+  // cwd has lower priority than appPath
   tryRead(path.join(process.cwd(), '.env'));
 
-  // 只在 Electron 运行时环境下尝试读 app.getAppPath(),测试环境会跳过
+  // Only attempt `app.getAppPath()` when running inside Electron; skip in test environments
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { app } = require('electron');
@@ -162,10 +165,10 @@ export function readEnvFile(): Record<string, string> {
       tryRead(path.join(app.getAppPath(), '.env'));
     }
   } catch {
-    // 不在 Electron 下运行(测试等),忽略
+    // Not running under Electron (e.g. tests) — ignore
   }
 
-  // process.env 里如果已经有同名变量,优先级最高(shell 覆盖文件)
+  // Existing `process.env` entries always win over file contents (shell overrides file)
   for (const key of Object.keys(process.env)) {
     if (process.env[key]) merged[key] = process.env[key]!;
   }
@@ -174,7 +177,7 @@ export function readEnvFile(): Record<string, string> {
 }
 
 /**
- * 组合操作:读 .env + process.env → LLMConfig fallback,失败返回 null。
+ * Convenience wrapper: read `.env` + `process.env`, and return an `LLMConfig` fallback (or `null` on failure).
  */
 export function loadEnvFallback(): LLMConfig | null {
   return envToConfig(readEnvFile());

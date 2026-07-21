@@ -1,7 +1,8 @@
 // src/main/ipc/handlers.ts
 //
-// IPC 处理器注册。集中定义所有 renderer ↔ main 的通信,
-// 保证 channel 名字只从 shared/ipc-channels 来,避免拼写漂移。
+// IPC handler registration. All renderer ↔ main communication is centralized here,
+// and channel names are taken exclusively from `shared/ipc-channels` to avoid
+// channel-name drift.
 
 import { ipcMain, BrowserWindow, nativeImage } from 'electron';
 import { readFileSync } from 'fs';
@@ -26,18 +27,18 @@ import { runSidecarAgent, type AgentEvent } from '../agent/agent-loop-sidecar';
 import { OpenAIAdapter } from '../llm/openai';
 
 /**
- * 取消令牌表:requestId → AbortController
- * 渲染进程可以通过 requestId 取消正在进行的流式请求
+ * Cancellation-token table: `requestId` → `AbortController`.
+ * The renderer can cancel an in-flight streaming request via its `requestId`.
  */
 const activeRequests = new Map<string, AbortController>();
 
-/** MED-1：同一时刻只允许一个 agent 会话，第二个直接拒 */
+/** MED-1: only one agent session may be running at a time; a second one is rejected outright */
 let agentRunning = false;
 
-/** MED-3：等待渲染层确认的工具回调表，key = `${requestId}:${callId}` */
+/** MED-3: callback table waiting for the renderer to confirm a tool call; key = `${requestId}:${callId}` */
 const pendingConfirms = new Map<string, (ok: boolean) => void>();
 
-/** P3：把边车返回的本地图片路径转 data URL（边车调用 capture_view 后用） */
+/** P3: convert a local image path returned by the sidecar into a data URL (used after `sidecar.call('capture_view')`) */
 function imageToDataUrl(p: string, format: string): string {
   if (format === 'png') return `data:image/png;base64,${readFileSync(p).toString('base64')}`;
   const png = nativeImage.createFromPath(p).toPNG();
@@ -45,7 +46,7 @@ function imageToDataUrl(p: string, format: string): string {
   return `data:image/bmp;base64,${readFileSync(p).toString('base64')}`;
 }
 
-/** P3：工具确认门（共用） —— 发 confirm_request 事件 + 等渲染层回包 / 超时默认拒绝 */
+/** P3: shared tool-confirmation gate — emit a `confirm_request` event and wait for the renderer to reply (default-deny on timeout) */
 function requestUserConfirm(
   sender: Electron.WebContents,
   requestId: string,
@@ -58,7 +59,7 @@ function requestUserConfirm(
     const timer = setTimeout(() => {
       if (pendingConfirms.has(key)) {
         pendingConfirms.delete(key);
-        resolve(false); // 超时默认拒绝
+        resolve(false); // default-deny on timeout
       }
     }, 120_000);
     pendingConfirms.set(key, (ok) => {
@@ -67,7 +68,7 @@ function requestUserConfirm(
       resolve(ok);
     });
     sendEvent({ type: 'confirm_request', toolCall: call });
-    // sender 占位保留（避免 unused 警告）
+    // `sender` is intentionally retained (avoids an "unused" warning)
     void sender;
   });
 }
@@ -76,7 +77,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   const bridge = getBridge();
   const scriptEngine = new ScriptEngine(bridge);
 
-  // ===== 配置 =====
+  // ===== Config =====
   ipcMain.handle(IpcChannels.CONFIG_LOAD, async () => {
     return await loadConfig();
   });
@@ -98,7 +99,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   });
 
   ipcMain.handle(IpcChannels.SW_STATUS, async () => {
-    // FEATURE: 返回真实当前文档（供 UI 轮询），不走陈旧 cache
+    // FEATURE: return the real current document (for UI polling); bypasses the stale cache
     return await bridge.refresh();
   });
 
@@ -111,22 +112,22 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
 
   // ===== LLM =====
 
-  // 非流式:一次性返回完整响应
+  // Non-streaming: return the complete response in one shot
   ipcMain.handle(
     IpcChannels.LLM_CHAT,
     async (_e, payload: { config: LLMConfig; messages: ChatMessage[] }) => {
       const check = validateConfig(payload.config);
       if (!check.valid) {
-        return { ok: false, error: toLLMError(new Error(check.issues.join(', ')), '配置无效') };
+        return { ok: false, error: toLLMError(new Error(check.issues.join(', ')), 'Invalid configuration') };
       }
       const controller = new AbortController();
       const reqId = uuid();
       activeRequests.set(reqId, controller);
       try {
-        // FEATURE: 每次对话前先取真实当前文档（连接后用户可能已切文档/进零件）
+        // FEATURE: refresh the real current document before each conversation (the user may have switched docs/parts since connecting)
         await bridge.refresh();
-        // SolidWorks 文档上下文:在主进程统一采集并注入 system prompt,
-        // 真正发送给模型(adapter 用 config.systemPrompt 构造请求)。
+        // SolidWorks document context: collected centrally in the main process and injected
+        // into the system prompt — the adapter then uses `config.systemPrompt` to build the request.
         const swContext = await formatContextForPromptAsync(bridge);
         const enrichedConfig = swContext
           ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
@@ -137,16 +138,16 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
         const response = await adapter.chat(truncated, controller.signal);
         return { ok: true, response, requestId: reqId };
       } catch (err) {
-        // 必须归一化:原始 Error 过 IPC structured-clone 会丢失 message/code,
-        // 渲染层 ErrorBanner 依赖 error.code 判断展示。
-        return { ok: false, error: toLLMError(err, '请求失败'), requestId: reqId };
+        // Must normalize: a raw `Error` crossing IPC structured-clone loses its `message`/`code`,
+        // and the renderer's `ErrorBanner` relies on `error.code` to choose how to render.
+        return { ok: false, error: toLLMError(err, 'Request failed'), requestId: reqId };
       } finally {
         activeRequests.delete(reqId);
       }
     },
   );
 
-  // 流式:通过 webContents.send 把事件推给 renderer
+  // Streaming: push events to the renderer via `webContents.send`
   ipcMain.handle(
     IpcChannels.LLM_CHAT_STREAM,
     async (_e, payload: { config: LLMConfig; messages: ChatMessage[] }) => {
@@ -159,12 +160,12 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       const reqId = uuid();
       activeRequests.set(reqId, controller);
 
-      // 异步运行,不 await(立即把 requestId 返回给 renderer)
+      // Run asynchronously without awaiting (returns the `requestId` to the renderer immediately)
       (async () => {
         try {
-          // FEATURE: 每次对话前先取真实当前文档
+          // FEATURE: refresh the real current document before each conversation
           await bridge.refresh();
-          // SolidWorks 文档上下文:主进程统一采集并注入(发送给模型)
+          // SolidWorks document context: collected centrally in the main process and injected into the request
           const swContext = await formatContextForPromptAsync(bridge);
           const enrichedConfig = swContext
             ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
@@ -176,7 +177,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           for await (const ev of stream) {
             const win = getMainWindow();
             if (!win) {
-              controller.abort(new Error('窗口已关闭'));
+              controller.abort(new Error('Window closed'));
               return;
             }
             win.webContents.send(IpcChannels.LLM_STREAM_EVENT, ev);
@@ -187,7 +188,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
             win.webContents.send(IpcChannels.LLM_STREAM_EVENT, {
               type: 'error',
               requestId: reqId,
-              error: toLLMError(err, '流式请求失败'),
+              error: toLLMError(err, 'Streaming request failed'),
             });
           }
         } finally {
@@ -206,7 +207,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       activeRequests.delete(requestId);
       return { ok: true };
     }
-    return { ok: false, message: '请求不存在或已完成' };
+    return { ok: false, message: 'Request not found or already completed' };
   });
 
   ipcMain.handle(IpcChannels.LLM_TEST, async (_e, config: LLMConfig) => {
@@ -219,51 +220,51 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       await adapter.test();
       return { ok: true };
     } catch (err) {
-      // 同上:归一化错误,保证渲染层拿到 { code, message }
-      return { ok: false, error: toLLMError(err, '连接测试失败') };
+      // Same as above: normalize the error so the renderer always receives { code, message }
+      return { ok: false, error: toLLMError(err, 'Connectivity test failed') };
     }
   });
 
   // ===== Agent =====
 
   ipcMain.handle(IpcChannels.LLM_AGENT, async (e, payload: { config: LLMConfig; messages: ChatMessage[]; requestId: string }) => {
-    // MED-1：互斥，第二个直接拒
+    // MED-1: mutual exclusion — reject the second concurrent request outright
     if (agentRunning) {
-      return { ok: false, error: { code: 'AGENT_BUSY', message: '已有一个任务在执行中，请等待完成或先停止。' } };
+      return { ok: false, error: { code: 'AGENT_BUSY', message: 'Another task is already running. Wait for it to complete or stop it first.' } };
     }
     const check = validateConfig(payload.config);
     if (!check.valid) {
-      return { ok: false, error: toLLMError(new Error(check.issues.join(', ')), '配置无效') };
+      return { ok: false, error: toLLMError(new Error(check.issues.join(', ')), 'Invalid configuration') };
     }
     const { requestId } = payload;
     const controller = new AbortController();
-    activeRequests.set(requestId, controller); // 复用 LLM_CANCEL 的 map
+    activeRequests.set(requestId, controller); // reuse the same map as LLM_CANCEL
     agentRunning = true;
     try {
-      // FEATURE: agent 会话前先 refresh 取真实当前文档
+      // FEATURE: refresh the real current document before each agent session
       await bridge.refresh();
       const swContext = await formatContextForPromptAsync(bridge);
       const enrichedConfig = swContext
         ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
         : payload.config;
-      // LOW：只 build 一次 adapter（包括 enriched config）
+      // LOW: build the adapter only once (the enriched config is final here)
       const adapter = createAdapter(enrichedConfig) as OpenAIAdapter;
       if (!(adapter instanceof OpenAIAdapter)) {
-        return { ok: false, error: { code: 'LLM_AGENT_UNSUPPORTED', message: 'agent 模式目前仅支持 OpenAI 兼容协议' } };
+        return { ok: false, error: { code: 'LLM_AGENT_UNSUPPORTED', message: 'Agent mode currently supports only the OpenAI-compatible protocol' } };
       }
 
       const send = (ev: AgentEvent) =>
         e.sender.send(IpcChannels.LLM_AGENT_EVENT, { ...ev, requestId });
 
-      // P3：边车优先；仅当边车「启动失败」（未装 python/pywin32）才回退 VBS。
-      // 边车一旦就绪，运行期错误（含用户取消）正常向外抛，绝不静默回退重跑。
+      // P3: prefer the sidecar; only fall back to VBS when the sidecar fails to *start* (e.g. python/pywin32 missing).
+      // Once the sidecar is up, runtime errors (including user cancellation) propagate normally — never silently rerun via the VBS fallback.
       const sidecar = getSidecar({ onLog: (l) => console.log('[sidecar]', l) });
       let sidecarReady = false;
       try {
         await sidecar.start();
         sidecarReady = true;
       } catch (startErr) {
-        console.warn('[agent] 边车启动失败，回退 VBS agent:', startErr);
+        console.warn('[agent] sidecar failed to start; falling back to VBS agent:', startErr);
       }
 
       if (sidecarReady) {
@@ -280,7 +281,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
         return { ok: true, text, requestId };
       }
 
-      // 仅边车不可用时走旧 VBS 路径
+      // Only when the sidecar is unavailable do we take the legacy VBS path
       const text = await runAgentLoop(adapter, payload.messages, scriptEngine, {
         requestId,
         maxRounds: 8,
@@ -294,37 +295,37 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       });
       return { ok: true, text, requestId };
     } catch (err) {
-      return { ok: false, error: toLLMError(err, 'Agent 执行失败'), requestId };
+      return { ok: false, error: toLLMError(err, 'Agent execution failed'), requestId };
     } finally {
       activeRequests.delete(requestId);
       agentRunning = false;
     }
   });
 
-  // MED-3：渲染层回包
+  // MED-3: renderer reply to a confirmation request
   ipcMain.on(IpcChannels.AGENT_CONFIRM_REPLY, (_e, payload: { requestId: string; callId: string; approved: boolean }) => {
     const key = `${payload.requestId}:${payload.callId}`;
     const resolve = pendingConfirms.get(key);
     if (resolve) resolve(!!payload.approved);
-    // 超时已删 / 二次点击：no-op
+    // No-op if the entry was already cleaned up (timeout or duplicate click)
   });
 
-  // ===== 脚本 =====
+  // ===== Scripts =====
 
   ipcMain.handle(IpcChannels.SCRIPT_VALIDATE, (_e, payload: { code: string; lang: 'vba' | 'python' }) => {
     return validateScript(payload.code, payload.lang);
   });
 
   ipcMain.handle(IpcChannels.SCRIPT_RUN, async (_e, payload: { code: string; lang: 'vba' | 'python' }) => {
-    // 执行前自动备份
+    // Auto-backup before execution
     const backup = await backupActiveDocument(bridge);
     const result = await scriptEngine.run(payload.code, payload.lang);
 
     if (result.success && backup.backupPath) {
-      // 执行成功，删除备份
+      // Execution succeeded → drop the backup
       removeBackup(backup.backupPath);
     } else if (backup.backupPath) {
-      // 执行失败，保留备份路径供用户恢复
+      // Execution failed → keep the backup so the user can roll back
       result.backupPath = backup.backupPath;
     }
 
@@ -348,7 +349,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     },
   );
 
-  // ===== 对话历史 =====
+  // ===== Conversation history =====
 
   ipcMain.handle(IpcChannels.CHAT_LIST, async () => {
     return listSessions();
@@ -372,9 +373,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     return createSession(initialMessages);
   });
 
-  // ===== 主题(独立于 LLM 配置) =====
-  // 复用 CONFIG_ 频道的命名习惯不够干净,这里直接加两个 handler,
-  // channel 名复用 config:save/load + 区分参数在后续需要时可以演进。
+  // ===== Theme (kept independent of the LLM config) =====
+  // Reusing the CONFIG_ channel-name convention felt too cramped, so we register
+  // two dedicated handlers here. The channel names piggyback on `config:save/load`
+  // for now; we can split them out later if needed.
   ipcMain.handle('theme:load', async (): Promise<ThemeName> => {
     return await loadTheme();
   });
@@ -385,7 +387,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   });
 }
 
-/** 清理所有在途请求 —— 应用退出前调用,避免 Promise 悬挂 */
+/** Tear down all in-flight requests — call before app exit to avoid dangling promises */
 export function abortAllRequests(): void {
   for (const [, controller] of activeRequests) {
     controller.abort();
