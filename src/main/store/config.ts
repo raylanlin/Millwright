@@ -87,7 +87,7 @@ export async function loadConfig(): Promise<LLMConfig> {
     const envFallback = loadEnvFallback();
     if (envFallback) {
       console.info(
-        `[SW Copilot] 使用 .env fallback 配置: protocol=${envFallback.protocol}, model=${envFallback.model}`,
+        `[Millwright] 使用 .env fallback 配置: protocol=${envFallback.protocol}, model=${envFallback.model}`,
       );
       return envFallback;
     }

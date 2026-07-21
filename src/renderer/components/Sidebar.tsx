@@ -82,10 +82,10 @@ export function Sidebar({
               fontSize: 14, fontWeight: 700, color: t.btnPrimaryText,
             }}
           >
-            S
+            M
           </div>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>SW Copilot</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Millwright</div>
             <div style={{ fontSize: 10, color: t.textMuted }}>{tr('sidebar.subtitle')}</div>
           </div>
         </div>

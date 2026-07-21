@@ -1,5 +1,5 @@
 {
-  "name": "sw-copilot",
+  "name": "millwright",
   "version": "0.2.4",
   "description": "Open-source AI automation for SolidWorks — talk to your CAD.",
   "keywords": [
@@ -11,10 +11,11 @@
     "agent",
     "typescript",
     "python",
-    "automation"
+    "automation",
+    "millwright"
   ],
   "main": "dist/main/main/index.js",
-  "author": "SW Copilot Contributors",
+  "author": "Millwright Contributors",
   "license": "Apache-2.0",
   "scripts": {
     "dev": "concurrently -k -n main,preload,renderer,electron -c blue,cyan,magenta,green \"npm:dev:main\" \"npm:dev:preload\" \"npm:dev:renderer\" \"npm:dev:electron\"",

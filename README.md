@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/banner-hero.png" alt="SW Copilot — Open-source AI automation for SolidWorks" />
+  <img src="assets/icon-256.png" width="80" height="80" alt="Millwright" />
 </p>
 
-<h1 align="center">SW Copilot</h1>
+<h1 align="center">Millwright</h1>
 
 <p align="center">
-  <strong>Open-source AI automation for SolidWorks — talk to your CAD.</strong>
+  <strong>The open-source AI machinist for SolidWorks — talk to your CAD.</strong>
 </p>
 
 <p align="center">
@@ -29,13 +29,13 @@
 
 ---
 
-Describe what you want in plain language — *"sketch a 50×30 rectangle on the front plane and extrude it 20 mm"* — and SW Copilot drives SolidWorks to do it. The AI plans the work, calls real modeling tools one step at a time, reads structured results back, and corrects itself as it goes.
+Describe what you want in plain language — *"sketch a 50×30 rectangle on the front plane and extrude it 20 mm"* — and Millwright drives SolidWorks to do it. The AI plans the work, calls real modeling tools one step at a time, reads structured results back, and corrects itself as it goes.
 
 **You choose the AI backend.** Claude, GPT-4o, DeepSeek, Kimi, MiniMax, Qwen, or a local Ollama model — anything speaking the Anthropic or OpenAI-compatible protocol. The code is open; you pay only your own API usage.
 
-> Existing CAD AI tools lock you into one provider at \$16–417/mo. SW Copilot is free and provider-agnostic.
+> Existing CAD AI tools lock you into one provider at \$16–417/mo. Millwright is free and provider-agnostic.
 
-| | Typical CAD AI SaaS | **SW Copilot** |
+| | Typical CAD AI SaaS | **Millwright** |
 |---|---|---|
 | AI backend | Fixed by plan | **Any model you choose** |
 | Pricing | \$16–417 / month | **Free** (you bring your own API key) |
@@ -57,7 +57,7 @@ Describe what you want in plain language — *"sketch a 50×30 rectangle on the 
 
 ### Install
 
-1. Download the installer from [Releases](https://github.com/raylanlin/sw-copilot/releases) and run it.
+1. Download the installer from [Releases](https://github.com/raylanlin/millwright/releases) and run it.
 2. Install the sidecar runtime (drives SolidWorks):
    ```bash
    pip install pywin32 pillow
@@ -67,8 +67,8 @@ Describe what you want in plain language — *"sketch a 50×30 rectangle on the 
 ### From source
 
 ```bash
-git clone https://github.com/raylanlin/sw-copilot.git
-cd sw-copilot
+git clone https://github.com/raylanlin/millwright.git
+cd millwright
 npm install
 npm run dev
 ```
@@ -77,7 +77,7 @@ npm run dev
 
 ### Configure
 
-1. Start SolidWorks, then launch SW Copilot.
+1. Start SolidWorks, then launch Millwright.
 2. Open ⚙️ **Settings** → pick a protocol → enter Base URL, API key, and model → **Save**.
 3. (Optional) Enable **Vision**: either toggle *"main model supports images"* or configure a separate vision model.
 
@@ -172,6 +172,10 @@ Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especi
 - [ ] **v0.3** — Full tool coverage, macro-verified parameters, streaming tool calls
 - [ ] **v1.0** — MCP server, multi-CAD support
 
+## Name
+
+**Millwright** *(n.)* — a skilled tradesperson who installs, maintains, and operates machinery. That's the role this tool plays: the AI machinist standing at your SolidWorks bench.
+
 ## License
 
 [Apache-2.0](LICENSE) — permissive, with an explicit patent grant. Free for commercial use.
@@ -180,3 +184,5 @@ Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especi
 
 - SolidWorks COM API reference: [CodeStack](https://www.codestack.net/)
 - Inspiration: Cursor, Claude Code
+
+<sub>SolidWorks is a registered trademark of Dassault Systèmes. Millwright is an independent open-source project and is not affiliated with or endorsed by Dassault Systèmes.</sub>

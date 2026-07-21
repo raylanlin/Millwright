@@ -10,7 +10,7 @@ assignees: ''
 
 - **OS**: Windows 10 / 11
 - **SolidWorks**: 20xx SP x.x
-- **SW Copilot**: v0.x.x
+- **Millwright**: v0.x.x
 - **AI Provider**: Anthropic / OpenAI / DeepSeek / ...
 
 ## 描述 / Description

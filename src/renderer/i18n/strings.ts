@@ -15,7 +15,7 @@ type Dict = Record<string, string>;
 const zh: Dict = {
   // App
   'app.greeting':
-    '你好，我是 SW Copilot。\n\n先到左下角「设置」配置 AI 服务商（Anthropic / OpenAI / DeepSeek / Kimi / MiniMax …），之后就能用自然语言驱动 SolidWorks。\n\n当 AI 回复里包含代码，你可以直接点「执行」把脚本注入 SolidWorks，或「复制」到自己的宏环境中用。',
+    '你好，我是 Millwright。\n\n先到左下角「设置」配置 AI 服务商（Anthropic / OpenAI / DeepSeek / Kimi / MiniMax …），之后就能用自然语言驱动 SolidWorks。\n\n当 AI 回复里包含代码，你可以直接点「执行」把脚本注入 SolidWorks，或「复制」到自己的宏环境中用。',
   'app.clearChat': '清空对话',
   'app.riskConfirm': '检测到潜在风险：\n\n{issues}\n\n仍要继续执行吗？',
   // Tabs (nav short labels)
@@ -138,7 +138,7 @@ const zh: Dict = {
 
 const en: Dict = {
   'app.greeting':
-    "Hi, I'm SW Copilot.\n\nOpen Settings (bottom-left) to configure an AI provider (Anthropic / OpenAI / DeepSeek / Kimi / MiniMax …), then drive SolidWorks with plain language.\n\nWhen a reply contains code, click Run to inject the script into SolidWorks, or Copy to use it in your own macro environment.",
+    "Hi, I'm Millwright.\n\nOpen Settings (bottom-left) to configure an AI provider (Anthropic / OpenAI / DeepSeek / Kimi / MiniMax …), then drive SolidWorks with plain language.\n\nWhen a reply contains code, click Run to inject the script into SolidWorks, or Copy to use it in your own macro environment.",
   'app.clearChat': 'Clear chat',
   'app.riskConfirm': 'Potential risks detected:\n\n{issues}\n\nContinue anyway?',
   'tab.chat': 'Chat',

@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/banner-hero.png" alt="SW Copilot — SolidWorks 开源 AI 自动化助手" />
+  <img src="assets/icon-256.png" width="80" height="80" alt="Millwright" />
 </p>
 
-<h1 align="center">SW Copilot</h1>
+<h1 align="center">Millwright</h1>
 
 <p align="center">
-  <strong>开源的 SolidWorks AI 自动化助手 —— 用自然语言驱动你的 CAD。</strong>
+  <strong>开源的 SolidWorks AI 机械技工 —— 用自然语言驱动你的 CAD。</strong>
 </p>
 
 <p align="center">
@@ -29,13 +29,13 @@
 
 ---
 
-用大白话描述你的需求 —— *「在前视基准面画一个 50×30 的矩形，拉伸 20mm」* —— SW Copilot 就会驱动 SolidWorks 完成。AI 会规划任务、一步步调用真实的建模工具、读取结构化的执行结果，并在出错时自我纠正。
+用大白话描述你的需求 —— *「在前视基准面画一个 50×30 的矩形，拉伸 20mm」* —— Millwright 就会驱动 SolidWorks 完成。AI 会规划任务、一步步调用真实的建模工具、读取结构化的执行结果，并在出错时自我纠正。
 
 **AI 后端由你决定。** Claude、GPT-4o、DeepSeek、Kimi、MiniMax、Qwen，或本地 Ollama —— 任何支持 Anthropic 或 OpenAI 兼容协议的模型都行。代码开源，你只付自己的 API 费用。
 
-> 市面上的 CAD AI 工具绑定单一服务商、按月收 \$16–417。SW Copilot 免费且不锁定服务商。
+> 市面上的 CAD AI 工具绑定单一服务商、按月收 \$16–417。Millwright 免费且不锁定服务商。
 
-| | 常见 CAD AI SaaS | **SW Copilot** |
+| | 常见 CAD AI SaaS | **Millwright** |
 |---|---|---|
 | AI 后端 | 按套餐固定 | **任你选择** |
 | 价格 | \$16–417 / 月 | **免费**（自带 API Key） |
@@ -57,7 +57,7 @@
 
 ### 安装
 
-1. 从 [Releases](https://github.com/raylanlin/sw-copilot/releases) 下载安装包并运行。
+1. 从 [Releases](https://github.com/raylanlin/millwright/releases) 下载安装包并运行。
 2. 安装边车运行时（用于驱动 SolidWorks）：
    ```bash
    pip install pywin32 pillow
@@ -67,8 +67,8 @@
 ### 从源码运行
 
 ```bash
-git clone https://github.com/raylanlin/sw-copilot.git
-cd sw-copilot
+git clone https://github.com/raylanlin/millwright.git
+cd millwright
 npm install
 npm run dev
 ```
@@ -77,7 +77,7 @@ npm run dev
 
 ### 配置
 
-1. 先启动 SolidWorks，再启动 SW Copilot。
+1. 先启动 SolidWorks，再启动 Millwright。
 2. 打开 ⚙️ **设置** → 选择协议 → 填入 Base URL、API Key、模型名 → **保存**。
 3. （可选）开启**视觉**：勾选「主模型支持图像」，或单独配置一个视觉模型。
 
@@ -172,6 +172,10 @@ SolidWorks
 - [ ] **v0.3** — 工具全覆盖、宏核验参数、流式工具调用
 - [ ] **v1.0** — MCP server、多 CAD 支持
 
+## 关于名字
+
+**Millwright**（名词）—— 安装、维护并操作机械设备的技工。这正是本工具扮演的角色：站在你 SolidWorks 工作台前的 AI 机械技工。
+
 ## 许可证
 
 [Apache-2.0](LICENSE) —— 宽松协议，含明确的专利授权。允许商业使用。
@@ -180,3 +184,5 @@ SolidWorks
 
 - SolidWorks COM API 参考：[CodeStack](https://www.codestack.net/)
 - 灵感来源：Cursor、Claude Code
+
+<sub>SolidWorks 是 Dassault Systèmes 的注册商标。Millwright 是独立开源项目，与 Dassault Systèmes 无从属或背书关系。</sub>

@@ -1,6 +1,6 @@
-appId: com.swcopilot.app
-productName: SW Copilot
-copyright: Copyright © 2026 SW Copilot Contributors
+appId: com.millwright.app
+productName: Millwright
+copyright: Copyright © 2026 Millwright Contributors
 
 directories:
   output: release
@@ -20,8 +20,8 @@ files:
   - '!vite.config.ts'
   - '!.env*'
 
-# P3：把 Python 边车代码随安装包/免安装版一起出去
-# sw-sidecar.ts 默认 cwd = resourcesPath/sidecar（见其构造）
+# P3: ship the Python sidecar alongside the installer / portable build.
+# sw-sidecar.ts defaults its cwd to resourcesPath/sidecar (see its constructor).
 extraResources:
   - from: 'sidecar'
     to: 'sidecar'
@@ -29,8 +29,9 @@ extraResources:
       - '**/*'
 
 win:
-  # 只保留 NSIS。移除 squirrel —— 它会在安装后自动后台拉起应用，
-  # 导致随后的 NSIS 安装器发现进程关不掉，弹「无法关闭，请手动关闭」并反复重试。
+  # NSIS only. Squirrel was removed — it auto-launches the app in the background
+  # after install, which then makes the NSIS installer unable to close the running
+  # process, popping "cannot close, please close manually" in a retry loop.
   target:
     - target: nsis
       arch: [x64]
@@ -42,12 +43,13 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: false
   deleteAppDataOnUninstall: false
-  # 安装前强制结束仍在运行的实例，避免文件占用 / 关不掉的重试循环
-  # （electron-builder 自带该逻辑，perMachine:false + 单实例即可，保留默认）
+  # Force-terminate any running instance before install to avoid file locks /
+  # the unclosable-retry loop (electron-builder handles this with
+  # perMachine:false + single-instance; defaults kept).
 
 squirrelWindows: null
 
 publish:
   provider: github
   owner: raylanlin
-  repo: sw-copilot
+  repo: millwright

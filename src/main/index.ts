@@ -31,7 +31,7 @@ function createMainWindow(): void {
     minHeight: 600,
     show: false,
     backgroundColor: '#1b1c20',
-    title: 'SW Copilot',
+    title: 'Millwright',
     webPreferences: {
       preload: app.isPackaged
         ? path.join(app.getAppPath(), 'dist/preload/preload/index.js')
@@ -88,7 +88,7 @@ app.whenReady().then(async () => {
     const { SW_TOOLS } = require('../shared/sw-tools');
     const cov = checkCoverage(SW_TOOLS);
     if (cov.missing.length > 0) {
-      console.warn('[SW Copilot] generator coverage incomplete; missing:', cov.missing);
+      console.warn('[Millwright] generator coverage incomplete; missing:', cov.missing);
     }
     crashLog('generators ok');
   } catch (err) {
