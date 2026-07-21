@@ -1,64 +1,84 @@
 <p align="center">
-  <img src="assets/icon-256.png" width="80" height="80" alt="SW Copilot" />
+  <img src="assets/banner-hero.png" alt="SW Copilot — SolidWorks AI automation assistant" />
 </p>
 
 <h1 align="center">SW Copilot</h1>
 
 <p align="center">
-  <strong>开源的 SolidWorks AI 自动化助手</strong><br/>
-  <em>Open-source SolidWorks AI automation assistant</em>
+  <strong>Open-source SolidWorks AI automation assistant</strong><br/>
+  <em>Talk to your CAD. Ship geometry, not boilerplate.</em>
 </p>
 
 <p align="center">
-  <a href="#快速开始--quick-start">快速开始</a> ·
-  <a href="docs/USER-GUIDE.md">用户手册</a> ·
-  <a href="docs/ARCHITECTURE.md">技术架构</a> ·
-  <a href="docs/CONTRIBUTING.md">参与贡献</a> ·
-  <a href="CHANGELOG.md">更新日志</a>
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="docs/USER-GUIDE.md">User Guide</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/CONTRIBUTING.md">Contributing</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.3-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.4-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
-  <img src="https://img.shields.io/badge/tests-161_passed-brightgreen" alt="tests" />
-  <img src="https://img.shields.io/badge/license-GPLv3-orange" alt="license" />
+  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python" alt="python" />
+  <img src="https://img.shields.io/badge/tests-167_passed-brightgreen" alt="tests" />
+  <img src="https://img.shields.io/badge/license-Apache_2.0-green" alt="license" />
 </p>
 
 ---
 
-## 为什么选择 SW Copilot？ / Why SW Copilot?
+## Why SW Copilot?
 
-市面上的 CAD AI 助手（如 MecAgent）绑定特定 AI 服务商，按月收费 $16–417，且底层模型能力有限。
+Existing CAD AI tools lock you into one provider at $16–417/month and ship closed-source models you can't audit. **SW Copilot flips both defaults**: pick any AI backend (Claude, GPT-4o, DeepSeek, Qwen, MiniMax, Ollama local) and run open source you can read, fork, and extend.
 
-SW Copilot 的理念：**AI 后端由你决定**。接入 Claude、GPT-4o、DeepSeek、Qwen、Ollama 本地模型——代码开源，开箱即用。
-
-> Existing CAD AI tools lock you into one provider at $16–417/mo. SW Copilot lets you **choose any AI backend** — Claude, GPT-4o, DeepSeek, Qwen, or local Ollama. Open source. Works out of the box.
-
-| | MecAgent | **SW Copilot** |
+| | Closed-source CAD AI | **SW Copilot** |
 |---|---|---|
-| AI 后端 | 固定（按套餐分级） | **用户自选（任意模型）** |
-| 价格 | $16–417/月 | **免费**（用户自付 API 费用） |
-| 源代码 | 闭源 | **开源** |
-| COM 方式 | winax 原生模块 | **零依赖 cscript.exe** |
+| AI backend | Single provider, per-tier pricing | **Any OpenAI- or Anthropic-compatible endpoint** |
+| Price | $16–417 / month | **Free** (you pay your own API costs) |
+| Source code | Closed | **Apache-2.0, open source** |
+| COM bridge | Native `winax` module | **Python `pywin32` via stdio JSON-RPC** |
+| Tools | Fixed catalog | **26+ tools, plus an extension API** |
 
-## 核心特性 / Features
+---
 
-- **自然语言 → SolidWorks 操作**：用中文或英文描述需求，AI 生成 VBA/Python 脚本并通过 COM 接口执行
-- **双协议 LLM 适配**：Anthropic 协议 + OpenAI 兼容协议，覆盖 7+ 服务商
-- **零插件安装**：通过 Windows 原生 `cscript.exe` + VBScript 连接 SolidWorks，无需 winax 等原生模块
-- **26 个内置工具**：草图、特征、装配、导出、批量操作全覆盖
-- **安全第一**：脚本黑名单校验 + 执行前自动备份 + 用户确认机制
-- **开发者友好**：161 个单元测试、完整文档、`SKIP_SW_CONNECT` 纯 UI 开发模式
+## Features
 
-## 快速开始 / Quick Start
+- **Natural language → SolidWorks operations.** Describe what you want in English or Chinese. The agent plans the steps, calls tools, and reports structured results — not just a wall of text.
+- **Provider-agnostic LLM.** Anthropic protocol + OpenAI-compatible protocol. Anthropic Claude, OpenAI, DeepSeek, Qwen (DashScope), MiniMax, SiliconFlow, Ollama, and any custom endpoint.
+- **Python sidecar architecture.** A long-running `sw_agent` process holds the SolidWorks COM connection open, executes tools, and streams structured JSON results back over stdio. No more per-action subprocess thrash.
+- **Vision-aware (optional).** Configure an independent vision model (image-to-text) or enable a multimodal main model. The agent can rotate the viewport, capture, analyze, and decide.
+- **26+ built-in tools** covering sketch, feature, assembly, reference geometry, document, view, and export. Each tool is a self-describing `@tool`-decorated Python function with an auto-generated JSON schema.
+- **Safety first.** Script sanitization, per-session backup with one-click restore, user confirmation gate for destructive operations, and crash log rotation.
+- **Developer friendly.** 167 unit tests, end-to-end build (typecheck + lint + test + electron-builder), and a `SKIP_SW_CONNECT` flag for UI-only iteration without SolidWorks installed.
 
-### 安装 / Install
+---
 
-从 [Releases](https://github.com/raylanlin/sw-copilot/releases) 下载安装包，双击安装。
+## Quick Start
 
-### 从源码运行 / From Source
+### Prerequisites
+
+- **Windows 10/11 (64-bit)**
+- **SolidWorks 2017+** (must be installed and runnable)
+- **Python 3.9+** with `pywin32` and `Pillow`:
+
+  ```powershell
+  pip install pywin32 pillow
+  ```
+
+  The Pillow dependency is important — without it, the sidecar falls back to BMP captures and many vision models refuse to decode them.
+
+- **Node.js 20+** (only required for building from source)
+
+### Install (end users)
+
+1. Download the latest `SW Copilot-Setup-x.y.z-x64.exe` from [Releases](https://github.com/raylanlin/sw-copilot/releases).
+2. Double-click to install. The installer places the app and the bundled Python sidecar in `Program Files\SW Copilot\`.
+3. Launch SolidWorks, then launch SW Copilot.
+4. Open ⚙️ Settings → choose your AI provider → paste your API key → Save.
+
+### Run from source
 
 ```bash
 git clone https://github.com/raylanlin/sw-copilot.git
@@ -67,103 +87,161 @@ npm install
 npm run dev
 ```
 
-> 纯 UI 开发无需 SolidWorks：设置 `SKIP_SW_CONNECT=true`
->
-> UI-only dev without SolidWorks: set `SKIP_SW_CONNECT=true`
+> For UI-only iteration without SolidWorks running: `SKIP_SW_CONNECT=true npm run dev`
 
-### 配置 / Configuration
+### First conversation
 
-1. 启动 SolidWorks → 启动 SW Copilot
-2. 点击 ⚙️ **设置** → 选择 API 协议 → 填入 Base URL 和 API Key → **保存**
-
-<details>
-<summary><strong>支持的 AI 服务商 / Supported Providers</strong></summary>
-
-| 服务商 Provider | 协议 Protocol | Base URL |
-|---|---|---|
-| Anthropic (Claude) | Anthropic | `https://api.anthropic.com` |
-| OpenAI | OpenAI 兼容 | `https://api.openai.com/v1` |
-| 百炼 (Qwen) | OpenAI 兼容 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| MiniMax | OpenAI 兼容 | `https://api.minimax.chat/v1` |
-| DeepSeek | OpenAI 兼容 | `https://api.deepseek.com` |
-| 硅基流动 | OpenAI 兼容 | `https://api.siliconflow.cn/v1` |
-| Ollama (本地) | OpenAI 兼容 | `http://localhost:11434/v1` |
-
-</details>
-
-## 使用示例 / Examples
+Open the chat panel and try:
 
 ```
-你: 把装配体里所有零件的圆角半径统一改成 3mm
-AI: [生成 VBA 脚本] → 检测到 8 个圆角特征，确认执行？ → 执行完成 ✓
-
-你: 导出当前零件为 STEP 和 PDF
-AI: [生成导出脚本] → 导出完成 ✓
-
-你: 在前视面画一个 50×30 的矩形然后拉伸 20mm
-AI: [生成建模脚本] → 零件创建完成 ✓
+Draw a 50×30 mm rectangle on the Front Plane and extrude it 20 mm.
 ```
 
-## 架构 / Architecture
-
 ```
-Renderer (React UI)  ←IPC→  Main Process (Node.js)  ←COM/cscript→  SolidWorks
+What is the mass and bounding box of this part?
 ```
 
-- **零 SDK 依赖**：原生 `fetch` + 手写 SSE 解析器，运行时仅 2 个 npm 依赖
-- **VBA → VBS 转换器**：10 步自动转换，支持 AI 直接生成的 VBA 代码
-- **UTF-16LE+BOM 编码**：解决中文注释在 cscript 中的编译错误
-- **GetObject → CreateObject fallback**：兼容 SolidWorks 未注册 ROT 的场景
+The agent will call `start_sketch` → `sketch_rectangle` → `extrude` in turn and stream each step into the UI. Switch documents in SolidWorks and the sidebar indicator updates within 3 seconds.
 
-详见 [技术架构文档](docs/ARCHITECTURE.md)。
+---
 
-## 系统要求 / Requirements
+## Architecture
 
-- Windows 10/11 (64-bit)
-- SolidWorks 2017+
-- Node.js 20+（仅开发模式）
+SW Copilot uses a three-tier architecture. The Python sidecar is the single source of truth for tools; the main process is the orchestrator; the renderer is the surface.
 
-## 文档 / Documentation
+```
+┌────────────────────────────────────────────────────────────┐
+│  Renderer (React)                                           │
+│    └─ llm:agent → window.api.llm.agent(config, messages)    │
+└────────────────────────┬───────────────────────────────────┘
+                         │ IPC (preload)
+┌────────────────────────▼───────────────────────────────────┐
+│  Main (Electron)                                            │
+│    ├─ runSidecarAgent ─ OpenAI-compatible tool dispatch    │
+│    │     ├─ Tools source = sidecar list_tools() (self-describing JSON schema)
+│    │     ├─ Execution = sidecar call() → structured {ok, data, error}
+│    │     └─ Vision analyze_view → independent vision model OR main model multimodal
+│    ├─ Confirmation gate → user approves destructive tools
+│    ├─ Per-session backup → one-click rollback
+│    └─ Fallback: runAgentLoop (legacy VBS) if sidecar not available
+└────────────────────────┬───────────────────────────────────┘
+                         │ stdio JSON-RPC (newline-delimited)
+┌────────────────────────▼───────────────────────────────────┐
+│  Python sidecar (sw_agent, long-running)                    │
+│    ├─ win32com → SolidWorks (one persistent connection)    │
+│    ├─ Tool registry (@tool decorator) — view/sketch/feature/
+│    │   reference/assembly/query/document/export
+│    └─ Returns structured JSON for every tool call          │
+└────────────────────────────────────────────────────────────┘
+```
 
-| 文档 | 说明 |
+### Why a Python sidecar?
+
+The legacy design spawned a fresh `cscript.exe` per tool call. That worked but: (a) it paid the COM handshake cost on every step, (b) any uncaught error in the generated VBS left the process in an indeterminate state, and (c) VBS has no first-class way to return structured data — the agent only saw raw `MsgBox` strings.
+
+The P3 sidecar replaces that with a long-running Python process that:
+
+1. Holds one `SldWorks.Application` COM handle for the lifetime of the app.
+2. Exposes each tool as a `@tool`-decorated function with auto-generated JSON schema.
+3. Returns `{ ok, data, error }` for every call so the agent can self-correct on failure.
+4. Streams progress over stdio so the UI can render each step live.
+
+If `pywin32` or Python is missing, the app automatically falls back to the legacy VBS path — nothing crashes, but you lose structured returns and vision. The README will yell at you on first launch.
+
+---
+
+## Requirements
+
+| Layer | Requirement |
 |---|---|
-| [技术架构](docs/ARCHITECTURE.md) | 系统设计、模块说明、数据流 |
-| [用户手册](docs/USER-GUIDE.md) | 安装配置、使用指南、FAQ |
-| [开发者指南](docs/DEVELOPMENT.md) | 代码结构、开发约定、测试 |
-| [API 参考](docs/API-REFERENCE.md) | LLM 接口、COM API 速查 |
-| [贡献指南](docs/CONTRIBUTING.md) | 如何参与贡献 |
-| [变更记录](CHANGELOG.md) | 版本历史 |
-| [安全策略](SECURITY.md) | 安全规范与漏洞报告 |
+| OS | Windows 10 / 11 (64-bit) |
+| CAD | SolidWorks 2017 or newer (must be installed and licensed) |
+| Python | 3.9+ with `pywin32` and `Pillow` |
+| RAM | 4 GB minimum, 8 GB recommended for vision workflows |
+| Node | 20+ (only for building from source) |
+| Network | Outbound HTTPS to your chosen LLM endpoint |
 
-## 参与贡献 / Contributing
+---
 
-欢迎贡献！详见 [CONTRIBUTING.md](docs/CONTRIBUTING.md)。
+## Documentation
 
-特别欢迎 / We especially welcome:
+| Doc | Description |
+|---|---|
+| [User Guide](docs/USER-GUIDE.md) | Install, configuration, usage, FAQ |
+| [Architecture](docs/ARCHITECTURE.md) | System design, module breakdown, data flow |
+| [API Reference](docs/API-REFERENCE.md) | LLM endpoints, tool catalog, COM API cheat sheet |
+| [Development Guide](docs/DEVELOPMENT.md) | Code structure, dev conventions, testing |
+| [Contributing](docs/CONTRIBUTING.md) | How to contribute, code style, PR process |
+| [Verify Tracker](docs/VERIFY-ISSUES.md) | Tools pending SolidWorks macro-recorder validation |
+| [Changelog](CHANGELOG.md) | Version history |
+| [Security Policy](SECURITY.md) | Security practices and vulnerability reporting |
 
-- 🧪 SolidWorks 实际环境测试报告
-- 🔨 新的 SW 工具生成器（扩展 26 → 40+）
-- 🎨 UI/UX 改进与交互优化
-- 🌐 多 CAD 软件适配（Inventor、CATIA、NX）
-- 📝 文档翻译与国际化
-- 🔌 MCP Server 集成
+中文版文档请见 [README.zh-CN.md](README.zh-CN.md)。
 
-## 路线图 / Roadmap
+---
 
-- [x] **v0.1.0** — MVP 基础架构（Electron + LLM + COM + 26 Tools）
-- [x] **v0.2.0** — 稳定版（Bug 修复 + CI/CD + .env fallback + 文档完善）
-- [x] **v0.2.1** — 假成功问题彻底修复（移除 CreateObject fallback + vbaToVbs 重写）
-- [x] **v0.2.2** — 渲染层修复（IPC 错误归一化 + 主题色 token + 滚动行为）
-- [x] **v0.2.3** — 新增 CI 质量门（PR / push 跑 typecheck + lint + test）← *当前*
-- [ ] **v0.3.0** — 高级特性（视觉感知 + 小步快跑 Agent + Function Calling）
-- [ ] **v1.0.0** — 生态建设（MCP Server + 多 CAD + 商业授权）
+## Contributing
 
-## 许可证 / License
+We welcome contributions. See [CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
-[GNU GPLv3](LICENSE) — 自由软件，允许商业使用，衍生作品也须开源。
+Particularly welcome:
 
-## 致谢 / Acknowledgments
+- 🧪 **SolidWorks real-environment testing reports** — open an issue with your SW version and a minimal repro
+- 🔨 **New tool implementations** in `sidecar/sw_agent/tools/` — extend the catalog from 26 → 40+
+- 🎨 **UI/UX improvements** to the chat surface and tool step rendering
+- 🌐 **Multi-CAD adapters** (Inventor, CATIA, NX, Onshape)
+- 📝 **Documentation and translations** — README.zh-CN.md needs continuous updates
+- 🔌 **MCP server integration** so SW Copilot can be driven from Claude Code / Cursor
 
-- SolidWorks COM API 参考：[CodeStack](https://www.codestack.net/)
-- MCP 生态：[SolidworksMCP-TS](https://github.com/vespo92/SolidworksMCP-TS)、[SolidPilot](https://github.com/eyfel/mcp-server-solidworks)
-- 灵感来源：Cursor、Claude Code、MecAgent
+### Adding a new tool
+
+The sidecar's tool registry is the extension point. Add a new file under `sidecar/sw_agent/tools/`:
+
+```python
+from ..registry import tool
+
+@tool(
+    name="my_tool",
+    description="What this tool does (visible to the LLM).",
+    parameters={
+        "type": "object",
+        "properties": {
+            "param1": {"type": "string", "description": "First parameter"},
+        },
+        "required": ["param1"],
+    },
+)
+def my_tool(param1: str) -> dict:
+    """Implementation goes here. Return {"ok": True, "data": {...}}."""
+    return {"ok": True, "data": {"result": param1}}
+```
+
+Restart the app — the sidecar will auto-discover the new tool and surface it to the LLM. See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full registry protocol.
+
+---
+
+## Roadmap
+
+- [x] **v0.1.0** — MVP (Electron + LLM + COM + 26 tools)
+- [x] **v0.2.0** — Stability (bug fixes + CI/CD + .env fallback)
+- [x] **v0.2.1** — Defeat the "silent success" footgun (remove CreateObject fallback)
+- [x] **v0.2.2** — Renderer hardening (IPC error normalization + theme tokens)
+- [x] **v0.2.3** — CI quality gate on every PR and push
+- [x] **v0.2.4** — **Python sidecar architecture (P3)** — structured tool returns, vision pipeline, agent loop rewrite
+- [ ] **v0.3.0** — Make sidecar required at install time (drop VBS fallback), validate all `# VERIFY` tools against real SolidWorks versions
+- [ ] **v0.4.0** — MCP server adapter (drive SW Copilot from Claude Code / Cursor)
+- [ ] **v1.0.0** — Multi-CAD adapters (Inventor, CATIA, NX, Onshape), commercial license track
+
+---
+
+## License
+
+[Apache License 2.0](LICENSE) — permissive open source. Use it, fork it, ship it in a commercial product. Attribution appreciated, not required. Patent grant included. No copyleft.
+
+---
+
+## Acknowledgments
+
+- SolidWorks COM API reference: [CodeStack](https://www.codestack.net/) SolidWorks API documentation
+- MCP ecosystem: [SolidworksMCP-TS](https://github.com/vespo92/SolidworksMCP-TS), [SolidPilot](https://github.com/eyfel/mcp-server-solidworks)
+- Inspiration: Cursor, Claude Code, MecAgent, and every engineer who has ever hand-written a FeatureExtrusion3 call

@@ -41,7 +41,7 @@ test('parseEnv: 行尾注释(无引号值)', () => {
 });
 
 test('parseEnv: 有引号时行尾 # 被视为值的一部分', () => {
-  // 这是合理的 —— shell 里引号内的 # 就是字面量
+  // This is reasonable — # inside quotes in shell is a literal character
   const r = parseEnv('FOO="bar # not comment"');
   assert.equal(r.FOO, 'bar # not comment');
 });

@@ -9,10 +9,10 @@ import { OpenAIAdapter } from '../dist/main/main/llm/openai.js';
 test('validateConfig: 空对象列出所有缺失项', () => {
   const r = validateConfig({});
   assert.equal(r.valid, false);
-  assert.ok(r.issues.some((i) => i.includes('protocol')));
-  assert.ok(r.issues.some((i) => i.includes('Base URL')));
-  assert.ok(r.issues.some((i) => i.includes('API Key')));
-  assert.ok(r.issues.some((i) => i.includes('模型')));
+  assert.ok(r.issues.some((i) => i.toLowerCase().includes('protocol')));
+  assert.ok(r.issues.some((i) => i.toLowerCase().includes('base url') || i.toLowerCase().includes('baseurl')));
+  assert.ok(r.issues.some((i) => i.toLowerCase().includes('api key') || i.toLowerCase().includes('apikey')));
+  assert.ok(r.issues.some((i) => i.toLowerCase().includes('model')));
 });
 
 test('validateConfig: 正常配置通过', () => {
@@ -44,7 +44,7 @@ test('validateConfig: 非法 URL 被拒', () => {
     model: 'y',
   });
   assert.equal(r.valid, false);
-  assert.ok(r.issues.some((i) => i.includes('Base URL')));
+  assert.ok(r.issues.some((i) => i.toLowerCase().includes('base url') || i.toLowerCase().includes('baseurl')));
 });
 
 test('validateConfig: ftp:// 被拒', () => {

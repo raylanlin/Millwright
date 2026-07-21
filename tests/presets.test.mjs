@@ -1,10 +1,10 @@
 // tests/presets.test.mjs
 //
-// 校验预设数据的一致性:
-//   - DEFAULT_URLS 两个协议都有
-//   - DEFAULT_URLS 是合法 URL
-//   - MODEL_PRESETS 两个协议都有,且都包含 "custom" 选项
-//   - DEFAULT_CONFIG 能通过 validateConfig(除了 apiKey 外)
+// Validate consistency of preset data:
+//   - DEFAULT_URLS covers both protocols
+//   - DEFAULT_URLS are valid URLs
+//   - MODEL_PRESETS covers both protocols, each with a "custom" option
+//   - DEFAULT_CONFIG passes validateConfig (except for apiKey)
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

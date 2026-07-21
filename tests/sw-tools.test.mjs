@@ -1,11 +1,11 @@
 // tests/sw-tools.test.mjs
 //
-// sw-tools 是纯数据,测试它的不变式:
-//   - 所有工具名唯一(后续接 function calling 靠 name 做 dispatch,重名必挂)
-//   - name 是 snake_case 合法标识符
-//   - 每个工具都有非空 description
-//   - category 合法
-//   - 分类分组能覆盖所有工具
+// sw-tools is pure data; test its invariants:
+//   - All tool names are unique (function calling dispatches by name; duplicates will break)
+//   - name is a valid snake_case identifier
+//   - Every tool has a non-empty description
+//   - category is valid
+//   - Category grouping covers all tools
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -78,7 +78,7 @@ test('sw-tools: getToolsByCategory 的每条都属于正确分类', () => {
 });
 
 test('sw-tools: 至少包含几个关键工具', () => {
-  // 这几个是 UI 原型和文档里都展示过的,不应该被意外删除
+  // These are shown in both the UI prototype and the docs; they should not be accidentally removed
   const required = ['create_part', 'create_fillet', 'extrude_feature', 'export_pdf', 'export_step'];
   const names = new Set(getToolNames());
   for (const r of required) {

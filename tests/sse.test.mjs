@@ -1,6 +1,6 @@
 // tests/sse.test.mjs
-// 纯 Node 自带 test runner,零额外依赖
-// 运行:node --test tests/sse.test.mjs
+// Pure Node built-in test runner, zero extra dependencies
+// Run: node --test tests/sse.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -60,15 +60,15 @@ test('SSE: CRLF 换行', async () => {
 });
 
 test('SSE: 只有空 data 的事件被跳过', async () => {
-  // 没有 data 行的事件应该返回 null(在 parseEventBlock 中),
-  // 注意 :comment 本身不构成事件
+  // Events without a data line should return null (in parseEventBlock),
+  // note: a :comment alone does not constitute an event
   const evs = await collect(streamOf([':just comment\n\ndata: real\n\n']));
   assert.equal(evs.length, 1);
   assert.equal(evs[0].data, 'real');
 });
 
 test('SSE: 冒号后可选空格', async () => {
-  // 规范允许 "data:value" 和 "data: value",value 应该一致
+  // The spec allows both "data:value" and "data: value"; the value should be the same
   const evs = await collect(streamOf(['data:no-space\n\ndata: with-space\n\n']));
   assert.equal(evs[0].data, 'no-space');
   assert.equal(evs[1].data, 'with-space');

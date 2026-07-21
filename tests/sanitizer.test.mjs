@@ -64,7 +64,7 @@ test('sanitizer: 正常 Python 通过', () => {
 });
 
 test('sanitizer: 语言维度隔离 - VBA 关键字不该触发 Python 规则', () => {
-  // VBA 里的 Shell() 应该只在 vba 模式下被拦,python 模式下不该被拦
+  // Shell() in VBA should only be blocked in vba mode, not in python mode
   const r = validateScript('Shell("a")', 'python');
   assert.equal(r.safe, true);
 });
@@ -72,12 +72,12 @@ test('sanitizer: 语言维度隔离 - VBA 关键字不该触发 Python 规则', 
 test('sanitizer: 通用黑名单 - reg add', () => {
   const r = validateScript('Shell("reg add HKCU\\\\X /v y /d z")', 'vba');
   assert.equal(r.safe, false);
-  // 两条规则都会命中(VBA Shell + 注册表),issues 会去重
+  // Both rules hit (VBA Shell + registry), and issues are deduplicated
   assert.ok(r.issues.length >= 1);
 });
 
 test('sanitizer: 问题列表去重', () => {
-  // 同一条规则多次命中应只报一次
+  // The same rule hit multiple times should only be reported once
   const code = 'Shell("a")\nShell("b")\nShell("c")';
   const r = validateScript(code, 'vba');
   const shellCount = r.issues.filter((i) => /Shell/.test(i)).length;

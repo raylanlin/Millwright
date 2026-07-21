@@ -1,6 +1,6 @@
 // tests/agent-loop.test.mjs
-// P1 冒烟测试：验证工具 schema 转换 + agent 循环（用假 adapter，不打真实网络）。
-// 运行： npm run build:main && node --test tests/agent-loop.test.mjs
+// P1 smoke test: verify tool schema conversion + agent loop (uses fake adapter, no real network).
+// Run: npm run build:main && node --test tests/agent-loop.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,5 +28,5 @@ test('工具 schema：mm 数值参数映射为 number', () => {
   assert.equal(rect.function.parameters.properties.width.type, 'number');
 });
 
-// 若要测完整 agent 循环，注入一个假 adapter：
-// 第 1 轮返回 tool_calls，第 2 轮返回纯文本，断言工具被执行、循环收敛。
+// To test the full agent loop, inject a fake adapter:
+// Round 1 returns tool_calls, round 2 returns plain text; assert tools are executed and loop converges.

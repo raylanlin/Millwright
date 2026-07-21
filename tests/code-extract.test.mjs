@@ -47,13 +47,13 @@ test('extract: no code returns null', () => {
 });
 
 test('extract: ambiguous untagged block returns null', () => {
-  // 没有 VBA/Python 明确信号的无标签代码块应该被忽略
+  // Untagged code blocks without explicit VBA/Python signals should be ignored
   const r = extractFirstCodeBlock('```\nfoo bar baz\n```');
   assert.equal(r, null);
 });
 
 test('extract: unrecognized language tag returns null', () => {
-  // 不是 vba/python 的 fence 不应被抽成代码
+  // Fences that are not vba/python should not be extracted as code
   const r = extractFirstCodeBlock('```rust\nfn main() {}\n```');
   assert.equal(r, null);
 });
