@@ -67,9 +67,13 @@ export class SWSidecar {
     proc.stderr.on('data', (b) => this.opts.onLog?.(`[sidecar:err] ${b}`));
     proc.on('exit', (code) => {
       this.opts.onLog?.(`[sidecar] 退出 code=${code}`);
+      if (this.proc === proc) this.proc = null; // BUGFIX: 允许下次 start() 重新拉起（崩溃自愈）
       this.cleanup(new Error(`边车进程退出 (code=${code})`));
     });
-    proc.on('error', (e) => this.cleanup(new Error(`边车启动失败：${e.message}`)));
+    proc.on('error', (e) => {
+      if (this.proc === proc) this.proc = null;
+      this.cleanup(new Error(`边车启动失败：${e.message}`));
+    });
 
     // 等 ready 握手（10s 超时）
     await new Promise<void>((resolve, reject) => {

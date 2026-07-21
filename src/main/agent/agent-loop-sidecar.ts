@@ -86,6 +86,17 @@ export async function runSidecarAgent(
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
     history = truncateMessages(history);
+    // BUGFIX: 截断保留的是最新一段后缀，可能把某轮的 assistant(tool_calls) 砍掉却留下它的
+    // 工具结果 → OpenAI/DeepSeek 会因“role:tool/工具结果缺少前置 tool_calls”报 400。
+    // 剥掉开头的孤儿工具结果，保证首条不是悬空的工具结果。
+    while (
+      history.length > 0 &&
+      history[0].role === 'system' &&
+      history[0].toolCalls &&
+      history[0].toolCalls.length > 0
+    ) {
+      history.shift();
+    }
 
     const resp = await adapter.chatWithTools(history, opts.signal, tools);
     if (resp.content) {
@@ -104,10 +115,13 @@ export async function runSidecarAgent(
 
       // 视觉工具单独处理
       if (call.name === 'analyze_view') {
-        const resultText = await handleAnalyzeView(call, history, sidecar, opts);
+        const { resultText, imageMessage } = await handleAnalyzeView(call, sidecar, opts);
         call.result = resultText;
         opts.onEvent?.({ type: 'tool_result', toolCall: call });
+        // 先压工具结果（紧跟 assistant.tool_calls，满足 OpenAI 配对要求），
+        // 再把图像作为独立 user 消息压入 —— 绝不能插在 tool_calls 与其结果之间（否则 400）。
         history.push({ role: 'system', content: resultText, toolCalls: [{ ...call, result: resultText }] });
+        if (imageMessage) history.push(imageMessage);
         continue;
       }
 
@@ -137,21 +151,26 @@ export async function runSidecarAgent(
   return finalText || `已多步执行但未收敛（${maxRounds} 轮上限）。`;
 }
 
+interface AnalyzeViewResult {
+  resultText: string;
+  /** 路径 B：图像作为独立 user 消息，由调用方压在工具结果“之后” */
+  imageMessage?: ChatMessage;
+}
+
 /** analyze_view：截屏 → 图生文(独立视觉模型) 或 直喂多模态主模型。 */
 async function handleAnalyzeView(
   call: ToolCall,
-  history: ChatMessage[],
   sidecar: SWSidecar,
   opts: SidecarAgentOptions,
-): Promise<string> {
+): Promise<AnalyzeViewResult> {
   const question = String(call.parameters?.question ?? '请描述当前零件状态');
   const cap = await sidecar.call('capture_view', {});
-  if (!cap.ok) return `截屏失败：${cap.error}`;
+  if (!cap.ok) return { resultText: `截屏失败：${cap.error}` };
   let dataUrl: string;
   try {
     dataUrl = opts.imageToDataUrl(cap.data.image_path, cap.data.format);
   } catch (e) {
-    return `图像读取失败：${e instanceof Error ? e.message : String(e)}`;
+    return { resultText: `图像读取失败：${e instanceof Error ? e.message : String(e)}` };
   }
 
   // 路径 A：独立视觉模型（图生文，prompt = 主模型自拟的 question）
@@ -159,18 +178,22 @@ async function handleAnalyzeView(
     try {
       const desc = await analyzeImage({ question, imageDataUrl: dataUrl, config: opts.visionConfig, signal: opts.signal });
       opts.onEvent?.({ type: 'image' });
-      return `【视觉分析】${clip(desc)}`;
+      return { resultText: `【视觉分析】${clip(desc)}` };
     } catch (e) {
-      return `视觉模型分析失败：${e instanceof Error ? e.message : String(e)}`;
+      return { resultText: `视觉模型分析失败：${e instanceof Error ? e.message : String(e)}` };
     }
   }
 
-  // 路径 B：主模型本身多模态 → 把图注入历史，下一轮它直接看图
+  // 路径 B：主模型本身多模态 → 图像作为独立 user 消息返回（调用方压在工具结果之后）
   if (opts.mainModelVision) {
-    history.push({ role: 'user', content: `（视图截图，请据此回答：${question}）`, images: [dataUrl] });
     opts.onEvent?.({ type: 'image' });
-    return '已将当前视图图像提供给你，请直接观察后继续。';
+    return {
+      resultText: '已截取当前视图，图像见下一条消息，请据此继续。',
+      imageMessage: { role: 'user', content: `（视图截图，请据此回答：${question}）`, images: [dataUrl] },
+    };
   }
 
-  return '未配置视觉模型，且主模型未开启视觉输入。请在「设置 → 视觉模型」中指定一个视觉模型，或勾选“主模型支持视觉”。';
+  return {
+    resultText: '未配置视觉模型，且主模型未开启视觉输入。请在「设置 → 视觉模型」中指定一个视觉模型，或勾选“主模型支持视觉”。',
+  };
 }

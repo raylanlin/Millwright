@@ -255,10 +255,18 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       const send = (ev: AgentEvent) =>
         e.sender.send(IpcChannels.LLM_AGENT_EVENT, { ...ev, requestId });
 
-      // P3：边车优先；边车不可用（未装 python / pywin32）→ 回退旧 VBS agent
+      // P3：边车优先；仅当边车「启动失败」（未装 python/pywin32）才回退 VBS。
+      // 边车一旦就绪，运行期错误（含用户取消）正常向外抛，绝不静默回退重跑。
       const sidecar = getSidecar({ onLog: (l) => console.log('[sidecar]', l) });
+      let sidecarReady = false;
       try {
         await sidecar.start();
+        sidecarReady = true;
+      } catch (startErr) {
+        console.warn('[agent] 边车启动失败，回退 VBS agent:', startErr);
+      }
+
+      if (sidecarReady) {
         const text = await runSidecarAgent(adapter, payload.messages, sidecar, {
           requestId,
           maxRounds: 12,
@@ -270,22 +278,21 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           imageToDataUrl,
         });
         return { ok: true, text, requestId };
-      } catch (sidecarErr) {
-        // 边车不可用 → 回退旧 VBS agent 路径
-        console.warn('[agent] sidecar 不可用，回退 VBS agent:', sidecarErr);
-        const text = await runAgentLoop(adapter, payload.messages, scriptEngine, {
-          requestId,
-          maxRounds: 8,
-          signal: controller.signal,
-          onEvent: send,
-          backup: async () => {
-            const r = await backupActiveDocument(bridge);
-            return r.backupPath ?? null;
-          },
-          confirmTool: (call) => requestUserConfirm(e.sender, requestId, call, send),
-        });
-        return { ok: true, text, requestId };
       }
+
+      // 仅边车不可用时走旧 VBS 路径
+      const text = await runAgentLoop(adapter, payload.messages, scriptEngine, {
+        requestId,
+        maxRounds: 8,
+        signal: controller.signal,
+        onEvent: send,
+        backup: async () => {
+          const r = await backupActiveDocument(bridge);
+          return r.backupPath ?? null;
+        },
+        confirmTool: (call) => requestUserConfirm(e.sender, requestId, call, send),
+      });
+      return { ok: true, text, requestId };
     } catch (err) {
       return { ok: false, error: toLLMError(err, 'Agent 执行失败'), requestId };
     } finally {
