@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/icon-256.png" width="80" height="80" alt="Millwright" />
+  <img src="assets/banner-hero.png" alt="Millwright — Talk to your CAD" />
+</p>
+
+<p align="center">
+  <img src="assets/icon-512.png" width="96" height="96" alt="Millwright" />
 </p>
 
 <h1 align="center">Millwright</h1>
