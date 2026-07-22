@@ -6,6 +6,33 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-22
+
+### Changed
+- **Visual brand refresh**: Raylan's new 1320×1320 M monogram (silver M
+  plus semi-transparent blue-tinted M offset forming a 'm/m' letterform)
+  now drives every brand surface:
+  - `assets/icon.ico` regenerated at all required Windows sizes
+    (16/24/32/48/64/128/256) from the v4 M monogram. The previous
+    `icon.ico` was the original 256×256 mark from commit 949930e and was
+    never touched through v0.2.x.
+  - `assets/banner-hero.png` (1600×640) and `assets/social-preview.png`
+    (1280×640) refreshed to v3.1 — Space Grotesk wordmark, M monogram,
+    Navy `#060D1D` + Silver `#EAEDF4` + Electric Blue `#1E6BFF` + Cyan
+    `#38CCFF` brand palette, subtle gradient + noise for depth.
+  - `assets/README-hero.png` (1536×1024) refreshed to v3.1 as well.
+  - `assets/icon-256.png`, `icon-512.png`, `icon-1024.png`,
+    `logo-square-512.png` regenerated from the M monogram source.
+- **`README.md` / `README.zh-CN.md`**: insert v3.1 `banner-hero.png` as
+  the top hero image; swap header icon to v3.1 `icon-512.png` (96×96).
+- **`.github/workflows/build.yml`**: artifact names updated from the old
+  `SW-Copilot-*` slug to `Millwright-*` to match the new product name.
+
+### Fixed
+- v0.2.4 release still shipped the original Jun-14 256×256 icon (never
+  refreshed) and the installer filename was still `SW.Copilot-Setup-…`.
+  Both are addressed by this release.
+
 ## [0.2.3] - 2026-06-14
 
 ### Added
@@ -119,7 +146,8 @@
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/raylanlin/Millwright/compare/v0.2.4...v0.2.5
 [0.2.3]: https://github.com/raylanlin/sw-copilot/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/raylanlin/sw-copilot/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/raylanlin/sw-copilot/compare/v0.1.0...v0.2.1

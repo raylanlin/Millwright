@@ -49,14 +49,14 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
-          name: SW-Copilot-Setup
+          name: Millwright-Setup
           path: release/*.exe
           retention-days: 30
 
       - name: Upload portable artifact
         uses: actions/upload-artifact@v7
         with:
-          name: SW-Copilot-Portable
+          name: Millwright-Portable
           path: release/win-unpacked/**
           retention-days: 30
 
