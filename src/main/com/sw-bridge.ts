@@ -16,8 +16,6 @@
 //    so the UI can show the real fix instead of "make sure SolidWorks is running".
 
 import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { exec } from 'child_process';
 import type { SWDocumentType, SWStatus } from '../../shared/types';
 import { writeVBSFile, safeUnlink } from './vbs-writer';
@@ -233,8 +231,24 @@ If IsNull(title) Then title = ""
 WScript.Echo "{""connected"":true,""hasDoc"":true,""version"":""" & J(ver) & """,""activeDocumentType"":""" & dtStr & """,""activeDocumentPath"":""" & J(dp) & """,""activeDocumentTitle"":""" & J(title) & """}"
 
 Function J(s)
+    Dim i, c, cd, r
     If IsNull(s) Then J = "" : Exit Function
-    J = Replace(Replace(Replace(CStr(s), "\\", "\\\\"), """", "\\"""), vbCrLf, "\\n")
+    r = ""
+    For i = 1 To Len(CStr(s))
+        c = Mid(CStr(s), i, 1)
+        cd = AscW(c)
+        If cd < 0 Then cd = cd + 65536
+        If c = "\\" Then
+            r = r & "\\\\"
+        ElseIf c = """" Then
+            r = r & "\\"""
+        ElseIf cd < 32 Or cd > 126 Then
+            r = r & "\\u" & Right("000" & Hex(cd), 4)
+        Else
+            r = r & c
+        End If
+    Next
+    J = r
 End Function
 ${ATTACH_FN}`;
     try {
@@ -250,46 +264,29 @@ ${ATTACH_FN}`;
 
 // ===== VBS executor =====
 
-// P8.1: console codepage is UNRELIABLE either way — without //U cscript writes the
-// OEM codepage (GBK mojibake); //U itself is not honored on every Windows build, in
-// which case the UTF-16 decode garbles even ASCII ("OK" → 䫔…) and the connection
-// check permanently fails. So we bypass the console entirely: every WScript.Echo is
-// rewritten to Out(), which appends to a temp file via FSO in Unicode (UTF-16LE) mode
-// — an encoding that is deterministic on all systems. Node reads that file back.
+// P9: output transport is now plain stdout with PURE-ASCII content.
+// History: raw stdout decoded as UTF-8 broke CJK (OEM codepage); //U (P8) broke the
+// connection check on builds that ignore it for pipes; an FSO temp file (P8.1) is
+// blocked by some AV products — Sub Out then dies silently, the script quits with
+// empty output and the UI reports "not connected" even when COM attach SUCCEEDED.
+// Final approach: never emit a non-ASCII byte. All strings are escaped to \uXXXX
+// inside VBS (see J/EscapeJson); ASCII bytes are identical in every codepage, so a
+// plain utf8 decode of the pipe is always correct. No //U, no temp file, no FSO.
 function runVBS(scriptCode: string): Promise<string> {
   if (process.platform !== 'win32') {
     return Promise.reject(new Error('VBScript 仅支持 Windows'));
   }
-  const outPath = path.join(os.tmpdir(), `sw_out_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
-  // Open-append-close per line so output survives WScript.Quit at any point
-  const OUT_HELPER = `
-Dim __fso
-Set __fso = CreateObject("Scripting.FileSystemObject")
-Sub Out(s)
-    Dim __f
-    Set __f = __fso.OpenTextFile("${outPath}", 8, True, -1)
-    __f.WriteLine s
-    __f.Close
-End Sub`;
-  const rewritten = OUT_HELPER + '\n' + scriptCode.replace(/WScript\.Echo/g, 'Out');
-  const scriptPath = writeVBSFile(rewritten, 'sw_com');
+  const scriptPath = writeVBSFile(scriptCode, 'sw_com');
   return new Promise<string>((resolve, reject) => {
     const cscriptPath =
       `${process.env.SYSTEMROOT || 'C:\\Windows'}\\System32\\cscript.exe`;
     exec(
       `"${cscriptPath}" //NoLogo "${scriptPath}"`,
-      { timeout: VBS_TIMEOUT_MS, windowsHide: true },
-      (error) => {
+      { timeout: VBS_TIMEOUT_MS, windowsHide: true, encoding: 'utf8' },
+      (error, stdout) => {
         safeUnlink(scriptPath);
-        let text = '';
-        try {
-          const buf = fs.readFileSync(outPath);
-          // FSO Unicode mode writes UTF-16LE with BOM
-          text = buf.toString('utf16le').replace(/^\uFEFF/, '').trim();
-        } catch { /* no output file */ }
-        safeUnlink(outPath);
-        if (error && !text) reject(error);
-        else resolve(text);
+        if (error) reject(error);
+        else resolve(stdout.trim());
       },
     );
   });
@@ -343,7 +340,7 @@ Do While Not feat Is Nothing And fCount < 50
     ' 跳过系统特征
     If Not (fType = "OriginProfile" Or fType = "Reference" Or fName = "") Then
         If features <> "" Then features = features & "|"
-        features = features & fName & "::" & fType & "::" & CStr(feat.IsSuppressed())
+        features = features & fName & "::" & fType & "::" & LCase(CStr(feat.IsSuppressed()))
         fCount = fCount + 1
     End If
     Set feat = feat.GetNextFeature()
@@ -413,7 +410,7 @@ If docType = 2 Then
             If cCount >= 50 Then Exit For
             cName = comp.Name2
             cPath = comp.GetPathName()
-            cSup = CStr(comp.IsSuppressed())
+            cSup = LCase(CStr(comp.IsSuppressed()))
             If Not IsNull(cName) And cName <> "" Then
                 cFile = ""
                 If Not IsNull(cPath) And cPath <> "" Then
@@ -439,11 +436,27 @@ WScript.Echo """components"":[" & CompsToJson(comps) & "]"
 WScript.Echo "}"
 
 Function EscapeJson(s)
+    Dim i, c, cd, r
     If IsNull(s) Or s = "" Then
         EscapeJson = ""
         Exit Function
     End If
-    EscapeJson = Replace(Replace(Replace(s, "\\", "\\\\"), """", "\\"""), vbCrLf, "\\n")
+    r = ""
+    For i = 1 To Len(CStr(s))
+        c = Mid(CStr(s), i, 1)
+        cd = AscW(c)
+        If cd < 0 Then cd = cd + 65536
+        If c = "\\" Then
+            r = r & "\\\\"
+        ElseIf c = """" Then
+            r = r & "\\"""
+        ElseIf cd < 32 Or cd > 126 Then
+            r = r & "\\u" & Right("000" & Hex(cd), 4)
+        Else
+            r = r & c
+        End If
+    Next
+    EscapeJson = r
 End Function
 
 Function FeaturesToJson(s)

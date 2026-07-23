@@ -6,6 +6,43 @@
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-07-23
+
+### Fixed (P9 — 连接判定最终修复 + 真 bug 顺修)
+
+**输出通道第 4 版（终版）：纯 ASCII stdout + VBS 层转义**
+
+`P8.1` 的 FSO 临时文件方案在部分环境被杀毒软件拦截（写文件
+是常见诱因），`Sub Out` 无错误处理导致 `"OK"` 输出丢失 →
+COM 附着成功也判"未连接"。P9 回到 `stdout + exec + utf8` 的最朴素
+通道，但保证输出永远纯 ASCII：所有非 ASCII 字符在 VBS 层
+转成 `\uXXXX`（`AscW` + 负值修正处理代理对），`JSON.parse` 原生
+解码。ASCII 字节在任何代码页下都相同，编码问题物理上不可能再
+发生。不用 `//U`、不写临时文件、不碰 FSO。
+
+**老 bug 顺修：`CStr(True)` 输出大写 `True` 导致 JSON 解析炸**
+
+`LCase(CStr(feat.IsSuppressed()))` 和
+`LCase(CStr(comp.IsSuppressed()))` 修两处。**特征采集其实一直返回空**——
+try/catch 吞掉了 JSON 解析异常。这是 P9 之前没人发现的真 bug，
+现在终于有中文特征名能拿到非空结果。
+
+**保留 v0.2.7 的 `AttachSW()` 函数内 `On Error Resume Next`**
+
+### Files touched (1)
+- `src/main/com/sw-bridge.ts` — P9 drop-in，hash `584cd8fe760b180ce474217e4c81611cd87b0a49`
+  （drop-in 自带；v0.2.7 的 AttachSW On Error Resume Next 已包含在 patch 里）
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
+### 如果 P9 还不行
+
+通道问题已全部排除。剩下的必须跑 `diag.vbs`（之前给过）拿实际
+输出，**不要再盲修代码**。
+
 ## [0.2.7] - 2026-07-23
 
 ### Fixed (P8.1 回归根因 + 真 bug)
@@ -222,7 +259,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.7...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.8...HEAD
+[0.2.8]: https://github.com/raylanlin/Millwright/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/raylanlin/Millwright/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/raylanlin/Millwright/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/raylanlin/Millwright/compare/v0.2.4...v0.2.5
