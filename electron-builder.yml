@@ -27,6 +27,13 @@ extraResources:
     to: 'sidecar'
     filter:
       - '**/*'
+  # P12: ship the bundled Python runtime so users don't have to install Python
+  # + pywin32 themselves. `vendor/python/` is populated by `scripts/prepare-python.ps1`
+  # before `electron-builder` runs (see .github/workflows/build.yml and
+  # package.json's dist script). Path resolution at runtime lives in
+  # src/main/python-path.ts — that's the single source of truth for "where's python".
+  - from: 'vendor/python'
+    to: 'python'
 
 win:
   # NSIS only. Squirrel was removed — it auto-launches the app in the background

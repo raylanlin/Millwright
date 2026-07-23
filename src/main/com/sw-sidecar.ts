@@ -13,8 +13,8 @@
 //   correctly joins an in-flight handshake instead of returning early.
 
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
-import * as path from 'path';
 import * as readline from 'readline';
+import { resolvePythonPath, resolveSidecarCwd } from '../python-path';
 
 export interface SidecarResult<T = any> {
   ok: boolean;
@@ -54,8 +54,8 @@ export class SWSidecar {
 
   constructor(opts: SidecarOptions = {}) {
     this.opts = {
-      pythonPath: opts.pythonPath || (process.platform === 'win32' ? 'python' : 'python3'),
-      cwd: opts.cwd || path.join(process.resourcesPath || process.cwd(), 'sidecar'),
+      pythonPath: opts.pythonPath || resolvePythonPath(),
+      cwd: opts.cwd || resolveSidecarCwd(),
       callTimeoutMs: opts.callTimeoutMs ?? 60_000,
       onLog: opts.onLog,
     };

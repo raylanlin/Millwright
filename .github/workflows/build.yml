@@ -25,6 +25,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # P12: download the bundled Python embeddable + install pywin32 into
+      # vendor/python/ before electron-builder runs. Idempotent — safe to re-run.
+      # This is a build-time network op; end users have no network requirement.
+      - name: Prepare bundled Python runtime
+        shell: pwsh
+        run: ./scripts/prepare-python.ps1
+
       - name: Lint
         run: npm run lint
         continue-on-error: true

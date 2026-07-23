@@ -17,6 +17,7 @@ import type { ScriptLanguage, ScriptResult } from '../../shared/types';
 import { validateScript } from './sanitizer';
 import { vbaToVbs, detectRuntimes, checkVbsCompatibility } from './vba-macro-writer';
 import type { SolidWorksBridge } from '../com/sw-bridge';
+import { resolvePythonPath } from '../python-path';
 import { writeVBSFile, safeUnlink } from '../com/vbs-writer';
 
 const PYTHON_TIMEOUT_MS = 60_000;
@@ -217,8 +218,8 @@ export class ScriptEngine {
     const enrichedCode = `import os as __os__\n__result_path__ = r"${resultPath}"\n\n${code}`;
     fs.writeFileSync(scriptPath, enrichedCode, 'utf8');
 
-    // 与 sidecar 一致的解释器解析（PATH 里的 python / python3）
-    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    // P12: 与 sidecar 同源的解释器解析（内置运行时优先，零用户安装）
+    const pythonCmd = resolvePythonPath();
     const out = await runProcess(pythonCmd, [scriptPath], PYTHON_TIMEOUT_MS, 'utf8');
 
     const resultData = readResultFile(resultPath);
