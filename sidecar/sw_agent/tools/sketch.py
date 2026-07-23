@@ -4,12 +4,18 @@ All coordinate / dimension inputs are in mm; internally units.mm() converts
 to meters. Most entity methods (CreateCornerRectangle / CreateCircle /
 CreateLine / CreateArc / CreatePolygon) are stable across SolidWorks
 versions with well-defined signatures.
+
+P13: add_dimension's SetSystemValue3 config arg corrected — 1 = this
+configuration ONLY (the comment claimed "all"); 2 = all configurations.
 """
 from __future__ import annotations
 
 from ..registry import tool
 from ..bridge import Context, SWError
 from .. import units
+
+# swInConfigurationOpts_e
+CFG_ALL = 2
 
 
 def _require_sketch(ctx: Context):
@@ -177,7 +183,7 @@ def add_sketch_relation(ctx: Context, relation: str):
 
 
 @tool(
-    "add_dimension", "Add a driving dimension at the given location for the selected entities",
+    "add_dimension", "Add a driving dimension at the given location for the selected entities (applies to ALL configurations)",
     params={
         "x": {"type": "number", "desc": "Dimension placement X (mm)"},
         "y": {"type": "number", "desc": "Dimension placement Y (mm)"},
@@ -193,6 +199,7 @@ def add_dimension(ctx: Context, x: float, y: float, value: float = 0):
         raise SWError("failed to add dimension.")
     if value:
         d = disp.GetDimension2(0) if hasattr(disp, "GetDimension2") else disp.GetDimension()
-        d.SetSystemValue3(units.mm(value), 1, None)  # 1 = apply to all configurations
+        # P13: swInConfigurationOpts_e — 2 = all configurations (1 = this config only)
+        d.SetSystemValue3(units.mm(value), CFG_ALL, None)
         ctx.rebuild()
     return {"dimension_at": [x, y], "value_mm": value or None}

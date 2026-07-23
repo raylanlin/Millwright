@@ -48,3 +48,12 @@ jobs:
       # test 脚本内部已含 build:main,会编译主进程再跑 node --test
       - name: Test
         run: npm test
+
+      # P13: sidecar (Python) lint + tests — mock Context, 无需 SW 环境,
+      # 可以在 ubuntu runner 上跑。注意:仅跑 schema/必参/单位换算/参数流转,
+      # 真实 COM 调用依赖真机验证 (# VERIFY 标记的工具)。
+      - name: Python lint + tests
+        run: |
+          pip install --quiet ruff pytest
+          ruff check sidecar/
+          pytest sidecar/tests -q

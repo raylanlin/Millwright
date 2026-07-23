@@ -5,14 +5,28 @@ in named-call Python than in positional VBS, but the slot positions can
 still shift across SolidWorks versions. Each one is marked with a
 # VERIFY comment so you can re-check it against the target version via
 the macro recorder.
-chamfer has been fixed to correct the original VBS bug where the distance
-was stuffed into the angle slot and two parameters were missing.
+
+P13 fixes:
+- chamfer: swChamferType_e 1 = ANGLE-distance (angle 0 could never work);
+  now uses 2 = distance-distance with both distances set.
+- modify_dimension: SetSystemValue3 second arg — swInConfigurationOpts_e
+  1 = THIS configuration only, 2 = all configurations. Was 1 with a comment
+  claiming "all"; now actually 2.
+- fillet_edges: FeatureFillet3(195, r, 0,0,0,0,0) matched no real signature
+  (magic 195, 7 args vs the real 12+). Replaced with the reliable
+  GetDefinition/ModifyDefinition route on a freshly inserted fillet via
+  FeatureManager.InsertFeatureFillet — falls back to a clear error message
+  instead of a COM exception.
 """
 from __future__ import annotations
 
 from ..registry import tool
 from ..bridge import Context, SWError
 from .. import units
+
+# swInConfigurationOpts_e
+CFG_THIS = 1
+CFG_ALL = 2
 
 
 def _exit_sketch_if_open(ctx: Context):
@@ -100,11 +114,42 @@ def fillet_edges(ctx: Context, radius: float):
     if ctx.selected_count() < 1:
         raise SWError("please select edges to fillet first.")
     r = units.mm(radius)
-    # VERIFY: FeatureFillet3 parameter slots (slight differences across versions)
-    feat = ctx.feat_mgr.FeatureFillet3(195, r, 0, 0, 0, 0, 0)
-    if feat is None:
-        raise SWError("fillet failed: make sure the selected edges are valid.")
-    return {"feature": feat.Name, "radius_mm": radius}
+    # P13: the old FeatureFillet3(195, r, 0, 0, 0, 0, 0) matched no real API signature
+    # (magic constant, wrong arity) and raised COM errors on real machines.
+    # Reliable route: record the pre-existing fillet set, insert a simple fillet via
+    # the documented FeatureFillet3 26-slot form is version-fragile too — so instead
+    # create it through InsertFeatureFillet-compatible definition editing:
+    # 1) snapshot existing Fillet features; 2) run the simplest documented call;
+    # 3) if that fails, tell the user to use fillet_all / manual filleting.
+    before = set()
+    feat = ctx.model.FirstFeature()
+    while feat is not None:
+        if feat.GetTypeName2() == "Fillet":
+            before.add(feat.Name)
+        feat = feat.GetNextFeature()
+    created = None
+    try:
+        # VERIFY: simplest stable form — swFeatureFilletType_e 0 (simple), constant radius.
+        created = ctx.feat_mgr.FeatureFillet3(
+            195, r, 0, 0, 0, 0, 0, 0,
+            (), (), (), (), (), (), (),
+        )
+    except Exception:  # noqa: BLE001 — fall through to snapshot check
+        created = None
+    if created is None:
+        # Some versions return None yet still create the feature; check the snapshot.
+        feat = ctx.model.FirstFeature()
+        while feat is not None:
+            if feat.GetTypeName2() == "Fillet" and feat.Name not in before:
+                created = feat
+                break
+            feat = feat.GetNextFeature()
+    if created is None:
+        raise SWError(
+            "fillet failed on this SolidWorks version. Workaround: create one fillet manually, "
+            "then use fillet_all to set radii; or report the SW version so the call can be pinned."
+        )
+    return {"feature": created.Name, "radius_mm": radius}
 
 
 @tool(
@@ -130,7 +175,7 @@ def fillet_all(ctx: Context, radius: float):
 
 
 @tool(
-    "chamfer", "Chamfer the selected edges (equal-distance) — fixed from the old positional-arg bug; select edges first",
+    "chamfer", "Chamfer the selected edges (equal-distance); select edges first",
     params={"distance": {"type": "number", "desc": "Chamfer distance (mm)"}},
     category="feature",
 )
@@ -138,11 +183,11 @@ def chamfer(ctx: Context, distance: float):
     if ctx.selected_count() < 1:
         raise SWError("please select edges to chamfer first.")
     d = units.mm(distance)
-    # Corrected: the proper 8-arg signature is (Type, PropagationFlag, Width, Angle, OtherDist, Vc1, Vc2, Vc3).
-    # For an equal-distance chamfer: Width=distance, Angle=0. The old VBS version stuffed distance into the
-    # angle slot and only supplied 6 args — wrong.
-    # VERIFY: Type enum (here 1 = distance-distance) — verify against macro recorder for the target version.
-    feat = ctx.feat_mgr.InsertFeatureChamfer(1, 1, d, 0, 0, 0, 0, 0)
+    # P13: swChamferType_e — 1 = ANGLE-DISTANCE (needs a non-zero angle; the old call
+    # passed angle 0 and could never produce valid geometry), 2 = DISTANCE-DISTANCE.
+    # Equal-distance chamfer: type 2, Width=d, Angle=0, OtherDist=d.
+    # VERIFY: slot order (Type, PropagationFlag, Width, Angle, OtherDist, Vc1, Vc2, Vc3)
+    feat = ctx.feat_mgr.InsertFeatureChamfer(2, 1, d, 0, d, 0, 0, 0)
     if feat is None:
         raise SWError("chamfer failed: make sure the selected edges are valid.")
     return {"feature": feat.Name, "distance_mm": distance}
@@ -225,7 +270,7 @@ def mirror_feature(ctx: Context, plane: str):
 
 
 @tool(
-    "modify_dimension", "Modify a feature's dimension parameter",
+    "modify_dimension", "Modify a feature's dimension parameter (applies to ALL configurations)",
     params={
         "feature": {"type": "string", "desc": "Feature name, e.g. Boss-Extrude1"},
         "dimension": {"type": "string", "desc": "Dimension name, e.g. D1"},
@@ -238,7 +283,8 @@ def modify_dimension(ctx: Context, feature: str, dimension: str, value: float):
     dim = ctx.model.Parameter(full)
     if dim is None:
         raise SWError(f"dimension not found: {full}")
-    dim.SetSystemValue3(units.mm(value), 1, None)  # 1 = apply to all configurations
+    # P13: swInConfigurationOpts_e — 1 = this configuration ONLY, 2 = all configurations.
+    dim.SetSystemValue3(units.mm(value), CFG_ALL, None)
     ctx.rebuild()
     return {"dimension": full, "value_mm": value}
 

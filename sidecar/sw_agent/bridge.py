@@ -4,6 +4,9 @@ Key conventions:
 - Use GetActiveObject to connect to an **already-running** instance. Never
   CreateObject (that would spawn a hidden SolidWorks, and every subsequent
   operation would silently succeed against an invisible target).
+- P13: attach tries the bare ProgID first, then every versioned ProgID
+  (SW 2017-2026) — same fix as the VBS AttachSW(). On many installs only
+  the versioned ProgID is registered in the ROT.
 - All tools obtain app / model / the various Managers via Context. The
   "no connection / no document" error handling lives here, in one place.
 """
@@ -16,11 +19,17 @@ DOC_ASSEMBLY = 2
 DOC_DRAWING = 3
 DOC_TYPE_NAME = {DOC_PART: "part", DOC_ASSEMBLY: "assembly", DOC_DRAWING: "drawing"}
 
+# P13: real localized plane names (the old table had English in BOTH slots,
+# so the "localized fallback" never actually fell back — start_sketch failed
+# on Chinese SolidWorks templates).
 _PLANES = {
-    "front": ("Front Plane", "Front Plane"),
-    "top": ("Top Plane", "Top Plane"),
-    "right": ("Right Plane", "Right Plane"),
+    "front": ("Front Plane", "前视基准面"),
+    "top": ("Top Plane", "上视基准面"),
+    "right": ("Right Plane", "右视基准面"),
 }
+
+# Bare ProgID first, then versioned (SW 2026 → 2017)
+_PROGIDS = ["SldWorks.Application"] + [f"SldWorks.Application.{n}" for n in range(34, 24, -1)]
 
 
 class SWError(Exception):
@@ -38,13 +47,18 @@ class Context:
     @property
     def sw(self):
         if self._app is None:
-            try:
-                import win32com.client  # Lazy import so the module loads on non-Windows hosts too
-                self._app = win32com.client.GetActiveObject("SldWorks.Application")
-            except Exception as e:  # noqa: BLE001
+            import win32com.client  # Lazy import so the module loads on non-Windows hosts too
+            last_err: Exception | None = None
+            for progid in _PROGIDS:
+                try:
+                    self._app = win32com.client.GetActiveObject(progid)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    last_err = e
+            if self._app is None:
                 raise SWError(
                     "Cannot connect to SolidWorks: make sure SolidWorks is running and has been opened at least once. "
-                    f"({e})"
+                    f"({last_err})"
                 )
         return self._app
 
@@ -91,17 +105,14 @@ class Context:
         )
 
     def select_plane(self, which: str, append=False, mark=0) -> bool:
-        """Select a reference plane; auto-handles both English and localized templates."""
+        """Select a reference plane; auto-handles both English and localized (zh-CN) templates."""
         key = (which or "").lower()
         if key not in _PLANES:
             raise SWError(f"unknown plane: {which} (expected front/top/right)")
         en, zh = _PLANES[key]
-        before = self.selected_count()
         if self.select_by_id(en, "PLANE", append=append, mark=mark):
             return True
-        if self.selected_count() <= before:  # English name didn't hit → try the localized name
-            return self.select_by_id(zh, "PLANE", append=append, mark=mark)
-        return True
+        return self.select_by_id(zh, "PLANE", append=append, mark=mark)
 
     # ---- Rebuild ----
     def rebuild(self, top_only=False):
