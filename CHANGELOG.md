@@ -6,6 +6,54 @@
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-07-23
+
+### Fixed (P13 — API 规范性 + Python 测试 + 遗留清理)
+
+5 处 API 修复（对应审查报告编号）：
+
+| # | 修复 | 文件 |
+|---|------|------|
+| 1 | `select_plane` 真中文回退（前视/上视/右视基准面）—— 中文模板零件上 `start_sketch` 能用 | `sidecar/sw_agent/bridge.py` |
+| 2 | `chamfer` 改距离-距离型（原来角度-距离配 0 度角必失败） | `sidecar/sw_agent/tools/feature.py` |
+| 3 | `SetSystemValue3` 配置参数 1→2（真·所有配置），`modify_dimension` 和 `add_dimension` 两处 | `sidecar/sw_agent/tools/feature.py` + `sketch.py` |
+| 4 | sidecar COM 附着加版本 ProgID 遍历（与 VBS 侧 `AttachSW` 同款） | `sidecar/sw_agent/bridge.py` |
+| 5 | `fillet_edges` 加 try/except + 快照检测兜底，失败给**人话错误**而不是 COM 异常 | `sidecar/sw_agent/tools/feature.py` |
+
+### Python 测试骨架
+
+离线测试 15 个用例（schema / 必参 / 单位换算 / P13 回归点），mock Context
+无需 SolidWorks — `pytest sidecar/tests -q` 即可跑。CI 新加 `Python
+lint + tests` step（ubuntu runner 上跑 ruff + pytest）。
+
+### 清理
+
+- 删一次性脚本 `scripts/fix_vbs_encoding_bridge.py`（P8/P8.1 时代
+  一次性修过 Bridge 编码，修复已合入源码，本地脚本无意义）
+
+### 遗留（需真机验证，不在本补丁内）
+
+`# VERIFY` 位置参数调用（`extrude` / `cut` / `revolve` / `pattern` /
+`mirror`）—— 这些只能真机验证。装机时哪个工具报错把错误信息发我，
+我按 SW 版本钉参数。
+
+### Files changed (5)
+- `sidecar/sw_agent/bridge.py` (OVR)
+- `sidecar/sw_agent/tools/feature.py` (OVR)
+- `sidecar/sw_agent/tools/sketch.py` (OVR)
+- `sidecar/tests/test_sw_agent.py` (NEW)
+- `scripts/fix_vbs_encoding_bridge.py` (DEL)
+
+### Hand-edits (2)
+- `.github/workflows/ci.yml` — 加 `Python lint + tests` step（pip install
+  ruff pytest + ruff check + pytest sidecar/tests）
+- 删除一次性脚本 `scripts/fix_vbs_encoding_bridge.py`
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
 ## [0.2.10] - 2026-07-23
 
 ### Fixed (P12 — 零依赖打包)
@@ -355,7 +403,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.10...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.11...HEAD
+[0.2.11]: https://github.com/raylanlin/Millwright/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/raylanlin/Millwright/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/raylanlin/Millwright/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/raylanlin/Millwright/compare/v0.2.7...v0.2.8

@@ -28,6 +28,12 @@ jobs:
           npm cache clean --force
           if (Test-Path release) { Remove-Item -Recurse -Force release }
           if (Test-Path node_modules/.cache) { Remove-Item -Recurse -Force node_modules/.cache }
+          # electron-builder caches app metadata (incl. version) across runs in
+          # ~/.cache/electron-builder — if a previous run baked version=0.2.10,
+          # the next installer gets named "0.2.10" even after we bump package.json.
+          # Wipe it explicitly so appInfo.version is recomputed from package.json.
+          if (Test-Path "$env:LOCALAPPDATA\electron-builder\Cache") { Remove-Item -Recurse -Force "$env:LOCALAPPDATA\electron-builder\Cache" }
+          if (Test-Path "$env:USERPROFILE\.cache\electron-builder") { Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\electron-builder" }
           npm install
 
       # P12: download the bundled Python embeddable + install pywin32 into
