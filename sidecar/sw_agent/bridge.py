@@ -7,6 +7,15 @@ Key conventions:
 - P13: attach tries the bare ProgID first, then every versioned ProgID
   (SW 2017-2026) — same fix as the VBS AttachSW(). On many installs only
   the versioned ProgID is registered in the ROT.
+- P15: connect via EARLY BINDING (gencache.EnsureDispatch). Dynamic/late
+  binding carries no type info, so win32com misresolves many SolidWorks
+  members: methods get returned as their int value (calling them raises
+  "'int' object is not callable" — e.g. ModelDoc2.GetType), and others fail
+  GetIDsOfNames with DISP_E_MEMBERNOTFOUND ("找不到成员" — e.g. FirstFeature,
+  CreateMassProperty). EnsureDispatch loads the typelib so methods are
+  methods and properties are properties. Falls back to the raw dynamic
+  dispatch if makepy generation is unavailable (then the tolerant _member()
+  helper below still keeps GetType working).
 - All tools obtain app / model / the various Managers via Context. The
   "no connection / no document" error handling lives here, in one place.
 """
@@ -36,6 +45,20 @@ class SWError(Exception):
     """Agent-facing, human-readable error. str(e) is returned as the JSON-RPC error field."""
 
 
+def _member(obj, name: str, *args):
+    """Access a SW member tolerantly.
+
+    Under early binding a method is callable and we invoke it with args.
+    Under a dynamic-dispatch fallback, no-arg getters like GetType may be
+    resolved as a property whose *value* is returned on attribute access —
+    in that case `getattr` already yields the int, so we must NOT call it
+    (that is the "'int' object is not callable" crash). Used for the handful
+    of no-arg getters the connection layer relies on.
+    """
+    attr = getattr(obj, name)
+    return attr(*args) if callable(attr) else attr
+
+
 class Context:
     """Per-session execution context. Long-lived so multi-step tool calls reuse the same COM connection."""
 
@@ -44,22 +67,30 @@ class Context:
         self.scratch: dict[str, Any] = {}  # Inter-tool scratchpad (e.g. the feature name created in the previous step)
 
     # ---- Connection ----
+    def _connect(self):
+        import win32com.client
+        last_err: Exception | None = None
+        for progid in _PROGIDS:
+            try:
+                raw = win32com.client.GetActiveObject(progid)
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                continue
+            # P15: prefer early binding so members resolve from the typelib.
+            try:
+                from win32com.client import gencache
+                return gencache.EnsureDispatch(raw)
+            except Exception:  # noqa: BLE001 — makepy unavailable → degrade to dynamic dispatch
+                return raw
+        raise SWError(
+            "Cannot connect to SolidWorks: make sure SolidWorks is running and has been opened at least once. "
+            f"({last_err})"
+        )
+
     @property
     def sw(self):
         if self._app is None:
-            import win32com.client  # Lazy import so the module loads on non-Windows hosts too
-            last_err: Exception | None = None
-            for progid in _PROGIDS:
-                try:
-                    self._app = win32com.client.GetActiveObject(progid)
-                    break
-                except Exception as e:  # noqa: BLE001
-                    last_err = e
-            if self._app is None:
-                raise SWError(
-                    "Cannot connect to SolidWorks: make sure SolidWorks is running and has been opened at least once. "
-                    f"({last_err})"
-                )
+            self._app = self._connect()
         return self._app
 
     def reconnect(self):
@@ -75,7 +106,7 @@ class Context:
 
     def require(self, doc_type: int, label: str):
         m = self.model
-        if m.GetType() != doc_type:
+        if _member(m, "GetType") != doc_type:
             raise SWError(f"This operation requires a {label} document.")
         return m
 
@@ -120,4 +151,4 @@ class Context:
 
 
 def doc_type_name(model) -> str:
-    return DOC_TYPE_NAME.get(model.GetType(), "unknown")
+    return DOC_TYPE_NAME.get(_member(model, "GetType"), "unknown")

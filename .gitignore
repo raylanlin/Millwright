@@ -29,3 +29,9 @@ Desktop.ini
 *.tsbuildinfo
 package-lock.json
 backups/
+
+# Python bytecode (P13 pytest 本地跑会生成；不入仓)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
