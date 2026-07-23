@@ -89,6 +89,7 @@ const zh: Dict = {
   'settings.save': '保存',
   // Error banner
   'err.swDown': 'SolidWorks 未连接 — 请确保 SolidWorks 已启动',
+  'err.swElevation': 'SolidWorks 正在运行，但 COM 连接被拒绝 — 请让 Millwright 与 SolidWorks 以相同权限运行（都用管理员，或都不用），然后点「重新连接」',
   'err.reconnect': '重新连接',
   'err.auth': 'API 认证失败 — 请检查 API Key 是否正确',
   'err.rate': 'API 限流 — 请稍后再试',
@@ -203,6 +204,7 @@ const en: Dict = {
   'settings.saving': 'Saving…',
   'settings.save': 'Save',
   'err.swDown': 'SolidWorks not connected — make sure SolidWorks is running',
+  'err.swElevation': 'SolidWorks is running, but the COM connection was refused — run Millwright and SolidWorks at the same privilege level (both as administrator, or neither), then click Reconnect',
   'err.reconnect': 'Reconnect',
   'err.auth': 'API authentication failed — check your API key',
   'err.rate': 'Rate limited — please try again later',

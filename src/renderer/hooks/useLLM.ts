@@ -102,6 +102,10 @@ export function useLLM({ config, initial }: UseLLMOptions) {
         case 'start':
           // Session start (carries `backupPath`) — optional hint, kept quiet for now
           break;
+        case 'backup':
+          // P5: surface the auto-backup path to the user when the agent decides to make a destructive tool call
+          if (ev.backupPath) appendToAssistant(`\n\n💾 已自动备份当前文档：\`${ev.backupPath}\``);
+          break;
         case 'text':
           // Narrative text emitted by the model in a given turn; appended in arrival order
           if (ev.text) appendToAssistant(ev.text);
@@ -155,7 +159,8 @@ export function useLLM({ config, initial }: UseLLMOptions) {
       const payloadMessages = [...messages, userMsg];
 
       // OpenAI-compatible protocol → agent tool loop; Anthropic → legacy streaming fallback
-      const useAgent = config.protocol === 'openai';
+      // P5: Anthropic also has native tool_use, so both protocols run the agent path now.
+      const useAgent = true;
 
       if (useAgent) {
         const { requestId, promise } = window.api.llm.agent(config, payloadMessages);

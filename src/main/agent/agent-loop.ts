@@ -1,11 +1,9 @@
 // src/main/agent/agent-loop.ts
-// P1.1 polish: addresses the HIGH/MED findings from the code review.
-//   HIGH-1 Backup: back up the active document once at the start of runAgentLoop and surface the path via onEvent to the UI.
-//   MED-2  Truncation: truncate history before each round's chatWithTools call; cap individual tool result length.
-//   MED-3  Confirmation gate: tools marked requiresConfirmation pause via onEvent until the user approves.
-// Overrides the repo file of the same name. Dependencies: backupActiveDocument(bridge) and truncateMessages already exist.
+// Legacy VBS agent loop (fallback when the python sidecar cannot start).
+// P5: tool results are pushed as first-class role:'tool' messages (same
+// encoding as agent-loop-sidecar); adapter-agnostic via LLMAdapter.
 
-import type { OpenAIAdapter } from '../llm/openai';
+import type { LLMAdapter } from '../llm/adapter';
 import type { ChatMessage, ToolCall } from '../../shared/types';
 import { generateScript } from '../scripts/generators';
 import { validateScript } from '../scripts/sanitizer';
@@ -28,19 +26,23 @@ export interface AgentOptions {
   onEvent?: (ev: AgentEvent) => void;
   /** Pre-execution backup: a wrapper around the existing `backup.ts`; failures do not block but are surfaced to the UI */
   backup?: () => Promise<string | null>;
-  /** MED-3: tools that require human confirmation; returns Promise<boolean> (UI approve/reject). If omitted, the tool is executed directly */
+  /** Tools that require human confirmation; returns Promise<boolean> (UI approve/reject). If omitted, the tool is executed directly */
   confirmTool?: (call: ToolCall) => Promise<boolean>;
   /** Whitelist of tools that need confirmation (defaults to destructive operations) */
   confirmList?: Set<string>;
 }
 
 const DEFAULT_CONFIRM = new Set(['cut_extrude', 'create_fillet', 'modify_dimensions', 'delete_feature']);
-const TOOL_RESULT_MAX_CHARS = 4000; // MED-2: cap each tool result's length to prevent context explosion
+const TOOL_RESULT_MAX_CHARS = 4000;
 
 function clip(s: string): string {
   return s.length > TOOL_RESULT_MAX_CHARS
     ? s.slice(0, TOOL_RESULT_MAX_CHARS) + `\n…(截断，共 ${s.length} 字符)`
     : s;
+}
+
+function toolMsg(call: ToolCall, resultText: string): ChatMessage {
+  return { role: 'tool', toolCallId: call.id ?? call.name, content: resultText };
 }
 
 async function executeTool(engine: ScriptEngine, call: ToolCall): Promise<string> {
@@ -59,7 +61,7 @@ async function executeTool(engine: ScriptEngine, call: ToolCall): Promise<string
 }
 
 export async function runAgentLoop(
-  adapter: OpenAIAdapter,
+  adapter: LLMAdapter,
   messages: ChatMessage[],
   engine: ScriptEngine,
   opts: AgentOptions = {},
@@ -69,7 +71,7 @@ export async function runAgentLoop(
   let history: ChatMessage[] = [...messages];
   let finalText = '';
 
-  // HIGH-1: session-level backup (rollback point for the whole loop). Failures do not block, but are surfaced to the UI.
+  // Session-level backup (rollback point for the whole loop)
   let backupPath: string | null = null;
   if (opts.backup) {
     try { backupPath = await opts.backup(); } catch { backupPath = null; }
@@ -79,7 +81,6 @@ export async function runAgentLoop(
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
 
-    // MED-2: truncate before each round (keep system prompt + most recent exchanges)
     history = truncateMessages(history);
 
     const resp = await adapter.chatWithTools(history, opts.signal);
@@ -98,7 +99,6 @@ export async function runAgentLoop(
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
 
-      // MED-3: confirmation gate for destructive tools
       let resultText: string;
       if (confirmList.has(call.name) && opts.confirmTool) {
         opts.onEvent?.({ type: 'confirm_request', toolCall: call });
@@ -107,7 +107,7 @@ export async function runAgentLoop(
           resultText = `⛔ 用户拒绝执行 ${call.name}。请调整方案或询问用户意图。`;
           call.result = resultText;
           opts.onEvent?.({ type: 'tool_result', toolCall: call });
-          history.push({ role: 'system', content: resultText, toolCalls: [{ ...call, result: resultText }] });
+          history.push(toolMsg(call, resultText));
           continue;
         }
       }
@@ -116,7 +116,7 @@ export async function runAgentLoop(
       resultText = await executeTool(engine, call);
       call.result = resultText;
       opts.onEvent?.({ type: 'tool_result', toolCall: call });
-      history.push({ role: 'system', content: resultText, toolCalls: [{ ...call, result: resultText }] });
+      history.push(toolMsg(call, resultText));
     }
   }
 

@@ -14,7 +14,7 @@ import { truncateMessages } from '../llm/context-window';
 import { resolveSystemPrompt } from '../llm/prompts';
 import { getBridge } from '../com/sw-bridge';
 import { getSidecar } from '../com/sw-sidecar';
-import { collectDocumentContext, formatContextForPrompt, formatContextForPromptAsync } from '../com/context-collector';
+import { collectDocumentContext, formatContextForPrompt, formatContextForPromptAsync, invalidateContextCache } from '../com/context-collector';
 import { ScriptEngine } from '../scripts/engine';
 import { validateScript } from '../scripts/sanitizer';
 import { generateScript } from '../scripts/generators';
@@ -24,7 +24,6 @@ import { listSessions, getSession, saveSession, deleteSession, createSession } f
 import { toLLMError } from '../llm/errors';
 import { runAgentLoop } from '../agent/agent-loop';
 import { runSidecarAgent, type AgentEvent } from '../agent/agent-loop-sidecar';
-import { OpenAIAdapter } from '../llm/openai';
 
 /**
  * Cancellation-token table: `requestId` → `AbortController`.
@@ -128,7 +127,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
         await bridge.refresh();
         // SolidWorks document context: collected centrally in the main process and injected
         // into the system prompt — the adapter then uses `config.systemPrompt` to build the request.
-        const swContext = await formatContextForPromptAsync(bridge);
+        const swContext = await formatContextForPromptAsync(bridge, await loadLocale());
         const enrichedConfig = swContext
           ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
           : payload.config;
@@ -166,7 +165,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           // FEATURE: refresh the real current document before each conversation
           await bridge.refresh();
           // SolidWorks document context: collected centrally in the main process and injected into the request
-          const swContext = await formatContextForPromptAsync(bridge);
+          const swContext = await formatContextForPromptAsync(bridge, await loadLocale());
           const enrichedConfig = swContext
             ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
             : payload.config;
@@ -243,15 +242,16 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     try {
       // FEATURE: refresh the real current document before each agent session
       await bridge.refresh();
-      const swContext = await formatContextForPromptAsync(bridge);
+      const locale = await loadLocale();
+      const swContext = await formatContextForPromptAsync(bridge, locale);
+      // P7: agent path uses the tool-mode system prompt (user-customized prompts still win)
+      const basePrompt = resolveSystemPrompt(payload.config.systemPrompt, 'agent');
       const enrichedConfig = swContext
-        ? { ...payload.config, systemPrompt: [payload.config.systemPrompt, swContext].filter(Boolean).join('\n\n') }
-        : payload.config;
+        ? { ...payload.config, systemPrompt: [basePrompt, swContext].filter(Boolean).join('\n\n') }
+        : { ...payload.config, systemPrompt: basePrompt };
       // LOW: build the adapter only once (the enriched config is final here)
-      const adapter = createAdapter(enrichedConfig) as OpenAIAdapter;
-      if (!(adapter instanceof OpenAIAdapter)) {
-        return { ok: false, error: { code: 'LLM_AGENT_UNSUPPORTED', message: 'Agent mode currently supports only the OpenAI-compatible protocol' } };
-      }
+      // P5: drop the OpenAIAdapter-only restriction; both protocols now run agent via the sidecar / VBS paths
+      const adapter = createAdapter(enrichedConfig);
 
       const send = (ev: AgentEvent) =>
         e.sender.send(IpcChannels.LLM_AGENT_EVENT, { ...ev, requestId });
@@ -277,6 +277,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           visionConfig: enrichedConfig.visionModel,
           mainModelVision: !!enrichedConfig.mainModelVision,
           imageToDataUrl,
+          backup: async () => {
+            const r = await backupActiveDocument(bridge);
+            return r.backupPath ?? null;
+          },
         });
         return { ok: true, text, requestId };
       }
@@ -320,6 +324,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     // Auto-backup before execution
     const backup = await backupActiveDocument(bridge);
     const result = await scriptEngine.run(payload.code, payload.lang);
+    if (result.success) invalidateContextCache(); // next turn gets a fresh feature tree
 
     if (result.success && backup.backupPath) {
       // Execution succeeded → drop the backup

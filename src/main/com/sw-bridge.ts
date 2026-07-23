@@ -3,51 +3,68 @@
 // SolidWorks COM bridge layer.
 /* eslint-disable no-useless-escape */
 //
-// COM operations are implemented by running VBScript through `cscript.exe`, removing the
-// need for any native `winax` module. This works everywhere on Windows (cscript ships
-// with the OS) and avoids native module build issues.
+// COM operations run VBScript through `cscript.exe` (no native winax module).
 //
-// Every COM call is dispatched by writing a temporary `.vbs` file and invoking
-// `child_process.exec`; results come back over stdout.
-//
-// Key design points:
-// 1. Every VBS call has a timeout guard (default 15 seconds) so a hung SolidWorks
-//    instance cannot freeze the main process.
-// 2. On non-Windows platforms we short-circuit and report "not connected"
-//    without performing any work.
-// 3. `getRawApp()` is no longer available (COM pointers cannot cross processes);
-//    `context-collector` collects context via dedicated VBS scripts instead.
+// P4 fix (SW "not connected" while SolidWorks is clearly running):
+// 1. `GetObject(, "SldWorks.Application")` alone fails on many installs where only the
+//    version-suffixed ProgID is registered in the ROT (SW 2017–2026 = .25 … .34).
+//    All scripts now attach via `AttachSW()`, which tries the bare ProgID first and
+//    then every versioned ProgID.
+// 2. When every ProgID fails but SLDWORKS.exe IS running, the usual cause is a UAC
+//    integrity mismatch (one of the two apps runs elevated — the ROT refuses the
+//    handshake). We detect the process via WMI and report `processRunning: true`
+//    so the UI can show the real fix instead of "make sure SolidWorks is running".
 
 import * as fs from 'fs';
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-import * as path from 'path';
 import { exec } from 'child_process';
 import type { SWDocumentType, SWStatus } from '../../shared/types';
 import { writeVBSFile, safeUnlink } from './vbs-writer';
 
 const VBS_TIMEOUT_MS = 15_000;
 
+// Shared VBS helper: attach to a running SolidWorks via any registered ProgID.
+// Returns Nothing when no attach succeeds (explicit, so `Is Nothing` works —
+// a failed GetObject leaves the variable Empty, not Nothing).
+const ATTACH_FN = `
+Function AttachSW()
+    Dim ids, i, o
+    ids = Array("SldWorks.Application", _
+        "SldWorks.Application.34", "SldWorks.Application.33", "SldWorks.Application.32", _
+        "SldWorks.Application.31", "SldWorks.Application.30", "SldWorks.Application.29", _
+        "SldWorks.Application.28", "SldWorks.Application.27", "SldWorks.Application.26", _
+        "SldWorks.Application.25")
+    For i = 0 To UBound(ids)
+        Err.Clear
+        Set o = GetObject(, ids(i))
+        If Err.Number = 0 And IsObject(o) Then
+            Set AttachSW = o
+            Exit Function
+        End If
+    Next
+    Err.Clear
+    Set AttachSW = Nothing
+End Function`;
+
+type ConnCheck = 'ok' | 'proc' | 'fail';
+
 export class SolidWorksBridge {
   private cachedStatus: SWStatus = { connected: false };
   private lastCheck = 0;
-  private checkInterval = 3_000; // cached status is not refreshed within this window
+  private checkInterval = 3_000;
 
-  /**
-   * Check whether SolidWorks is running.
-   * Uses `GetObject` to attach to an already-running instance — never starts a new process.
-   */
+  /** Attach to an already-running instance — never starts a new process. */
   async connect(): Promise<boolean> {
     if (process.platform !== 'win32') {
       this.cachedStatus = { connected: false };
       return false;
     }
-
-    const connected = await this.checkConnection();
-    this.cachedStatus = connected
-      ? await this.fetchStatus()
-      : { connected: false };
+    const check = await this.checkConnection();
+    this.cachedStatus =
+      check === 'ok'
+        ? await this.fetchStatus()
+        : { connected: false, processRunning: check === 'proc' };
     this.lastCheck = Date.now();
-    return connected;
+    return check === 'ok';
   }
 
   disconnect(): void {
@@ -55,35 +72,29 @@ export class SolidWorksBridge {
     this.lastCheck = 0;
   }
 
-  /**
-   * FEATURE: fetch the real current document state (does not run the connection flow;
-   * meant to be polled / called before each conversation turn).
-   * Always fetches — the caller is responsible for throttling.
-   */
+  /** Fetch the real current document state (polled by the UI). */
   async refresh(): Promise<SWStatus> {
     if (process.platform !== 'win32') {
       this.cachedStatus = { connected: false };
       this.lastCheck = Date.now();
       return this.cachedStatus;
     }
-    const connected = await this.checkConnection();
-    this.cachedStatus = connected ? await this.fetchStatus() : { connected: false };
+    const check = await this.checkConnection();
+    this.cachedStatus =
+      check === 'ok'
+        ? await this.fetchStatus()
+        : { connected: false, processRunning: check === 'proc' };
     this.lastCheck = Date.now();
     return this.cachedStatus;
   }
 
-  /**
-   * Heartbeat check — quickly tells whether SolidWorks is still alive.
-   * Uses the cache to avoid spawning temp files too often.
-   */
   isConnected(): boolean {
     if (Date.now() - this.lastCheck < this.checkInterval) {
       return this.cachedStatus.connected;
     }
-    // Refresh asynchronously (do not block)
-    this.checkConnection().then((ok) => {
-      if (!ok) {
-        this.cachedStatus = { connected: false };
+    this.checkConnection().then((check) => {
+      if (check !== 'ok') {
+        this.cachedStatus = { connected: false, processRunning: check === 'proc' };
         this.lastCheck = Date.now();
       }
     });
@@ -94,7 +105,6 @@ export class SolidWorksBridge {
     return this.cachedStatus.version;
   }
 
-  /** No longer returns a COM object; returns document path and type info instead */
   getActiveDocumentInfo(): { path?: string; type: SWDocumentType } | null {
     return this.cachedStatus.connected
       ? {
@@ -112,26 +122,16 @@ export class SolidWorksBridge {
     return this.cachedStatus.activeDocumentPath;
   }
 
-  /** Aggregated status */
   getStatus(): SWStatus {
     return this.cachedStatus;
   }
 
-  /**
-   * `getRawApp()` is no longer available — cscript cannot return COM pointers across processes.
-   * `context-collector` and `backup` use dedicated VBS-based collection methods instead.
-   */
   getRawApp(): never {
     throw new Error('getRawApp() is no longer supported (cscript/VBS-based COM)');
   }
 
-  /**
-   * Execute a VBS script that collects context info for the current document.
-   * Returns JSON for `context-collector` to consume.
-   */
   async collectDocumentFeatures(): Promise<DocumentFeatures> {
     if (process.platform !== 'win32') return emptyFeatures();
-    // FIX-vbs-line47: any VBS failure is degraded to an empty feature context so the chat stream never breaks
     try {
       const vbs = buildCollectFeaturesVBS();
       const stdout = await runVBS(vbs);
@@ -142,13 +142,10 @@ export class SolidWorksBridge {
     }
   }
 
-  /**
-   * Execute a VBS script that backs up the current document.
-   */
-  async backupDocument(backupPath: string, originalPath?: string): Promise<boolean> {
+  /** P6: `docType` makes the post-backup reopen use the right document type (the old code effectively never restored — `OpenDoc7` is not a real API and the error was swallowed by On Error Resume Next) */
+  async backupDocument(backupPath: string, originalPath?: string, docType?: SWDocumentType): Promise<boolean> {
     if (process.platform !== 'win32') return false;
-
-    const vbs = buildBackupVBS(backupPath, originalPath);
+    const vbs = buildBackupVBS(backupPath, originalPath, docType);
     try {
       await runVBS(vbs);
       return fs.existsSync(backupPath);
@@ -157,40 +154,49 @@ export class SolidWorksBridge {
     }
   }
 
-  // ===== Private methods =====
+  // ===== Private =====
 
-  private async checkConnection(): Promise<boolean> {
-    // Only use `GetObject` to attach to an already-running instance.
-    // Never use `CreateObject` — that would spin up an invisible new SolidWorks process,
-    // and every subsequent script would "succeed" against that hidden instance.
-    // Note: when `GetObject` fails, `swApp` is `Empty` (not `Nothing`),
-    // so we must check via `Err.Number` + `IsObject` instead of `Is Nothing`.
+  /** 'ok' = attached · 'proc' = SLDWORKS.exe running but COM refused (UAC mismatch) · 'fail' = not running */
+  private async checkConnection(): Promise<ConnCheck> {
     const vbs = `
 On Error Resume Next
 Dim swApp
-Set swApp = GetObject(, "SldWorks.Application")
-If Err.Number = 0 And IsObject(swApp) Then
+Set swApp = AttachSW()
+If Not swApp Is Nothing Then
     WScript.Echo "OK"
-Else
-    WScript.Echo "FAIL"
-End If`;
+    WScript.Quit 0
+End If
+' COM attach failed — is SLDWORKS.exe actually running? (elevation mismatch symptom)
+Dim wmi, procs
+Err.Clear
+Set wmi = GetObject("winmgmts:\\\\.\\root\\cimv2")
+If Err.Number = 0 And IsObject(wmi) Then
+    Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='SLDWORKS.exe'")
+    If Err.Number = 0 Then
+        If procs.Count > 0 Then
+            WScript.Echo "PROC"
+            WScript.Quit 0
+        End If
+    End If
+End If
+WScript.Echo "FAIL"
+${ATTACH_FN}`;
     try {
       const stdout = await runVBS(vbs);
-      return stdout === 'OK';
+      if (stdout === 'OK') return 'ok';
+      if (stdout === 'PROC') return 'proc';
+      return 'fail';
     } catch {
-      return false;
+      return 'fail';
     }
   }
 
   private async fetchStatus(): Promise<SWStatus> {
-    // FEATURE: per-field error tolerance — any optional call failure must not blank out core fields;
-    // `hasDoc` / `activeDocumentTitle` let the UI display the current document correctly (even when unsaved).
-    // Note: variable names avoid VBScript reserved words (`dim`/`date`/`type`/etc.) — we use `dt`/`dtStr`/`dp`/`title`/`ver`.
     const vbs = `
 On Error Resume Next
 Dim swApp, doc
-Set swApp = GetObject(, "SldWorks.Application")
-If Err.Number <> 0 Or Not IsObject(swApp) Then
+Set swApp = AttachSW()
+If swApp Is Nothing Then
     WScript.Echo "{""connected"":false}"
     WScript.Quit 0
 End If
@@ -225,14 +231,15 @@ WScript.Echo "{""connected"":true,""hasDoc"":true,""version"":""" & J(ver) & """
 
 Function J(s)
     If IsNull(s) Then J = "" : Exit Function
-    J = Replace(Replace(Replace(CStr(s), "\", "\\"), """", "\"""), vbCrLf, "\n")
-End Function`;
+    J = Replace(Replace(Replace(CStr(s), "\\", "\\\\"), """", "\\"""), vbCrLf, "\\n")
+End Function
+${ATTACH_FN}`;
     try {
       const stdout = await runVBS(vbs);
       if (!stdout) return { connected: true };
       return JSON.parse(stdout);
     } catch {
-      // Even if VBS fails, keep `connected: true` so the UI does not misread a brief VBS error as a disconnect
+      // Keep `connected: true` so a brief VBS hiccup is not misread as a disconnect
       return { connected: true };
     }
   }
@@ -244,9 +251,7 @@ function runVBS(scriptCode: string): Promise<string> {
   if (process.platform !== 'win32') {
     return Promise.reject(new Error('VBScript 仅支持 Windows'));
   }
-
   const scriptPath = writeVBSFile(scriptCode, 'sw_com');
-
   return new Promise<string>((resolve, reject) => {
     const cscriptPath =
       `${process.env.SYSTEMROOT || 'C:\\Windows'}\\System32\\cscript.exe`;
@@ -261,7 +266,6 @@ function runVBS(scriptCode: string): Promise<string> {
     );
   });
 }
-
 
 // ===== VBS script generators =====
 
@@ -282,8 +286,8 @@ function buildCollectFeaturesVBS(): string {
   return `
 On Error Resume Next
 Dim swApp
-Set swApp = GetObject(, "SldWorks.Application")
-If Err.Number <> 0 Or Not IsObject(swApp) Then
+Set swApp = AttachSW()
+If swApp Is Nothing Then
     WScript.Echo "{}"
     WScript.Quit 0
 End If
@@ -385,7 +389,7 @@ If docType = 2 Then
             If Not IsNull(cName) And cName <> "" Then
                 cFile = ""
                 If Not IsNull(cPath) And cPath <> "" Then
-                    arr = Split(cPath, "\")
+                    arr = Split(cPath, "\\")
                     cFile = arr(UBound(arr))
                 End If
                 If comps <> "" Then comps = comps & "|"
@@ -411,7 +415,7 @@ Function EscapeJson(s)
         EscapeJson = ""
         Exit Function
     End If
-    EscapeJson = Replace(Replace(Replace(s, "\", "\\"), """", "\"""), vbCrLf, "\n")
+    EscapeJson = Replace(Replace(Replace(s, "\\", "\\\\"), """", "\\"""), vbCrLf, "\\n")
 End Function
 
 Function FeaturesToJson(s)
@@ -452,38 +456,28 @@ Function PropsToJson(s)
     Next
     PropsToJson = result
 End Function
-
-Function CompsToJson(s)
-    If s = "" Then CompsToJson = "": Exit Function
-    Dim arr, i, parts, result
-    arr = Split(s, "|")
-    result = ""
-    For i = 0 To UBound(arr)
-        parts = Split(arr(i), "::")
-        If result <> "" Then result = result & ","
-        result = result & "{""name"":""" & parts(0) & """,""fileName"":""" & parts(1) & """,""suppressed"":" & parts(2) & "}"
-    Next
-    CompsToJson = result
-End Function`;
+${ATTACH_FN}`;
 }
 
-function buildBackupVBS(backupPath: string, originalPath?: string): string {
-  // VBS strings have no backslash escaping, so the path can be embedded directly (the legacy "\\\\" doubling is unnecessary)
+function buildBackupVBS(backupPath: string, originalPath?: string, docType?: SWDocumentType): string {
+  // P6: 文档类型不再硬编码为零件 —— 装配体/工程图备份后按正确类型重新打开
+  const typeNum = docType === 'assembly' ? 2 : docType === 'drawing' ? 3 : 1;
   const restore = originalPath
-    ? `\n' 恢复原文档（SaveAs3 会改变活动文档路径）\nswApp.OpenDoc7 "${originalPath}", "", 1, ""`
+    ? `\n' 恢复原文档（SaveAs3 会改变活动文档路径）\nswApp.OpenDoc "${originalPath}", ${typeNum}`
     : '';
   return `
 On Error Resume Next
 Dim swApp
-Set swApp = GetObject(, "SldWorks.Application")
-If Err.Number <> 0 Or Not IsObject(swApp) Then WScript.Quit 1
+Set swApp = AttachSW()
+If swApp Is Nothing Then WScript.Quit 1
 Err.Clear
 Set doc = swApp.ActiveDoc
 If doc Is Nothing Then WScript.Quit 1
 
 doc.Extension.SaveAs3 "${backupPath}", 0, 1, "", "", 0, 0
 If Err.Number <> 0 Then WScript.Quit 1${restore}
-WScript.Quit 0`;
+WScript.Quit 0
+${ATTACH_FN}`;
 }
 
 // ===== Singleton =====

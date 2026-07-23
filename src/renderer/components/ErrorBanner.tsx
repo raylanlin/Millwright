@@ -2,6 +2,9 @@
 //
 // Top-of-window error banner. Surfaces SolidWorks connection loss or LLM API
 // errors, with quick-action buttons.
+//
+// P4: distinguishes "SolidWorks is running but COM refused the connection"
+// (UAC elevation mismatch) from "SolidWorks is not running".
 
 import type { LLMErrorInfo, SWStatus } from '../../shared/types';
 import { useT } from '../i18n/LocaleContext';
@@ -28,7 +31,9 @@ export function ErrorBanner({
   if (!swStatus.connected) {
     return (
       <Banner t={t} type="warning">
-        <span>{tr('err.swDown')}</span>
+        <span style={{ flex: 1 }}>
+          {swStatus.processRunning ? tr('err.swElevation') : tr('err.swDown')}
+        </span>
         <BannerButton t={t} onClick={onReconnectSW}>{tr('err.reconnect')}</BannerButton>
       </Banner>
     );

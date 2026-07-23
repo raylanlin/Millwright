@@ -31,6 +31,17 @@ export default function App() {
     [tr],
   );
 
+  // P4: keep the greeting in the active language while the chat is untouched
+  useEffect(() => {
+    if (
+      messages.length === 1 &&
+      messages[0].role === 'assistant' &&
+      messages[0].content !== INITIAL_MESSAGES[0].content
+    ) {
+      setMessages(INITIAL_MESSAGES);
+    }
+  }, [INITIAL_MESSAGES]);
+
   // —— Config ——
   const [config, setConfig] = useState<LLMConfig>(DEFAULT_CONFIG);
   useEffect(() => {
@@ -162,6 +173,14 @@ export default function App() {
       try {
         const result = await window.api.script.run(code, lang);
         setExecResults((prev) => ({ ...prev, [msgIndex]: result }));
+        // P5: feed the execution outcome back into the conversation so the model can react next turn
+        setMessages((prev) => [...prev, {
+          role: 'system',
+          content: result.success
+            ? `[脚本执行结果] ✅ 成功 (${result.duration}ms)${result.output ? `：${result.output.slice(0, 800)}` : ''}`
+            : `[脚本执行结果] ❌ 失败：${(result.error ?? '未知错误').slice(0, 800)}`,
+          timestamp: Date.now(),
+        }]);
       } finally {
         setExecutingIndex(null);
       }

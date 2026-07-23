@@ -2,25 +2,34 @@
 //
 // Mature agent loop: the single source of truth for tools is `sidecar.list_tools()`,
 // and execution happens via `sidecar.call()`.
-// Compared with the legacy agent-loop (which calls generators to produce VBS):
-//   - Tool schema is self-describing and natively injected into the main model (via the `tools` parameter)
-//   - Every step returns structured JSON that the model can observe and self-correct from
-//   - Built-in dual-path vision: `analyze_view` (image-to-text via a dedicated vision model /
-//     direct multimodal input to the main model)
 //
-// Dependency injection (provided by handlers) keeps it testable and decoupled.
+// P5 changes:
+//   - Tool results are pushed as first-class `role:'tool'` messages (toolCallId +
+//     content) instead of the role:'system'+toolCalls hack. Adapters map them 1:1
+//     to the OpenAI `role:'tool'` / Anthropic `tool_result` wire formats.
+//   - Truncation safety moved into truncateMessages (block-aware); the loop only
+//     keeps a thin guard against a tool-result-first history.
+//   - Adapter-agnostic: accepts any LLMAdapter with chatWithTools (OpenAI AND
+//     Anthropic protocols both drive the loop now).
+//   - Session backup: `opts.backup` is invoked lazily before the FIRST destructive
+//     tool executes, giving the whole session a rollback point (parity with the
+//     legacy VBS loop). Surfaced to the UI via a `backup` event.
+//   - Convergence nudge: when 3 rounds remain, a system note asks the model to
+//     wrap up; on hitting maxRounds a final no-tools turn produces a summary of
+//     what was changed instead of a bare "did not converge".
 
-import type { OpenAIAdapter } from '../llm/openai';
+import type { LLMAdapter } from '../llm/adapter';
 import type { ChatMessage, ToolCall, VisionConfig } from '../../shared/types';
 import type { SWSidecar } from '../com/sw-sidecar';
 import { truncateMessages } from '../llm/context-window';
 import { analyzeImage } from '../llm/vision';
 
 export interface AgentEvent {
-  type: 'start' | 'text' | 'tool_start' | 'tool_result' | 'confirm_request' | 'image' | 'done' | 'error';
+  type: 'start' | 'text' | 'tool_start' | 'tool_result' | 'confirm_request' | 'image' | 'backup' | 'done' | 'error';
   requestId?: string;
   text?: string;
   toolCall?: ToolCall;
+  backupPath?: string | null;
   error?: string;
 }
 
@@ -31,6 +40,8 @@ export interface SidecarAgentOptions {
   onEvent?: (ev: AgentEvent) => void;
   /** Confirmation gate for destructive tools */
   confirmTool?: (call: ToolCall) => Promise<boolean>;
+  /** P5: lazy session backup — called once, right before the first destructive tool runs */
+  backup?: () => Promise<string | null>;
   /** Vision: dedicated vision model (image-to-text). When unset, fall back to main-model multimodal input */
   visionConfig?: VisionConfig;
   mainModelVision?: boolean;
@@ -45,11 +56,12 @@ const VIRTUAL_TOOLS = [
     function: {
       name: 'analyze_view',
       description:
-        '截取当前 SolidWorks 视图并做视觉分析。带上你想弄清的具体问题；'
-        + '需要换角度先调用 set_view_orientation / rotate_view。',
+        'Capture the current SolidWorks viewport and run visual analysis on it. '
+        + 'Include the specific question you want answered; to change the angle first call '
+        + 'set_view_orientation / rotate_view.',
       parameters: {
         type: 'object',
-        properties: { question: { type: 'string', description: '你想通过看图弄清的具体问题' } },
+        properties: { question: { type: 'string', description: 'The specific question you want the image to answer' } },
         required: ['question'],
       },
     },
@@ -57,16 +69,21 @@ const VIRTUAL_TOOLS = [
 ];
 
 function clip(s: string): string {
-  return s && s.length > TOOL_RESULT_MAX ? s.slice(0, TOOL_RESULT_MAX) + '…(截断)' : s;
+  return s && s.length > TOOL_RESULT_MAX ? s.slice(0, TOOL_RESULT_MAX) + '…(truncated)' : s;
 }
 
 function fmtResult(name: string, r: { ok: boolean; data?: any; error?: string }): string {
   if (r.ok) return `✅ ${name}: ${clip(JSON.stringify(r.data ?? {}, null, 0))}`;
-  return `❌ ${name} 失败: ${clip(r.error ?? '未知错误')}`;
+  return `❌ ${name} failed: ${clip(r.error ?? 'unknown error')}`;
+}
+
+/** P5: canonical tool-result message */
+function toolMsg(call: ToolCall, resultText: string): ChatMessage {
+  return { role: 'tool', toolCallId: call.id ?? call.name, content: resultText };
 }
 
 export async function runSidecarAgent(
-  adapter: OpenAIAdapter,
+  adapter: LLMAdapter,
   messages: ChatMessage[],
   sidecar: SWSidecar,
   opts: SidecarAgentOptions,
@@ -74,31 +91,43 @@ export async function runSidecarAgent(
   const maxRounds = opts.maxRounds ?? 12;
   let history: ChatMessage[] = [...messages];
   let finalText = '';
+  let backupDone = false;
 
   await sidecar.start();
-  // Tool list: sidecar tools (filtered to exclude `internal`) + virtual vision tool, natively injected into the main model
   const sidecarTools = await sidecar.listTools(false);
   const tools = [...VIRTUAL_TOOLS, ...sidecarTools];
   const destructive = new Set(
     sidecarTools.filter((t) => t.x_meta?.destructive).map((t) => t.function.name),
   );
 
+  /** Lazy one-shot backup before anything destructive touches the document */
+  const ensureBackup = async () => {
+    if (backupDone || !opts.backup) return;
+    backupDone = true;
+    try {
+      const p = await opts.backup();
+      opts.onEvent?.({ type: 'backup', backupPath: p });
+    } catch {
+      opts.onEvent?.({ type: 'backup', backupPath: null });
+    }
+  };
+
   opts.onEvent?.({ type: 'start', requestId: opts.requestId });
 
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
     history = truncateMessages(history);
-    // BUGFIX: `truncateMessages` keeps the latest suffix, which can drop an assistant(tool_calls)
-    // turn while leaving its tool results behind → OpenAI/DeepSeek then return 400 because
-    // a "role:tool/tool-result" message has no preceding tool_calls.
-    // Strip orphaned tool results from the head so the first message is never a dangling tool result.
-    while (
-      history.length > 0 &&
-      history[0].role === 'system' &&
-      history[0].toolCalls &&
-      history[0].toolCalls.length > 0
-    ) {
+    // Thin guard (block-aware truncation should already prevent this)
+    while (history.length > 0 && (history[0].role === 'tool' || (history[0].role === 'system' && history[0].toolCalls?.length))) {
       history.shift();
+    }
+
+    // Convergence nudge when the budget is nearly spent
+    if (round === maxRounds - 3) {
+      history.push({
+        role: 'system',
+        content: `(仅剩 ${maxRounds - round} 轮工具调用预算。请尽快收敛：完成剩余最关键的步骤，或停止调用工具并总结当前进展与模型状态。)`,
+      });
     }
 
     const resp = await adapter.chatWithTools(history, opts.signal, tools);
@@ -116,14 +145,13 @@ export async function runSidecarAgent(
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
 
-      // Handle the vision tool on its own path
+      // Vision tool on its own path
       if (call.name === 'analyze_view') {
         const { resultText, imageMessage } = await handleAnalyzeView(call, sidecar, opts);
         call.result = resultText;
         opts.onEvent?.({ type: 'tool_result', toolCall: call });
-        // Push the tool result first (must immediately follow assistant.tool_calls to satisfy OpenAI pairing),
-        // then push the image as a standalone user message — never between tool_calls and its result (would 400).
-        history.push({ role: 'system', content: resultText, toolCalls: [{ ...call, result: resultText }] });
+        // Tool result must immediately follow assistant.tool_calls; the image goes after as its own user message
+        history.push(toolMsg(call, resultText));
         if (imageMessage) history.push(imageMessage);
         continue;
       }
@@ -135,20 +163,37 @@ export async function runSidecarAgent(
         if (!ok) {
           const r = `⛔ 用户拒绝执行 ${call.name}`;
           call.result = r;
-          history.push({ role: 'system', content: r, toolCalls: [{ ...call, result: r }] });
+          history.push(toolMsg(call, r));
           opts.onEvent?.({ type: 'tool_result', toolCall: call });
           continue;
         }
       }
+
+      // P5: rollback point before the first destructive execution
+      if (destructive.has(call.name)) await ensureBackup();
 
       opts.onEvent?.({ type: 'tool_start', toolCall: call });
       const r = await sidecar.call(call.name, call.parameters);
       const resultText = fmtResult(call.name, r);
       call.result = resultText;
       opts.onEvent?.({ type: 'tool_result', toolCall: call });
-      history.push({ role: 'system', content: resultText, toolCalls: [{ ...call, result: resultText }] });
+      history.push(toolMsg(call, resultText));
     }
   }
+
+  // Out of rounds — force a final no-tools summary turn so the user learns what actually changed
+  try {
+    history = truncateMessages(history);
+    history.push({
+      role: 'system',
+      content: '(已达到最大工具调用轮数。请不要再调用工具：总结你已完成的操作、当前模型的状态、以及未完成的部分。)',
+    });
+    const summary = await adapter.chatWithTools(history, opts.signal, undefined);
+    if (summary.content) {
+      finalText = summary.content;
+      opts.onEvent?.({ type: 'text', text: summary.content });
+    }
+  } catch { /* summary is best-effort */ }
 
   opts.onEvent?.({ type: 'error', error: `达到最大轮数(${maxRounds})，已停止。` });
   return finalText || `已多步执行但未收敛（${maxRounds} 轮上限）。`;
@@ -187,7 +232,7 @@ async function handleAnalyzeView(
     }
   }
 
-  // Path B: main model is itself multimodal → return image as a standalone user message (caller pushes it after the tool result)
+  // Path B: main model is itself multimodal → return image as a standalone user message
   if (opts.mainModelVision) {
     opts.onEvent?.({ type: 'image' });
     return {

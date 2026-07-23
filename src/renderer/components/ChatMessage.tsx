@@ -30,6 +30,23 @@ export function ChatMessage({
   const tr = useT();
   const isUser = msg.role === 'user';
 
+  // P5: render system / tool messages as a muted center hint instead of a regular bubble
+  if (msg.role === 'system' || msg.role === 'tool') {
+    return (
+      <div
+        style={{
+          textAlign: 'center',
+          fontSize: 11,
+          color: t.textMuted,
+          padding: '4px 0 10px',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {msg.content}
+      </div>
+    );
+  }
+
   return (
     <div
       style={{

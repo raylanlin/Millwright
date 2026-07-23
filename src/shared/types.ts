@@ -22,6 +22,8 @@ export interface LLMConfig {
   visionModel?: VisionConfig;
   /** P3: whether the main model itself supports visual input (when `true`, `analyze_view` will feed the screenshot to the main model) */
   mainModelVision?: boolean;
+  /** P5: optional context-window override in tokens (takes precedence over the built-in per-model budget table) */
+  contextWindow?: number;
 }
 
 /** P3: configuration for a dedicated vision model (OpenAI-compatible multimodal) */
@@ -32,7 +34,14 @@ export interface VisionConfig {
   timeoutMs?: number;
 }
 
-export type ChatRole = 'user' | 'assistant' | 'system';
+/**
+ * P5: `tool` is now a first-class role — a tool result message carries
+ * `toolCallId` + `content`, matching the OpenAI `role:'tool'` / Anthropic
+ * `tool_result` wire formats 1:1. The old encoding (role:'system' +
+ * toolCalls[0].result) is still accepted by the adapters for backward
+ * compatibility with persisted sessions.
+ */
+export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
 
 export interface ToolCall {
   id?: string;
@@ -45,6 +54,8 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   toolCalls?: ToolCall[];
+  /** P5: for role:'tool' — the id of the assistant tool call this message answers */
+  toolCallId?: string;
   code?: string;
   codeLanguage?: 'vba' | 'python';
   /** Optional: unique message id, used as the React `key` in the renderer */
@@ -136,6 +147,8 @@ export type SWDocumentType = 'part' | 'assembly' | 'drawing' | null;
 
 export interface SWStatus {
   connected: boolean;
+  /** P4: COM attach failed but SLDWORKS.exe IS running (usually a UAC elevation mismatch) */
+  processRunning?: boolean;
   version?: string;
   activeDocumentType?: SWDocumentType;
   activeDocumentPath?: string;

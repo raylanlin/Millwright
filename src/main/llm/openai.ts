@@ -239,6 +239,11 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     const out: any[] = [{ role: 'system', content: systemPrompt }];
 
     for (const m of messages) {
+      // P5: first-class tool-result message
+      if (m.role === 'tool') {
+        out.push({ role: 'tool', tool_call_id: m.toolCallId ?? '', content: m.content });
+        continue;
+      }
       // Message carrying a tool "result" (agent-loop uses role:'system' + toolCalls[0].result for this)
       if (m.role === 'system' && m.toolCalls && m.toolCalls[0]?.result != null) {
         const tc = m.toolCalls[0];

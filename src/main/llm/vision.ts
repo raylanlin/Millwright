@@ -1,17 +1,7 @@
-// src/main/llm/vision.ts
-//
-// Visual understanding — client for "image-to-text" against a dedicated vision model.
-//
-// Use case: when a text-only main model invokes `analyze_view(question)` inside the
-// agent loop, Node captures the screen and calls into this module to obtain a
-// textual description that is then fed back to the main model.
-// `question` is the prompt the **main model itself** wrote — the specific thing it
-// wants to understand from the image — and it is reused as the image-to-text prompt.
-//
-// Uses the OpenAI-compatible multimodal message format (works with MiniMax / Kimi-Vision /
-// GLM-4V / Qwen-VL, etc.).
+// src/main/llm/vision.ts (P7: caption prompt is now locale-aware — English default,
+// Chinese when the UI locale is zh; the old version always sent Chinese.)
 
-import type { VisionConfig } from '../../shared/types';
+import type { VisionConfig, LocaleName } from '../../shared/types';
 import { toLLMError } from './errors';
 
 export interface AnalyzeImageInput {
@@ -19,24 +9,33 @@ export interface AnalyzeImageInput {
   imageDataUrl: string;    // data:image/png;base64,...
   config: VisionConfig;    // Dedicated vision-model configuration
   signal?: AbortSignal;
+  locale?: LocaleName;
 }
 
-const CAPTION_SYSTEM =
-  '你是 SolidWorks 三维视图分析助手。仔细观察给定的零件/装配体截图，' +
-  '针对用户的问题给出准确、具体、结构化的回答：几何形状与主要特征、比例与对称性、' +
-  '当前方位、可见的异常或缺陷。只描述你在图中确实看到的，无法判断的点要明确说“看不清/无法确定”，不要臆测。';
+const CAPTION_SYSTEM: Record<LocaleName, string> = {
+  zh:
+    '你是 SolidWorks 三维视图分析助手。仔细观察给定的零件/装配体截图，' +
+    '针对用户的问题给出准确、具体、结构化的回答：几何形状与主要特征、比例与对称性、' +
+    '当前方位、可见的异常或缺陷。只描述你在图中确实看到的，无法判断的点要明确说“看不清/无法确定”，不要臆测。',
+  en:
+    'You are a SolidWorks 3D-view analysis assistant. Examine the given part/assembly screenshot carefully and ' +
+    'answer the question accurately, concretely, and in a structured way: geometry and main features, proportions ' +
+    'and symmetry, current orientation, visible anomalies or defects. Describe only what you actually see; when ' +
+    'something cannot be determined, say so explicitly — never guess.',
+};
 
 export async function analyzeImage(input: AnalyzeImageInput): Promise<string> {
   const { question, imageDataUrl, config, signal } = input;
+  const locale: LocaleName = input.locale === 'zh' ? 'zh' : 'en';
   const base = config.baseURL.replace(/\/+$/, '');
   const body = {
     model: config.model,
     messages: [
-      { role: 'system', content: CAPTION_SYSTEM },
+      { role: 'system', content: CAPTION_SYSTEM[locale] },
       {
         role: 'user',
         content: [
-          { type: 'text', text: question?.trim() || '请详细描述这个零件的当前状态。' },
+          { type: 'text', text: question?.trim() || (locale === 'zh' ? '请详细描述这个零件的当前状态。' : 'Describe the current state of this part in detail.') },
           { type: 'image_url', image_url: { url: imageDataUrl } },
         ],
       },

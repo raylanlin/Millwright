@@ -5,6 +5,7 @@ import type { ThemeTokens } from '../themes';
 import type { LLMConfig, SWStatus, ThemeName, ChatSessionMeta } from '../../shared/types';
 import { useT } from '../i18n/LocaleContext';
 import { StatusDot } from './StatusDot';
+import logoUrl from '../assets/logo.png';
 
 export type TabKey = 'chat' | 'automations' | 'tools';
 
@@ -75,15 +76,7 @@ export function Sidebar({
       {/* Logo area */}
       <div style={{ padding: '18px 16px 14px', borderBottom: `1px solid ${t.sidebarBorder}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div
-            style={{
-              width: 30, height: 30, borderRadius: 7, background: t.btnPrimary,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, fontWeight: 700, color: t.btnPrimaryText,
-            }}
-          >
-            M
-          </div>
+          <img src={logoUrl} alt="" style={{ width: 30, height: 30, borderRadius: 7, display: 'block' }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 700, color: t.text }}>Millwright</div>
             <div style={{ fontSize: 10, color: t.textMuted }}>{tr('sidebar.subtitle')}</div>

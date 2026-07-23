@@ -1,8 +1,12 @@
 // src/main/scripts/sanitizer.ts
 //
-// 脚本安全校验。
-// 策略:保守黑名单 + 明确风险项清单,让用户知道为什么被拦。
-// 后续可演化为允许列表 + 白名单 API 调用。
+// 脚本安全校验 (P6 加固)。
+// 策略:保守黑名单 + 明确风险项清单。
+// P6 补上的绕过口：VBS 动态执行(ExecuteGlobal/Execute/Eval —— 一行即可绕过全部
+// 规则)、Shell.Application、WScript.CreateObject、WMI、Python 的 eval/exec/
+// ctypes/__import__。
+// 已知局限：黑名单防呆不防恶，脚本以用户权限运行；文档自定义属性等不可信数据会
+// 进入模型上下文(提示注入面)，因此这里必须把"动态执行"类原语全部堵死。
 
 import type { ScriptValidation, ScriptLanguage } from '../../shared/types';
 
@@ -21,27 +25,27 @@ const BLOCKED_PATTERNS: BlockedPattern[] = [
   { pattern: /\bnet\s+(user|localgroup|accounts)\b/i, reason: '用户账户管理' },
   { pattern: /\bset-executionpolicy\b/i, reason: '修改 PowerShell 执行策略' },
 
+  // —— 动态执行（P6：黑名单的逃逸门，必须全堵）——
+  { pattern: /\b(ExecuteGlobal|Execute|Eval)\s*[(]/i, reason: 'VBS 动态代码执行', languages: ['vba'] },
+  { pattern: /\b(eval|exec|compile)\s*\(/, reason: 'Python 动态代码执行', languages: ['python'] },
+  { pattern: /\b__import__\s*\(/, reason: 'Python 动态导入', languages: ['python'] },
+  { pattern: /\bimportlib\b/, reason: 'Python importlib 动态导入', languages: ['python'] },
+  { pattern: /\bimport\s+ctypes\b|\bctypes\./, reason: 'Python ctypes 原生调用', languages: ['python'] },
+
   // —— 文件系统危险操作(VBA) ——
   {
     pattern: /\b(Kill|DeleteFile|RmDir|FileSystemObject\.DeleteFile|FileSystemObject\.DeleteFolder)\s*\(/i,
     reason: 'VBA 文件/目录删除',
     languages: ['vba'],
   },
-  {
-    pattern: /\bShell\s*\(/i,
-    reason: 'VBA Shell 命令执行',
-    languages: ['vba'],
-  },
-  {
-    pattern: /\bWScript\.Shell\b/i,
-    reason: 'Windows Script Host 命令执行',
-    languages: ['vba'],
-  },
-  {
-    pattern: /\bCreateObject\s*\(\s*["']WScript/i,
-    reason: '创建 WScript 对象',
-    languages: ['vba'],
-  },
+  { pattern: /\bShell\s*\(/i, reason: 'VBA Shell 命令执行', languages: ['vba'] },
+  { pattern: /\bWScript\.Shell\b/i, reason: 'Windows Script Host 命令执行', languages: ['vba'] },
+  { pattern: /\bCreateObject\s*\(\s*["']WScript/i, reason: '创建 WScript 对象', languages: ['vba'] },
+  // P6: 其余高危 COM 对象
+  { pattern: /\bCreateObject\s*\(\s*["']Shell\.Application/i, reason: '创建 Shell.Application 对象', languages: ['vba'] },
+  { pattern: /\bWScript\.CreateObject\b/i, reason: 'WScript.CreateObject 对象创建', languages: ['vba'] },
+  { pattern: /\bwinmgmts:/i, reason: 'WMI 系统管理访问', languages: ['vba'] },
+  { pattern: /\bGetObject\s*\(\s*["'](?!,)/i, reason: 'GetObject 绑定外部对象(仅允许连接 SolidWorks)', languages: ['vba'] },
 
   // —— 文件系统危险操作(Python) ——
   { pattern: /\bos\.(system|popen|execl?|execvp?|spawnl?)\b/, reason: 'Python 命令执行', languages: ['python'] },
@@ -53,16 +57,8 @@ const BLOCKED_PATTERNS: BlockedPattern[] = [
   // —— 网络请求 ——
   { pattern: /\b(Invoke-WebRequest|Invoke-RestMethod)\b/i, reason: 'PowerShell 网络请求' },
   { pattern: /\b(curl|wget)\s+https?:/i, reason: '命令行下载' },
-  {
-    pattern: /\bMSXML2\.(XMLHTTP|ServerXMLHTTP)\b/i,
-    reason: 'VBA 发起 HTTP 请求',
-    languages: ['vba'],
-  },
-  {
-    pattern: /^\s*import\s+(urllib|requests|httpx|aiohttp)\b/m,
-    reason: 'Python 网络库',
-    languages: ['python'],
-  },
+  { pattern: /\bMSXML2\.(XMLHTTP|ServerXMLHTTP)\b/i, reason: 'VBA 发起 HTTP 请求', languages: ['vba'] },
+  { pattern: /^\s*import\s+(urllib|requests|httpx|aiohttp|socket)\b/m, reason: 'Python 网络库', languages: ['python'] },
 ];
 
 export function validateScript(code: string, language: ScriptLanguage): ScriptValidation {
@@ -73,7 +69,6 @@ export function validateScript(code: string, language: ScriptLanguage): ScriptVa
       issues.push(reason);
     }
   }
-  // 去重
   const uniq = Array.from(new Set(issues));
   return { safe: uniq.length === 0, issues: uniq };
 }

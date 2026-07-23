@@ -33,7 +33,7 @@ const DEFAULT_STORED: StoredConfig = {
   llm: DEFAULT_LLM_WITHOUT_KEY,
   encryptedApiKey: '',
   theme: 'light',
-  locale: 'zh',
+  locale: 'en',
   schemaVersion: SCHEMA_VERSION,
 };
 
@@ -131,7 +131,7 @@ export async function saveTheme(theme: ThemeName): Promise<void> {
 
 export async function loadLocale(): Promise<LocaleName> {
   const store = await getStore();
-  return store.get('locale') ?? 'zh';
+  return store.get('locale') ?? 'en';
 }
 
 export async function saveLocale(locale: LocaleName): Promise<void> {

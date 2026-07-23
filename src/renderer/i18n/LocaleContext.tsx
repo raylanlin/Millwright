@@ -17,10 +17,9 @@ interface LocaleCtx {
 
 const Ctx = createContext<LocaleCtx | null>(null);
 
-/** 默认语言：优先浏览器/系统语言，中文环境用 zh，其余 en。首次运行前的兜底。 */
+/** P4: 默认语言统一为英文（首次运行、未保存偏好时）。用户在设置中的选择仍然优先。 */
 function detectDefault(): LocaleName {
-  const nav = typeof navigator !== 'undefined' ? navigator.language.toLowerCase() : 'en';
-  return nav.startsWith('zh') ? 'zh' : 'en';
+  return 'en';
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
