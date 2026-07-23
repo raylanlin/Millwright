@@ -31,17 +31,6 @@ export default function App() {
     [tr],
   );
 
-  // P4: keep the greeting in the active language while the chat is untouched
-  useEffect(() => {
-    if (
-      messages.length === 1 &&
-      messages[0].role === 'assistant' &&
-      messages[0].content !== INITIAL_MESSAGES[0].content
-    ) {
-      setMessages(INITIAL_MESSAGES);
-    }
-  }, [INITIAL_MESSAGES]);
-
   // —— Config ——
   const [config, setConfig] = useState<LLMConfig>(DEFAULT_CONFIG);
   useEffect(() => {
@@ -56,6 +45,26 @@ export default function App() {
     config,
     initial: INITIAL_MESSAGES,
   });
+
+  // P4: keep the greeting in the active language while the chat is untouched.
+  // Placement note: this effect is intentionally declared *after* the useLLM
+  // destructure so the closure captures `messages` / `setMessages` from the
+  // same render that owns them — avoids any TDZ surprise during a future
+  // refactor that reorders hooks above.
+  useEffect(() => {
+    if (
+      messages.length === 1 &&
+      messages[0].role === 'assistant' &&
+      messages[0].content !== INITIAL_MESSAGES[0].content
+    ) {
+      setMessages(INITIAL_MESSAGES);
+    }
+    // INTENTIONAL: intentionally only depend on `INITIAL_MESSAGES` (which
+    // changes when the locale changes). Reading `messages` / `setMessages`
+    // here would cause this effect to fire on every chat update, defeating
+    // its purpose (sync greeting once, never touch a session the user has
+    // already started).
+  }, [INITIAL_MESSAGES]);
 
   // —— Conversation-history persistence ——
   const {

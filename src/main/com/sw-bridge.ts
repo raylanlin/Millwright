@@ -247,6 +247,9 @@ ${ATTACH_FN}`;
 
 // ===== VBS executor =====
 
+// P8: cscript writes piped stdout in the OEM codepage (GBK on zh-CN Windows) by
+// default, which we were decoding as UTF-8 → Chinese doc titles/paths turned into
+// "����". Same fix as engine.ts (P6): force UTF-16 output with //U and decode utf16le.
 function runVBS(scriptCode: string): Promise<string> {
   if (process.platform !== 'win32') {
     return Promise.reject(new Error('VBScript 仅支持 Windows'));
@@ -256,12 +259,12 @@ function runVBS(scriptCode: string): Promise<string> {
     const cscriptPath =
       `${process.env.SYSTEMROOT || 'C:\\Windows'}\\System32\\cscript.exe`;
     exec(
-      `"${cscriptPath}" //NoLogo "${scriptPath}"`,
-      { timeout: VBS_TIMEOUT_MS, windowsHide: true, encoding: 'utf8' },
+      `"${cscriptPath}" //NoLogo //U "${scriptPath}"`,
+      { timeout: VBS_TIMEOUT_MS, windowsHide: true, encoding: 'buffer' },
       (error, stdout) => {
         safeUnlink(scriptPath);
         if (error) reject(error);
-        else resolve(stdout.trim());
+        else resolve(stdout.toString('utf16le').replace(/^\uFEFF/, '').trim());
       },
     );
   });

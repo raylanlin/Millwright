@@ -14,7 +14,7 @@ import { truncateMessages } from '../llm/context-window';
 import { resolveSystemPrompt } from '../llm/prompts';
 import { getBridge } from '../com/sw-bridge';
 import { getSidecar } from '../com/sw-sidecar';
-import { collectDocumentContext, formatContextForPrompt, formatContextForPromptAsync, invalidateContextCache } from '../com/context-collector';
+import { collectDocumentContext, formatContextForPromptAsync, invalidateContextCache } from '../com/context-collector';
 import { ScriptEngine } from '../scripts/engine';
 import { validateScript } from '../scripts/sanitizer';
 import { generateScript } from '../scripts/generators';
@@ -105,7 +105,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   ipcMain.handle(IpcChannels.SW_CONTEXT, async () => {
     const ctx = await collectDocumentContext(bridge);
     if (!ctx) return { ok: false, context: null, formatted: '' };
-    const formatted = formatContextForPrompt(ctx);
+    const formatted = await formatContextForPromptAsync(bridge, await loadLocale());
     return { ok: true, context: ctx, formatted };
   });
 
