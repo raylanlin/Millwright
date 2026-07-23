@@ -6,6 +6,63 @@
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-07-23
+
+### Fixed (P10 — "边车未运行"回退失效)
+
+**真 bug**：`sw-sidecar.ts` 的 `cleanup()` 用 **resolve** 解除 `start()`
+的等待。当 python 不存在或边车秒退（缺 pywin32 / sidecar 目录没
+打进安装包）时，`start()` 返回成功，handlers 标记 `sidecarReady = true`
+跳过 VBS 回退，第一个 RPC 才报「边车未运行」并作为 agent 错误抛给
+用户。
+
+修复：
+- `cleanup()` 改为 **reject** 所有等待中的 `start()`——死掉的
+  边车不可能再「看起来就绪」
+- `start()` 语义修正：已就绪→立即返回；握手进行中→加入等待
+  （原实现 `if (this.proc) return` 会在握手期间直接假成功）；
+  未启动/已死→重新 spawn
+- 每个 waiter 带自己的超时清理，避免泄漏
+
+修复后 handlers 现有代码不用动：`start()` 抛错 → `sidecarReady = false`
+→ 自动走 VBS agent 回退，**26 个生成器工具照常可用**。
+
+### 文案清理：「边车」→「Python 组件」
+
+所有用户可见文案改干净：
+- 「Python 组件未运行——请安装 Python + pywin32，或忽略此错误
+  （将自动使用内置 VBS 引擎）」
+- 「Python 组件启动超时——请确认已安装 Python 并执行过
+  pip install pywin32」
+- 「Python 组件已退出」
+- 「Python 组件调用超时」
+
+「边车」只留在代码注释里。
+
+### Files touched (1)
+- `src/main/com/sw-sidecar.ts` — P10 drop-in，hash
+  `0c8d7ecf1ff8377e16cfa25fca5a13f8111ea039`
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
+### 装机版额外隐患（不在本补丁内）
+
+`electron-builder.yml` 是否把 `sidecar/` 打进了 `extraResources`
+——如果没打包，装机版的边车路径永远不存在，所有用户都走 VBS
+回退。想让边车在装机版可用需要：
+
+```yaml
+extraResources:
+  - from: sidecar
+    to: sidecar
+```
+
+且用户机器需要 python + pywin32（README 应写明；没有也不影响使用，
+只是走 VBS 路径）。
+
 ## [0.2.8] - 2026-07-23
 
 ### Fixed (P9 — 连接判定最终修复 + 真 bug 顺修)
@@ -259,7 +316,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/raylanlin/Millwright/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/raylanlin/Millwright/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/raylanlin/Millwright/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/raylanlin/Millwright/compare/v0.2.5...v0.2.6
