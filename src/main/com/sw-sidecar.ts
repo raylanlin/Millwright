@@ -1,7 +1,13 @@
 // src/main/com/sw-sidecar.ts
 //
-// Long-lived Python sidecar client. Spawns `python -m sw_agent` and exchanges
-// line-delimited JSON-RPC over stdio.
+// Long-lived Python sidecar client. Spawns the sidecar via `_bootstrap.py`
+// (falling back to `-m sw_agent`) and exchanges line-delimited JSON-RPC over stdio.
+//
+// P14: bundled Python is the *embeddable* distribution, whose `._pth` prevents cwd
+// from being added to sys.path — so `python -m sw_agent` raised ModuleNotFoundError
+// and the sidecar died before handshake, silently falling back to VBS (no suppress /
+// analyze_view). We now launch `_bootstrap.py` by path (it inserts its own dir on
+// sys.path, then runpy-runs sw_agent), and surface the real stderr on failure.
 //
 // P10 fix — "边车未运行" instead of VBS fallback:
 //   When the python process failed to spawn (no python) or exited immediately
@@ -13,6 +19,8 @@
 //   correctly joins an in-flight handshake instead of returning early.
 
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as readline from 'readline';
 import { resolvePythonPath, resolveSidecarCwd } from '../python-path';
 
@@ -50,6 +58,7 @@ export class SWSidecar {
   private nextId = 1;
   private ready = false;
   private readyWaiters: ReadyWaiter[] = [];
+  private lastStderr: string[] = [];  // ring buffer of recent stderr, surfaced on failure
   private opts: Required<Omit<SidecarOptions, 'onLog'>> & { onLog?: (l: string) => void };
 
   constructor(opts: SidecarOptions = {}) {
@@ -77,7 +86,7 @@ export class SWSidecar {
       if (!this.proc) return reject(new Error('Python 组件未能启动'));
       const t = setTimeout(() => {
         remove();
-        reject(new Error('Python 组件启动超时——请确认已安装 Python 并执行过 pip install pywin32'));
+        reject(new Error('Python 组件启动超时' + this.stderrTail()));
       }, 10_000);
       const waiter: ReadyWaiter = {
         resolve: () => { clearTimeout(t); resolve(); },
@@ -92,7 +101,11 @@ export class SWSidecar {
   }
 
   private spawnProc(): void {
-    const proc = spawn(this.opts.pythonPath, ['-m', 'sw_agent'], {
+    this.lastStderr = [];
+    // P14: prefer the bootstrap script (embeddable-Python safe); fall back to -m for dev trees without it
+    const bootstrap = path.join(this.opts.cwd, '_bootstrap.py');
+    const args = fs.existsSync(bootstrap) ? [bootstrap] : ['-m', 'sw_agent'];
+    const proc = spawn(this.opts.pythonPath, args, {
       cwd: this.opts.cwd,
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
@@ -101,16 +114,27 @@ export class SWSidecar {
 
     this.rl = readline.createInterface({ input: proc.stdout });
     this.rl.on('line', (line) => this.onLine(line));
-    proc.stderr.on('data', (b) => this.opts.onLog?.(`[sidecar:err] ${b}`));
+    proc.stderr.on('data', (b) => {
+      const s = String(b);
+      this.opts.onLog?.(`[sidecar:err] ${s}`);
+      this.lastStderr.push(s);
+      if (this.lastStderr.length > 30) this.lastStderr.shift();
+    });
     proc.on('exit', (code) => {
       this.opts.onLog?.(`[sidecar] 退出 code=${code}`);
       if (this.proc === proc) this.proc = null; // allow a future start() to respawn (crash self-heal)
-      this.cleanup(new Error(`Python 组件已退出 (code=${code})`));
+      this.cleanup(new Error(`Python 组件已退出 (code=${code})${this.stderrTail()}`));
     });
     proc.on('error', (e) => {
       if (this.proc === proc) this.proc = null;
       this.cleanup(new Error(`Python 组件启动失败（未找到 python？）：${e.message}`));
     });
+  }
+
+  /** Last stderr lines, trimmed to a short tail — makes ModuleNotFoundError etc. visible in the error message. */
+  private stderrTail(): string {
+    const tail = this.lastStderr.join('').trim().replace(/\s+/g, ' ').slice(-400);
+    return tail ? ` — ${tail}` : '';
   }
 
   private onLine(line: string): void {
