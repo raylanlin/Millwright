@@ -6,6 +6,63 @@
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-07-23
+
+### Fixed (P14 — Python 组件启动修复，截图问题的真因)
+
+**诊断（已由源码坐实）**
+
+用户截图里模型说"工具集中没有压缩/解压缩功能"+ 主动提议写 VBA
+—— 这是 VBS 回退路径的行为。`src/shared/sw-tools.ts` 的 VBS 工具
+目录里**根本没有 suppress/unsuppress**；而 Python 组件的
+`sidecar/sw_agent/tools/assembly.py` 里**有** `suppress_component`
+/`unsuppress_component`。
+→ **Python 组件在装机版从未启动成功**，一直在用 VBS 回退，所以
+少了一批只有 Python 侧才有的工具（含解压缩、analyze_view 等）。
+
+**根因**
+
+v0.2.11 内置的是 **embeddable 版 Python**，其 `._pth` 文件会
+**禁止把当前目录加入 sys.path**。启动用的是 `python -m sw_agent`
+（依赖 cwd 可导入）→ 在 embeddable 上必然 ModuleNotFoundError →
+进程握手前就退出 → 静默回退 VBS。开发机（系统 Python）会自动加
+cwd 所以从来没复现。
+
+**修复**
+
+不再用 `python -m sw_agent`，改为按脚本路径启动
+`sidecar/_bootstrap.py` —— 它先把自己所在目录插进 sys.path，
+再用 `runpy` 以 `__main__` 方式运行 sw_agent（与 `-m` 等价），
+不依赖解释器是否自动加 cwd，embeddable / 系统 Python 都可靠。
+
+启动失败时把 **Python 的真实 stderr 尾部**带进错误信息（原来只有
+`code=1`，看不到 ModuleNotFoundError）。以后再出问题日志直接告诉
+我们原因。
+
+### Files changed (2)
+- `sidecar/_bootstrap.py` (NEW) — 9 行 bootstrap，自己目录塞进 sys.path
+  + runpy 启动 sw_agent
+- `src/main/com/sw-sidecar.ts` (OVR) — spawn bootstrap + stderr 环形
+  缓冲 + 失败原因透出（含 P10/P12 全部内容）
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13（本地 WSL 跑通）
+
+### 装机回归
+- 日志出现 `[sidecar] ... ready`（不是 `falling back to VBS`）
+- "解压缩动力套装"一步完成（suppress_component 是 Python 侧工具）
+- `analyze_view` 截图分析可用
+- 若仍失败：错误信息现在带出 Python stderr（例
+  `ModuleNotFoundError: No module named 'win32com'` → pywin32 没打进
+  包；或路径问题），把那行发我
+
+### 顺带确认（给打包环节）
+- `resources/sidecar/_bootstrap.py` 和 `resources/sidecar/sw_agent/__main__.py` 都应存在
+- `resources/python/python.exe` 存在（installer 105 MB 已说明 vendor/python 打进去了）
+
 ## [0.2.11] - 2026-07-23
 
 ### Fixed (P13 — API 规范性 + Python 测试 + 遗留清理)
@@ -403,7 +460,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.11...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/raylanlin/Millwright/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/raylanlin/Millwright/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/raylanlin/Millwright/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/raylanlin/Millwright/compare/v0.2.8...v0.2.9
