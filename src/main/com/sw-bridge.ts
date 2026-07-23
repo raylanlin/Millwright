@@ -29,6 +29,7 @@ const VBS_TIMEOUT_MS = 15_000;
 // a failed GetObject leaves the variable Empty, not Nothing).
 const ATTACH_FN = `
 Function AttachSW()
+    On Error Resume Next
     Dim ids, i, o
     ids = Array("SldWorks.Application", _
         "SldWorks.Application.34", "SldWorks.Application.33", "SldWorks.Application.32", _

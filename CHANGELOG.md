@@ -6,6 +6,82 @@
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-07-23
+
+### Fixed (P8.1 回归根因 + 真 bug)
+
+**P8.1 exe 是旧缓存的问题** — v0.2.6 release 的 asset 名字是
+`Millwright-Setup-0.5-x64.exe`，说明 Windows runner 的 npm 构建用了
+旧的 node_modules 缓存（打包时 package.json 的 version 还是 0.2.5），
+用户下载的 installer 根本不含 P8.1 代码。解决方案：打 v0.2.7 tag
+全新触发器，强制重新 npm install，清缓存。
+
+**真 bug: AttachSW() 缺少 On Error Resume Next** — VBScript 的错误
+处理按过程隔离，被调函数内部的 `On Error Resume Next` 不会继承调用
+者的设置。`Function AttachSW()` 体内没有任何错误处理，所以当裸
+ProgID 失败时，第一个 `GetObject(, "SldWorks.Application")` 报错
+后整个函数直接中断，`.34`～`.25` 根本轮不到。在只注册了带版本号
+ProgID 的机器上，P4 的遍历修复实际完全失效。修法：在 `Function
+AttachSW()` 函数体第一行加 `On Error Resume Next`。
+
+### Files touched (1)
+- `src/main/com/sw-bridge.ts` — `Function AttachSW()` 加 `On Error
+  Resume Next`（一行改动），同时确认 P8.1 的 FSO Unicode 临时文件
+  机制在位
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
+## [0.2.6] - 2026-07-23
+
+### Fixed (P8 — CJK hotfix)
+- **Sidebar document title shows garbage for Chinese filenames** (e.g.
+  `L10����II��-new.SLDASM` instead of `L10整机装配-new`). Root cause:
+  `src/main/com/sw-bridge.ts` `runVBS` decoded cscript stdout as UTF-8,
+  but cscript writes to the pipe in the OEM code page (Chinese Windows
+  = GBK). P6 already fixed this for `engine.ts` by adding `//U` to force
+  UTF-16 output; the short-query path in sw-bridge (status poll /
+  feature collect) was missed. This hotfix applies the same fix to
+  `runVBS`: cscript arg `//U`, decode with `encoding: 'buffer'` →
+  `toString('utf16le')`, strip BOM. Drop-in patch, no manual edits.
+
+### Fixed (cleanup from v0.2.5 review)
+- `src/renderer/App.tsx`: moved the P4 greeting-sync `useEffect` to
+  *after* the `useLLM` destructure. The previous placement closed over
+  `messages` / `setMessages` before they were declared — runtime was
+  fine because React resolves hooks top-to-bottom, but the ordering was
+  TDZ-fragile during refactors. Added a placement-note comment so the
+  reasoning survives future readers.
+- `src/main/ipc/handlers.ts` SW_CONTEXT handler: now calls
+  `formatContextForPromptAsync(bridge, await loadLocale())` instead of
+  the sync `formatContextForPrompt(ctx)` without locale. UI-preview
+  panel now matches the user's active language (this was the only
+  context-collection path that hadn't been plumbed through `loadLocale`
+  in P7).
+- `src/main/ipc/handlers.ts`: removed the now-unused `formatContextForPrompt`
+  import.
+- Replaced the obsolete `// eslint-disable-next-line react-hooks/exhaustive-deps`
+  comment in `App.tsx` with a plain `// INTENTIONAL:` note explaining
+  why the effect intentionally lists only `[INITIAL_MESSAGES]` in its
+  dep array. (`react-hooks` plugin isn't installed in `.eslintrc.json`,
+  so the disable comment was a no-op anyway.)
+
+### Files touched (3)
+- `src/main/com/sw-bridge.ts` — P8 drop-in, hash identical to patch
+- `src/renderer/App.tsx` — P4 effect reposition + intentional-dep note
+- `src/main/ipc/handlers.ts` — SW_CONTEXT locale + unused-import cleanup
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
+Backup before P8 apply: `backups/sw-copilot-pre-v0.2.6-p8-20260723-144520/`
+(69 files in src/, restored verbatim — patch only ever touched
+sw-bridge.ts, verified by `git status` after `cp`).
+
 ## [0.2.5] - 2026-07-22
 
 ### Changed
@@ -146,7 +222,9 @@
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/raylanlin/Millwright/compare/v0.2.6...v0.2.7
+[0.2.6]: https://github.com/raylanlin/Millwright/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/raylanlin/Millwright/compare/v0.2.4...v0.2.5
 [0.2.3]: https://github.com/raylanlin/sw-copilot/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/raylanlin/sw-copilot/compare/v0.2.1...v0.2.2
