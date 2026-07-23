@@ -36,6 +36,23 @@ jobs:
           if (Test-Path "$env:USERPROFILE\.cache\electron-builder") { Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\electron-builder" }
           npm install
 
+      # DEBUG: print package.json version + electron-builder cache state so we can
+      # verify the build is reading the right source. Remove once v0.2.13 name
+      # is confirmed.
+      - name: Debug version + cache state
+        shell: pwsh
+        run: |
+          Write-Host "=== package.json ==="
+          Get-Content package.json | Select-String -Pattern '"version"'
+          Write-Host "=== electron-builder Cache (LOCALAPPDATA) ==="
+          if (Test-Path "$env:LOCALAPPDATA\electron-builder\Cache") {
+            Get-ChildItem "$env:LOCALAPPDATA\electron-builder\Cache" | Select-Object -First 5
+          } else { Write-Host "  (empty)" }
+          Write-Host "=== electron-builder Cache (USERPROFILE) ==="
+          if (Test-Path "$env:USERPROFILE\.cache\electron-builder") {
+            Get-ChildItem "$env:USERPROFILE\.cache\electron-builder" | Select-Object -First 5
+          } else { Write-Host "  (empty)" }
+
       # P12: download the bundled Python embeddable + install pywin32 into
       # vendor/python/ before electron-builder runs. Idempotent — safe to re-run.
       # This is a build-time network op; end users have no network requirement.

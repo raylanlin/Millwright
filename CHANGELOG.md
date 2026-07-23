@@ -6,6 +6,61 @@
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-07-23
+
+### Fixed (P15 — COM 绑定修复：'int' object is not callable + 找不到成员)
+
+**诊断**
+
+P14 已生效（Python 组件在跑、`rebuild_model` 成功）。现在跑期 COM
+绑定 bug：
+
+- `list_components` / `unsuppress_component` / `check_interference` 全部
+  `'int' object is not callable`。三者都先调
+  `ctx.require(DOC_ASSEMBLY, ...)` → `m.GetType()`；`rebuild_model`
+  不走 require 所以正常。
+- `list_features` / `mass_properties` 报 `-2147352573 找不到成员`
+  （`DISP_E_MEMBERNOTFOUND`）。
+
+**根因**
+
+sidecar 用 win32com **动态（后期）绑定**，没有类型库信息，导致
+SolidWorks 成员误解析——方法被当属性返回其 int 值（`GetType` 被
+当属性 → `GetType()` = 调用 int → 崩），或干脆解析不到
+（`FirstFeature` / `CreateMassProperty` → 找不到成员）。这是
+pywin32 + SolidWorks 的经典坑。
+
+**修复**
+
+`bridge.py` 连接改为**早期绑定**：`gencache.EnsureDispatch(GetActiveObject(...))`
+加载类型库，方法归方法、属性归属性，一次性修好全部这类误解析。
+makepy 不可用时回退动态绑定（不比现状差）。额外加 `_member()`
+容错助手兜底 `GetType`（早绑正常调用；万一回退动态、属性化也能
+取到 int）。
+
+### Files changed (1)
+- `sidecar/sw_agent/bridge.py` (OVR) — 含 P13 全部内容 + P15 早绑
+
+### 注意
+- **首次工具调用会慢一下**（几十秒）：EnsureDispatch 第一次要生成
+  SolidWorks 类型库的 makepy 缓存，之后走缓存恢复正常。握手不受
+  影响（`ready` 在任何 COM 访问前就发了，不会误触发 VBS 回退）。
+- gen_py 缓存写在 `%TEMP%\gen_py`，embeddable Python 可写。
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 装机回归（重点）
+- "把动力套装解除压缩" → `list_components` 正常返回组件树 →
+  `unsuppress_component` 一步成功
+- `list_features` / `mass_properties` / `check_interference` 不再报错
+- 若 `mass_properties` 仍 `找不到成员`：说明该 SW 版本是
+  `CreateMassProperty2`，把报错发我，单独钉一行（早绑修不了不存在的
+  成员名）
+
 ## [0.2.12] - 2026-07-23
 
 ### Fixed (P14 — Python 组件启动修复，截图问题的真因)
@@ -460,7 +515,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.12...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/raylanlin/Millwright/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/raylanlin/Millwright/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/raylanlin/Millwright/compare/v0.2.9...v0.2.10
