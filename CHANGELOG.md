@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-07-23
+
+### Fixed (P12 — 零依赖打包)
+
+合并 P9 / P10 / P11 全部内容 + 三处同类问题清扫：
+
+| 修复 | 内容 |
+|------|------|
+| P9 | 连接检查/文档采集输出编码问题 → VBS 输出纯 ASCII（`\uXXXX` 转义），`CStr(True)` 老 bug 修 |
+| P10 | Python 组件起不来假成功 → `cleanup()` reject + `start()` 语义修正 + 文案「边车」→「Python 组件」 |
+| P12a | `engine.ts` Python 路径硬编码 `'python'` → 统一走 `resolvePythonPath()` |
+| P12b | `sw-sidecar` 开发模式下 resourcesPath 指错目录（开发时 sidecar 从来找不到） → `resolveSidecarCwd()` 实际探测 |
+| P12c | 路径解析分散 → 收口到新模块 `src/main/python-path.ts`（唯一来源） |
+
+**解释器解析优先级**：
+内置 `resources/python/python.exe` → 系统 PATH `python` → 都没有则
+自动回退 VBS 引擎（26 个工具照常，仅少 `analyze_view` 截图分析）。
+
+### Files changed (8)
+- `src/main/python-path.ts` (NEW) — 路径解析单一来源
+- `src/main/com/sw-sidecar.ts` (OVR) — `cleanup()` reject + `start()` 语义修正 + 移除 dead import
+- `src/main/com/sw-bridge.ts` (OVR) — 纯 ASCII stdout + `\uXXXX` 转义 + AttachSW On Error Resume Next
+- `src/main/scripts/engine.ts` (OVR) — Python 路径统一走 `resolvePythonPath()`
+- `scripts/prepare-python.ps1` (NEW) — 打包前下载 embeddable + 装 pywin32 + 自验证，幂等
+- `electron-builder.yml` (hand-edit) — extraResources 补 `vendor/python`
+- `.github/workflows/build.yml` (hand-edit) — 加 "Prepare bundled Python runtime" step
+- `package.json` (hand-edit) — `dist` script 先 `prepare-python.ps1` 再 build
+- `.gitignore` — `vendor/`（构建产物）
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
+### 装机回归（Raylan 在 Windows 跑）
+- 干净虚拟机（无 Python、无网络）装新 exe：绿点 + 中文标题正常 + 发消息 agent 调工具正常 + `analyze_view` 可用
+- 删掉 `resources/python/` → 自动回退，不崩
+- `npm run dev` 开发模式 → sidecar 能找到
+
 ## [0.2.9] - 2026-07-23
 
 ### Fixed (P10 — "边车未运行"回退失效)
@@ -316,7 +355,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/raylanlin/Millwright/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/raylanlin/Millwright/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/raylanlin/Millwright/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/raylanlin/Millwright/compare/v0.2.6...v0.2.7

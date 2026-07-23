@@ -23,7 +23,10 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm cache clean --force
+          rm -rf release node_modules/.cache
+          npm ci
 
       # P12: download the bundled Python embeddable + install pywin32 into
       # vendor/python/ before electron-builder runs. Idempotent — safe to re-run.
