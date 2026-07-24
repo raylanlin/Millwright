@@ -59,6 +59,7 @@ def _select_profile_sketch(ctx: Context, sketch: str | None = None):
             except Exception:  # noqa: BLE001
                 continue
     if not name:
+        raise SWError    if not name:
         raise SWError("no sketch found to extrude — draw a sketch first.")
     if not ctx.select_by_id(name, "SKETCH"):
         raise SWError(f"failed to select sketch: {name}")
@@ -115,15 +116,71 @@ def cut_extrude(ctx: Context, depth: float, through_all: bool = False, sketch: s
     if ctx.sketch_mgr.ActiveSketch is None:
         _select_profile_sketch(ctx, sketch or None)
     d = units.mm(depth)
-    # VERIFY: FeatureCut4 parameter slots (25 args)
-    feat = ctx.feat_mgr.FeatureCut4(
-        True, False, False, 1 if through_all else 0, 0, d, 0,
-        False, False, False, False, 0, 0, False, False, False, False,
-        True, True, True, True, 0, 0, False, False,
-    )
-    if feat is None:
-        raise SWError("cut failed: make sure the sketch intersects a solid body.")
-    return {"feature": feat.Name, "depth_mm": depth, "through_all": through_all}
+    end = 1 if through_all else 0  # swEndConditions_e: 0=Blind, 1=ThroughAll
+
+    # P34: FeatureCut4 arg count / member differs across SW versions — SW2023+ resolves
+    # FeatureCut5 and the FeatureCut4 wrapper mis-typed, giving DISP_E_PARAMNOTOPTIONAL
+    # (-2147352561, "参数不是可选的"). Instead of pinning one positional signature, try
+    # the documented signatures in order and detect success by a new feature appearing
+    # in the tree (some versions return None even on success). First one that produces a
+    # feature wins — auto-adapts to the installed version.
+    before = set()
+    for f in _all_features(ctx):
+        try:
+            before.add(sw_get(f, "Name"))
+        except Exception:  # noqa: BLE001
+            continue
+
+    # master arg list (26 slots); we try progressively shorter tails for older APIs
+    args = [
+        True, False, False, end, 0, d, 0,
+        False, False, False, False, 0.0, 0.0,
+        False, False, False, False,
+        True, True, True, False, False, False, True, False, False,
+    ]
+    last_err = None
+    made = None
+    for member in ("FeatureCut5", "FeatureCut4", "FeatureCut3"):
+        fn = getattr(ctx.feat_mgr, member, None)
+        if fn is None:
+            continue
+        for n in (26, 25, 24, 23):
+            try:
+                made = fn(*args[:n])
+            except Exception as e:  # noqa: BLE001 — wrong arity/type → try the next
+                last_err = e
+                made = None
+                continue
+            if made is not None:
+                break
+            # some versions return None yet still create it — check the tree
+            for f in _all_features(ctx):
+                try:
+                    if sw_get(f, "Name") not in before and "Cut" in (sw_get(f, "GetTypeName2") or ""):
+                        made = f
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+            if made is not None:
+                break
+        if made is not None:
+            break
+
+    if made is None:
+        # final tree check (a cut may have landed despite errors)
+        for f in _all_features(ctx):
+            try:
+                if sw_get(f, "Name") not in before and "Cut" in (sw_get(f, "GetTypeName2") or ""):
+                    made = f
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+    if made is None:
+        raise SWError(
+            "cut failed: make sure the sketch profile lies on/through the solid. "
+            f"(last COM error: {last_err})"
+        )
+    return {"feature": sw_get(made, "Name"), "depth_mm": depth, "through_all": through_all}
 
 
 @tool(

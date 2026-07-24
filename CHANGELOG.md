@@ -6,6 +6,58 @@
 
 ## [Unreleased]
 
+## [0.2.32] - 2026-07-25
+
+### Fixed (P34 — cut_extrude 版本自适应 + 视觉检测积极性)
+
+**cut_extrude 版本自适应**
+
+好消息：extrude 位置参数首验通过（圆柱 + 凸台-拉伸1 已建）。
+cut_extrude 每次报 `(-2147352561, '参数不是可选的')` = DISP_E_PARAMNOTOPTIONAL：
+这台 SW（界面有 MBD Dimensions / CAM TBM，是 SW2023+）绑定的切除接口
+参数个数与硬编码的 25 参 `FeatureCut4` 不符——很可能已是 `FeatureCut5`。
+
+修复：不再盯死单一签名。依次尝试
+`FeatureCut5 → FeatureCut4 → FeatureCut3`，每个再依次尝试 26/25/24/23
+个参数长度；用特征树快照检测成功（新出现 Cut 类特征即成功，兼容
+"返回 None 但实际建了"的版本）。第一个成功的组合胜出，自动适配安装的
+SW 版本。全失败才报错，并带上真实 COM error。
+
+### Added (视觉检测积极性)
+
+`src/main/llm/prompts.ts` 在 `AGENT_SYSTEM_PROMPT` 新增「眼见为实」段：
+- 每建完一个特征后看图确认
+- 报错时先看图再动手（而非盲目重试）
+- 选面前先转到看得清的视角（`set_view_orientation`）
+- 任务结束前整体检查
+- `question` 要写具体问题；同图追问用 `recapture:false`
+
+提升建模稳健性，也顺带把视觉链路（`analyze_view` → MiniMax M3 多模态）
+真正用起来。
+
+> 注：此提示词仅在用户未自定义系统提示词时生效；自定义会覆盖内置。
+
+### Files changed (2)
+- `sidecar/sw_agent/tools/feature.py` (OVR) — 含 P13/P16/P27/P32 + P34 cut 自适应
+- `src/main/llm/prompts.ts` (OVR) — 含 P7 + P34 AGENT_SYSTEM_PROMPT 视觉积极性段
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest` ⚠️ 本地缺 pytest 模块（清完 site-packages 后），CI 跑即可
+
+### 装机回归
+- 圆柱顶面画圆 → `cut_extrude(through_all)` → 通孔建成（FeatureCut5 路径）
+- 失败时错误带真实 COM 原因，不再是空转
+- 后续建模：模型应在每步后主动调 `analyze_view` 看图确认
+
+### 重要部署注意（Raylan 2026-07-25 01:11）
+sidecar 在 `extraResources`，**重打 installer + 重装**才生效。
+APPLY.md 提到 P32 / P33 一起进 v0.2.32（虽然 P32 已在 v0.2.30 装机，
+但 P33 确认卡唯一 id 修复是这次带上），实际装机版将一次性带
+P32 / P33 / P34 三个修复。
+
 ## [0.2.30] - 2026-07-24
 
 ### Fixed (P32 — extrude/特征树根治：GetFeatures + 手工建模顺序)
@@ -938,6 +990,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.32]: https://github.com/raylanlin/Millwright/compare/v0.2.30...v0.2.32
 [0.2.30]: https://github.com/raylanlin/Millwright/compare/v0.2.29...v0.2.30
 [0.2.29]: https://github.com/raylanlin/Millwright/compare/v0.2.28...v0.2.29
 [0.2.28]: https://github.com/raylanlin/Millwright/compare/v0.2.25...v0.2.28
