@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 from ..registry import tool
-from ..bridge import Context, SWError, DOC_PART, DOC_ASSEMBLY, DOC_DRAWING, doc_type_name
+from ..bridge import Context, SWError, DOC_PART, DOC_ASSEMBLY, DOC_DRAWING, doc_type_name, sw_get
 
 # swUserPreferenceStringValue_e: default templates
 _PREF = {DOC_PART: 9, DOC_ASSEMBLY: 10, DOC_DRAWING: 11}
@@ -24,7 +24,8 @@ def _new(ctx: Context, doc_type: int, label: str):
     model = app.NewDocument(template, 0, 0, 0)
     if model is None:
         raise SWError(f"failed to create {label}.")
-    return {"created": label, "title": model.GetTitle()}
+    # P26: GetTitle/GetPathName are propget under early binding — bare () raised "'str' object is not callable"
+    return {"created": label, "title": sw_get(model, "GetTitle")}
 
 
 @tool("new_part", "Create a new part document", params={}, category="document")
@@ -57,7 +58,7 @@ def open_document(ctx: Context, path: str):
     model = r[0] if isinstance(r, tuple) else r
     if model is None:
         raise SWError(f"open failed: {path}")
-    return {"opened": model.GetTitle(), "type": doc_type_name(model)}
+    return {"opened": sw_get(model, "GetTitle"), "type": doc_type_name(model)}
 
 
 @tool("save_document", "Save the current document", params={}, category="document")
@@ -66,9 +67,9 @@ def save_document(ctx: Context):
     # Save3's err/warn are [out] — unpack defensively
     r = model.Save3(1, 0, 0)  # 1 = swSaveAsOptions_Silent
     ok = r[0] if isinstance(r, tuple) else r
-    if not ok and model.GetPathName() == "":
+    if not ok and sw_get(model, "GetPathName") == "":
         raise SWError("document has never been saved; use save_as with a target path.")
-    return {"saved": model.GetTitle()}
+    return {"saved": sw_get(model, "GetTitle")}
 
 
 @tool(

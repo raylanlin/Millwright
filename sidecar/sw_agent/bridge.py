@@ -142,8 +142,14 @@ class Context:
         return self.model.SelectionManager.GetSelectedObjectCount2(-1)
 
     def select_by_id(self, name, typ, x=0.0, y=0.0, z=0.0, append=False, mark=0) -> bool:
+        # P26: under early binding the Callout param ([in] IDispatch*) must be a
+        # VARIANT(VT_DISPATCH, None) — a bare None raises DISP_E_TYPEMISMATCH
+        # (0x80020005), which broke start_sketch / every selection-based tool.
+        import pythoncom
+        from win32com.client import VARIANT
+        callout = VARIANT(pythoncom.VT_DISPATCH, None)
         return bool(
-            self.model.Extension.SelectByID2(name, typ, x, y, z, append, mark, None, 0)
+            self.model.Extension.SelectByID2(name, typ, x, y, z, append, mark, callout, 0)
         )
 
     def select_plane(self, which: str, append=False, mark=0) -> bool:

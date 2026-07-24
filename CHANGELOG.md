@@ -6,6 +6,47 @@
 
 ## [Unreleased]
 
+## [0.2.24] - 2026-07-24
+
+### Fixed (P26 — 绘图链路两处 COM 修复)
+
+**诊断（截图坐实）**
+
+1. `start_sketch` → `(-2147352571, '类型不匹配', None, 8)`：argErr=8 =
+   `SelectByID2` 第 9 参 **Callout**。早绑下该参数是 `[in] IDispatch*`，
+   传裸 `None` 必报 `TYPEMISMATCH`——pywin32+SolidWorks 经典坑。必须
+   传 `VARIANT(VT_DISPATCH, None)`。
+2. `new_part` → `'str' object is not callable`：`model.GetTitle()`——
+   `GetTitle`/`GetPathName` 早绑下是属性，`document.py` 是 P16 的漏网之鱼。
+
+**修复**
+
+- `bridge.py` 的 `select_by_id`：Callout 改传 `VARIANT(pythoncom.VT_DISPATCH, None)`。
+  **集中修一处，所有选择类工具受益**（start_sketch / mirror_feature /
+  create_plane / 装配配合等全走这里）。
+- `document.py`：`GetTitle` / `GetPathName` 全部走 `sw_get`
+  （new / open / save 四处）。
+
+### Files changed (2)
+- `sidecar/sw_agent/bridge.py` (OVR) — 含 P24 全部 + P26 Callout VARIANT
+- `sidecar/sw_agent/tools/document.py` (OVR) — GetTitle/GetPathName 走 sw_get
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 装机回归（绘图测试重跑）
+- 「新建一个零件」→ 成功，返回标题
+- 「在前视基准面上画 50×30 矩形」→ start_sketch 成功（TYPEMISMATCH 消失）
+- 「画一个直径 40 高 20 的圆柱」→ 完整走通 sketch_circle + extrude
+  （extrude 是 `#VERIFY` 位置参数，若报错发我）
+
+### 另两件事（记账，下一包）
+- 设置面板缺视觉模型配置区（types/config 里字段已有，SettingsModal.tsx 没暴露 UI）
+- window.confirm 白框 → 聊天内 inline 确认卡片
+
 ## [0.2.23] - 2026-07-24
 
 ### Fixed (P24 — 连接线程初始化 + 真实错误上报)
@@ -711,6 +752,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.24]: https://github.com/raylanlin/Millwright/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/raylanlin/Millwright/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/raylanlin/Millwright/compare/v0.2.15...v0.2.22
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
