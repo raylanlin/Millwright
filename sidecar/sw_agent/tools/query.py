@@ -3,24 +3,42 @@
 This is the hallmark of a "mature agent": no more MsgBox popups — return
 structured data so the model can read the current feature tree / dimensions
 / mass / interferences, and plan and self-correct from there.
+
+P16: no-arg SW getters (GetPathName / IsSuppressed / GetTypeName2 / Volume /
+GetInterferences / ...) are propget under early binding on many SW versions —
+calling them with () raised "'str'/'tuple'/'bool' object is not callable".
+All such reads now go through bridge.sw_get(), and traversals are wrapped so
+one finicky member can't abort the whole query. mass_properties falls back to
+CreateMassProperty2 when CreateMassProperty is member-not-found.
 """
 from __future__ import annotations
 
 from ..registry import tool
-from ..bridge import Context, SWError, DOC_ASSEMBLY, DOC_PART
+from ..bridge import Context, SWError, DOC_ASSEMBLY, DOC_PART, sw_get
 from .. import units
 
 
 @tool("mass_properties", "Get mass properties (mass / volume / surface area / center of mass)", params={}, category="query")
 def mass_properties(ctx: Context):
-    mp = ctx.model.Extension.CreateMassProperty()
+    ext = ctx.model.Extension
+    mp = None
+    for maker in ("CreateMassProperty", "CreateMassProperty2"):
+        try:
+            fn = getattr(ext, maker, None)
+            if fn is None:
+                continue
+            mp = fn() if callable(fn) else fn
+            if mp is not None:
+                break
+        except Exception:  # noqa: BLE001 — try the next API name (version differences)
+            continue
     if mp is None:
-        raise SWError("unable to create mass property object.")
-    cog = mp.CenterOfMass  # [x,y,z] in meters
+        raise SWError("unable to create mass property object (CreateMassProperty/2 unavailable).")
+    cog = sw_get(mp, "CenterOfMass")  # [x,y,z] in meters
     return {
-        "mass_kg": round(mp.Mass, 6),
-        "volume_mm3": round(units.m3_to_mm3(mp.Volume), 3),
-        "surface_area_mm2": round(mp.SurfaceArea * 1.0e6, 3),
+        "mass_kg": round(sw_get(mp, "Mass"), 6),
+        "volume_mm3": round(units.m3_to_mm3(sw_get(mp, "Volume")), 3),
+        "surface_area_mm2": round(sw_get(mp, "SurfaceArea") * 1.0e6, 3),
         "center_of_mass_mm": [round(units.m_to_mm(c), 3) for c in cog],
     }
 
@@ -28,7 +46,7 @@ def mass_properties(ctx: Context):
 @tool("bounding_box", "Get the part bounding-box dimensions (length x width x height, mm)", params={}, category="query")
 def bounding_box(ctx: Context):
     part = ctx.require(DOC_PART, "part")
-    box = part.GetPartBox(True)  # (x1,y1,z1,x2,y2,z2) in meters
+    box = part.GetPartBox(True)  # (x1,y1,z1,x2,y2,z2) in meters — takes an arg, real method
     if not box:
         raise SWError("unable to retrieve bounding box.")
     dx = units.m_to_mm(abs(box[3] - box[0]))
@@ -42,12 +60,27 @@ def bounding_box(ctx: Context):
       category="query")
 def list_features(ctx: Context, limit: int = 100):
     out = []
-    feat = ctx.model.FirstFeature()
-    while feat is not None and len(out) < int(limit):
-        tn = feat.GetTypeName2()
+    feat = sw_get(ctx.model, "FirstFeature")
+    guard = 0
+    while feat is not None and len(out) < int(limit) and guard < 5000:
+        guard += 1
+        try:
+            tn = sw_get(feat, "GetTypeName2")
+        except Exception:  # noqa: BLE001 — older SW: GetTypeName2 may be absent
+            try:
+                tn = sw_get(feat, "GetTypeName")
+            except Exception:  # noqa: BLE001
+                tn = ""
         if tn not in ("HistoryFolder", "SensorFolder", "DocsFolder", "DetailCabinet"):
-            out.append({"name": feat.Name, "type": tn, "suppressed": bool(feat.IsSuppressed())})
-        feat = feat.GetNextFeature()
+            try:
+                out.append({
+                    "name": sw_get(feat, "Name"),
+                    "type": tn,
+                    "suppressed": bool(sw_get(feat, "IsSuppressed")),
+                })
+            except Exception:  # noqa: BLE001 — skip a feature whose members won't read
+                pass
+        feat = sw_get(feat, "GetNextFeature")
     return {"count": len(out), "features": out}
 
 
@@ -56,17 +89,20 @@ def list_features(ctx: Context, limit: int = 100):
       category="query")
 def list_components(ctx: Context, limit: int = 200):
     asm = ctx.require(DOC_ASSEMBLY, "assembly")
-    comps = asm.GetComponents(True)
+    comps = asm.GetComponents(True)  # arg-taking → real method
     out = []
     for c in (comps or []):
         if len(out) >= int(limit):
             break
-        path = c.GetPathName() or ""
-        out.append({
-            "name": c.Name2,
-            "file": path.split("\\")[-1] if path else "",
-            "suppressed": bool(c.IsSuppressed()),
-        })
+        try:
+            path = sw_get(c, "GetPathName") or ""
+            out.append({
+                "name": sw_get(c, "Name2"),
+                "file": path.split("\\")[-1] if path else "",
+                "suppressed": bool(sw_get(c, "IsSuppressed")),
+            })
+        except Exception:  # noqa: BLE001 — skip an unreadable component rather than abort the whole list
+            continue
     return {"count": len(out), "components": out}
 
 
@@ -74,33 +110,38 @@ def list_components(ctx: Context, limit: int = 200):
 def check_interference(ctx: Context):
     asm = ctx.require(DOC_ASSEMBLY, "assembly")
     mgr = asm.InterferenceDetectionManager
-    mgr.TreatCoincidenceAsInterference = False
-    mgr.IncludeMultibodyPartInterferences = True
-    inters = mgr.GetInterferences()
+    try:
+        mgr.TreatCoincidenceAsInterference = False
+        mgr.IncludeMultibodyPartInterferences = True
+    except Exception:  # noqa: BLE001 — setter differences across versions are non-fatal
+        pass
+    inters = sw_get(mgr, "GetInterferences")
     if not inters:
         return {"count": 0, "interferences": []}
     out = []
     for i, inter in enumerate(inters):
         if i >= 50:
             break
-        comps = inter.Components or []
-        out.append({
-            "pair": [c.Name2 for c in comps],
-            "volume_mm3": round(units.m3_to_mm3(inter.Volume), 3),
-        })
+        try:
+            comps = sw_get(inter, "Components") or []
+            out.append({
+                "pair": [sw_get(c, "Name2") for c in comps],
+                "volume_mm3": round(units.m3_to_mm3(sw_get(inter, "Volume")), 3),
+            })
+        except Exception:  # noqa: BLE001
+            continue
     return {"count": len(out), "interferences": out}
 
 
 @tool("get_custom_properties", "Read the custom properties of the current document", params={}, category="query")
 def get_custom_properties(ctx: Context):
     mgr = ctx.model.Extension.CustomPropertyManager("")
-    names = mgr.GetNames() or []
+    names = sw_get(mgr, "GetNames") or []
     props = {}
     for n in names:
-        r = mgr.Get5(n, False)  # -> (valOut, resolvedOut, wasResolved, ...) depends on version
+        r = mgr.Get5(n, False)  # arg-taking method; -> (valOut, resolvedOut, wasResolved, ...) depends on version
         val = ""
         if isinstance(r, tuple):
-            # Prefer the "resolved" value (usually index 1), falling back to the raw value
             val = (r[1] or r[0]) if len(r) > 1 else r[0]
         props[n] = val
     return {"count": len(props), "properties": props}
@@ -116,14 +157,14 @@ def measure_selection(ctx: Context):
         raise SWError("measurement failed.")
     out = {}
     try:
-        if m.Distance >= 0:
-            out["distance_mm"] = round(units.m_to_mm(m.Distance), 3)
+        if sw_get(m, "Distance") >= 0:
+            out["distance_mm"] = round(units.m_to_mm(sw_get(m, "Distance")), 3)
     except Exception:  # noqa: BLE001
         pass
     for attr, key, scale in (("Length", "length_mm", 1e3), ("Area", "area_mm2", 1e6),
                              ("TotalArea", "total_area_mm2", 1e6)):
         try:
-            v = getattr(m, attr)
+            v = sw_get(m, attr)
             if v and v > 0:
                 out[key] = round(v * scale, 3)
         except Exception:  # noqa: BLE001

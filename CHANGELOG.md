@@ -6,6 +6,54 @@
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-07-24
+
+### Fixed (P16 — COM 属性/方法歧义修复：'str'/'tuple' object is not callable)
+
+**诊断**
+
+P15 早绑生效了——错误从 'int' 变成 'str'/'tuple'，`unsuppress_component`
+也**能执行了**（`GetComponents(True)` 正常返回列表，只是模型没猜中
+组件名才报 "not found"）。
+
+剩下是镜像问题：早绑之后 SolidWorks 一批**无参 getter 在类型库里是
+属性 (propget)**，代码却用 `()` 调：
+- `list_components`：`c.GetPathName()` → propget 返回 str → `'str' object is not callable`
+- `check_interference`：`mgr.GetInterferences()` → propget 返回 tuple → `'tuple' object is not callable`
+- `list_features`：遍历里 `GetTypeName2()` / `IsSuppressed()` 同类问题（+ 少数版本成员名不同 → `找不到成员`）
+
+**修复**
+
+`bridge.py` 加公开助手 `sw_get(obj, name, *args)`：成员是方法就调用、
+是属性就取值——无参 getter 不用再关心当前 SW 版本把它定义成方法还是
+属性。把 `query.py` / `feature.py` 里所有无参 getter 读取全部走
+`sw_get`，并给遍历套上逐项 try/except（一个别扭成员不再拖垮整个
+查询）。`mass_properties` 增加 `CreateMassProperty` → `CreateMassProperty2`
+回退。
+
+带参成员（`GetComponents(True)` / `SelectByID2(...)` / `Get5(...)`）一定
+是真方法，不动。
+
+### Files changed (3)
+- `sidecar/sw_agent/bridge.py` (OVR) — 含 P13/P15 + P16 `sw_get`
+- `sidecar/sw_agent/tools/query.py` (OVR) — 所有无参 getter 走 sw_get + 逐项容错
+- `sidecar/sw_agent/tools/feature.py` (OVR) — 含 P13 + 遍历套 sw_get + 逐项容错
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 装机回归（重点）
+- "把动力套装解除压缩"：`list_components` **返回真实组件树** → 模型拿到准确 `Name2` → `unsuppress_component` 一步成功
+- `list_features` / `check_interference` 不再报 not-callable
+- `mass_properties` 若之前是 CreateMassProperty 缺失，现在走 CreateMassProperty2
+
+### 备注
+- 组件名格式：SolidWorks 里组件 `Name2` 通常是 `动力套装-1` 这种（实例后缀 `-1`）。有了 `list_components`，模型不用再猜。
+- 首次工具调用仍会因 makepy 缓存生成慢几十秒（P15 已知项），之后正常。
+
 ## [0.2.13] - 2026-07-23
 
 ### Fixed (P15 — COM 绑定修复：'int' object is not callable + 找不到成员)
@@ -515,7 +563,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.13...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.14...HEAD
+[0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/raylanlin/Millwright/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/raylanlin/Millwright/compare/v0.2.10...v0.2.11

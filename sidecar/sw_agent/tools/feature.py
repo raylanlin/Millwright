@@ -21,7 +21,7 @@ P13 fixes:
 from __future__ import annotations
 
 from ..registry import tool
-from ..bridge import Context, SWError
+from ..bridge import Context, SWError, sw_get
 from .. import units
 
 # swInConfigurationOpts_e
@@ -35,11 +35,14 @@ def _exit_sketch_if_open(ctx: Context):
 
 
 def _find_feature(ctx: Context, name: str):
-    feat = ctx.model.FirstFeature()
-    while feat is not None:
-        if feat.Name == name:
+    # P16: FirstFeature/GetNextFeature/Name may be method OR propget depending on SW version
+    feat = sw_get(ctx.model, "FirstFeature")
+    guard = 0
+    while feat is not None and guard < 5000:
+        guard += 1
+        if sw_get(feat, "Name") == name:
             return feat
-        feat = feat.GetNextFeature()
+        feat = sw_get(feat, "GetNextFeature")
     return None
 
 

@@ -7,15 +7,15 @@ Key conventions:
 - P13: attach tries the bare ProgID first, then every versioned ProgID
   (SW 2017-2026) — same fix as the VBS AttachSW(). On many installs only
   the versioned ProgID is registered in the ROT.
-- P15: connect via EARLY BINDING (gencache.EnsureDispatch). Dynamic/late
-  binding carries no type info, so win32com misresolves many SolidWorks
-  members: methods get returned as their int value (calling them raises
-  "'int' object is not callable" — e.g. ModelDoc2.GetType), and others fail
-  GetIDsOfNames with DISP_E_MEMBERNOTFOUND ("找不到成员" — e.g. FirstFeature,
-  CreateMassProperty). EnsureDispatch loads the typelib so methods are
-  methods and properties are properties. Falls back to the raw dynamic
-  dispatch if makepy generation is unavailable (then the tolerant _member()
-  helper below still keeps GetType working).
+- P15: connect via EARLY BINDING (gencache.EnsureDispatch) so members resolve
+  from the typelib. Dynamic binding misresolved methods as ints
+  ("'int' object is not callable").
+- P16: even under early binding, a number of SolidWorks *no-argument* getters
+  are declared as PROPERTIES (propget) in the typelib — GetPathName→str,
+  GetInterferences→tuple, GetType→int, IsSuppressed→bool. Calling those with
+  `()` raises "'<type>' object is not callable". `sw_get()` reads a member
+  tolerantly (invoke if it's a method, return the value if it's a property),
+  so tool code no longer has to know which is which per SW version.
 - All tools obtain app / model / the various Managers via Context. The
   "no connection / no document" error handling lives here, in one place.
 """
@@ -45,15 +45,15 @@ class SWError(Exception):
     """Agent-facing, human-readable error. str(e) is returned as the JSON-RPC error field."""
 
 
-def _member(obj, name: str, *args):
-    """Access a SW member tolerantly.
+def sw_get(obj, name: str, *args):
+    """Read a SolidWorks member that the typelib may expose as either a method
+    OR a propget.
 
-    Under early binding a method is callable and we invoke it with args.
-    Under a dynamic-dispatch fallback, no-arg getters like GetType may be
-    resolved as a property whose *value* is returned on attribute access —
-    in that case `getattr` already yields the int, so we must NOT call it
-    (that is the "'int' object is not callable" crash). Used for the handful
-    of no-arg getters the connection layer relies on.
+    Early binding resolves some no-arg 'Get*'/'Is*'/'Name*' accessors as
+    properties, whose value is returned on plain attribute access; calling
+    those with () raises "'<type>' object is not callable" (str/tuple/int/bool).
+    This tolerates both forms. Only use for NO-ARG getters (arg-taking members
+    like GetComponents(True) / SelectByID2(...) are always real methods).
     """
     attr = getattr(obj, name)
     return attr(*args) if callable(attr) else attr
@@ -106,7 +106,7 @@ class Context:
 
     def require(self, doc_type: int, label: str):
         m = self.model
-        if _member(m, "GetType") != doc_type:
+        if sw_get(m, "GetType") != doc_type:
             raise SWError(f"This operation requires a {label} document.")
         return m
 
@@ -151,4 +151,4 @@ class Context:
 
 
 def doc_type_name(model) -> str:
-    return DOC_TYPE_NAME.get(_member(model, "GetType"), "unknown")
+    return DOC_TYPE_NAME.get(sw_get(model, "GetType"), "unknown")
