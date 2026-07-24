@@ -1,19 +1,20 @@
 // src/renderer/components/ChatMessage.tsx
 //
 // Single message bubble.
-// Its only responsibility is rendering; state changes live elsewhere.
-// Run/copy actions are wired through prop callbacks.
+// P22: assistant tool activity is rendered as collapsible GROUPS — consecutive
+// tool steps coalesce into one <ToolCallGroup/>; a text step breaks the group,
+// so prose and tool groups interleave in arrival order. Falls back to `content`
+// when there are no steps (legacy / restored messages).
 
-import type { ChatMessage as ChatMsg, ScriptResult } from '../../shared/types';
+import type { ChatMessage as ChatMsg, ScriptResult, AgentStep } from '../../shared/types';
 import type { ThemeTokens } from '../themes';
 import { useT } from '../i18n/LocaleContext';
+import { ToolCallGroup } from './ToolCallGroup';
 
 interface Props {
   msg: ChatMsg;
   t: ThemeTokens;
-  /** Script execution result (success / failure banner) */
   execResult?: ScriptResult;
-  /** Whether this code block is currently being executed */
   isExecuting?: boolean;
   onRunScript?: (code: string, lang: 'vba' | 'python') => void;
   onCopyCode?: (code: string) => void;
@@ -30,22 +31,15 @@ export function ChatMessage({
   const tr = useT();
   const isUser = msg.role === 'user';
 
-  // P5: render system / tool messages as a muted center hint instead of a regular bubble
   if (msg.role === 'system' || msg.role === 'tool') {
     return (
-      <div
-        style={{
-          textAlign: 'center',
-          fontSize: 11,
-          color: t.textMuted,
-          padding: '4px 0 10px',
-          whiteSpace: 'pre-wrap',
-        }}
-      >
+      <div style={{ textAlign: 'center', fontSize: 11, color: t.textMuted, padding: '4px 0 10px', whiteSpace: 'pre-wrap' }}>
         {msg.content}
       </div>
     );
   }
+
+  const hasSteps = !isUser && !!msg.steps && msg.steps.length > 0;
 
   return (
     <div
@@ -67,81 +61,28 @@ export function ChatMessage({
           border: isUser ? 'none' : `1px solid ${t.aiBubbleBorder}`,
           fontSize: 13,
           lineHeight: 1.65,
-          whiteSpace: 'pre-wrap',
+          whiteSpace: hasSteps ? 'normal' : 'pre-wrap',
           fontFamily: 'inherit',
           wordBreak: 'break-word',
         }}
       >
-        {/* Tool-call tag */}
-        {!isUser && msg.toolCalls && msg.toolCalls.length > 0 && (
-          <div
-            style={{
-              background: t.codeBg, borderRadius: 6, padding: '7px 10px',
-              marginBottom: 9, border: `1px solid ${t.codeBorder}`,
-            }}
-          >
-            <span style={{ color: t.textSecondary, fontSize: 11, fontWeight: 600 }}>
-              {tr('msg.toolCalls')}
-            </span>
-            <div style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {msg.toolCalls.map((tc, i) => (
-                <span
-                  key={i}
-                  style={{
-                    padding: '2px 7px', borderRadius: 4,
-                    background: t.toolBg, color: t.toolText,
-                    fontSize: 11, fontFamily: "'Consolas', monospace",
-                    border: `1px solid ${t.toolBorder}`,
-                  }}
-                >
-                  {tc.name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Code block */}
+        {/* Code block (run-button flow) */}
         {msg.code && (
           <div style={{ marginBottom: 9 }}>
             <div
               style={{
-                background: t.codeBg, borderRadius: 6,
-                padding: '10px 12px',
-                border: `1px solid ${t.codeBorder}`,
-                fontFamily: "'Consolas', monospace",
-                fontSize: 11.5,
-                color: t.codeText,
-                overflowX: 'auto',
-                lineHeight: 1.6,
-                whiteSpace: 'pre',
+                background: t.codeBg, borderRadius: 6, padding: '10px 12px',
+                border: `1px solid ${t.codeBorder}`, fontFamily: "'Consolas', monospace",
+                fontSize: 11.5, color: t.codeText, overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre',
               }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: 5,
-                }}
-              >
-                <span style={{ color: t.textMuted, fontSize: 10 }}>
-                  {msg.codeLanguage?.toUpperCase() ?? 'CODE'}
-                </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                <span style={{ color: t.textMuted, fontSize: 10 }}>{msg.codeLanguage?.toUpperCase() ?? 'CODE'}</span>
                 <div style={{ display: 'flex', gap: 6 }}>
                   {onCopyCode && (
                     <button
                       onClick={() => onCopyCode(msg.code!)}
-                      style={{
-                        background: 'none',
-                        border: `1px solid ${t.codeBorder}`,
-                        color: t.textMuted,
-                        fontSize: 10,
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        fontFamily: 'inherit',
-                      }}
+                      style={{ background: 'none', border: `1px solid ${t.codeBorder}`, color: t.textMuted, fontSize: 10, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontFamily: 'inherit' }}
                     >
                       {tr('msg.copy')}
                     </button>
@@ -150,17 +91,7 @@ export function ChatMessage({
                     <button
                       onClick={() => onRunScript(msg.code!, msg.codeLanguage!)}
                       disabled={isExecuting}
-                      style={{
-                        background: t.btnPrimary,
-                        border: 'none',
-                        color: t.btnPrimaryText,
-                        fontSize: 10,
-                        padding: '2px 10px',
-                        borderRadius: 4,
-                        cursor: isExecuting ? 'default' : 'pointer',
-                        opacity: isExecuting ? 0.6 : 1,
-                        fontFamily: 'inherit',
-                      }}
+                      style={{ background: t.btnPrimary, border: 'none', color: t.btnPrimaryText, fontSize: 10, padding: '2px 10px', borderRadius: 4, cursor: isExecuting ? 'default' : 'pointer', opacity: isExecuting ? 0.6 : 1, fontFamily: 'inherit' }}
                     >
                       {isExecuting ? tr('msg.running') : tr('msg.run')}
                     </button>
@@ -170,39 +101,49 @@ export function ChatMessage({
               {msg.code}
             </div>
 
-            {/* Execution result */}
             {execResult && (
               <div
                 style={{
                   marginTop: 7, padding: '6px 10px', borderRadius: 5, fontSize: 11.5,
                   background: execResult.success ? t.successBg : t.dangerBg,
-                  color: execResult.success ? t.successText : t.dangerText,
-                  fontFamily: 'inherit',
+                  color: execResult.success ? t.successText : t.dangerText, fontFamily: 'inherit',
                 }}
               >
                 {execResult.success ? '✓ ' : '✕ '}
-                {execResult.success
-                  ? tr('msg.execDone', { ms: execResult.duration })
-                  : execResult.error ?? tr('msg.execFail')}
+                {execResult.success ? tr('msg.execDone', { ms: execResult.duration }) : execResult.error ?? tr('msg.execFail')}
                 {execResult.output && (
-                  <pre
-                    style={{
-                      margin: '5px 0 0',
-                      fontSize: 10.5,
-                      whiteSpace: 'pre-wrap',
-                      opacity: 0.85,
-                    }}
-                  >
-                    {execResult.output}
-                  </pre>
+                  <pre style={{ margin: '5px 0 0', fontSize: 10.5, whiteSpace: 'pre-wrap', opacity: 0.85 }}>{execResult.output}</pre>
                 )}
               </div>
             )}
           </div>
         )}
 
-        {msg.content}
+        {/* P22: prose interleaved with collapsible tool-call groups */}
+        {hasSteps ? renderSteps(msg.steps!, t) : msg.content}
       </div>
     </div>
   );
+}
+
+/** Coalesce consecutive tool steps into one <ToolCallGroup/>; text steps render as prose and break the group. */
+function renderSteps(steps: AgentStep[], t: ThemeTokens) {
+  const els: React.ReactNode[] = [];
+  let buf: AgentStep[] = [];
+  const flush = (key: string | number) => {
+    if (buf.length) {
+      els.push(<ToolCallGroup key={`g${key}`} steps={buf} t={t} />);
+      buf = [];
+    }
+  };
+  steps.forEach((s, i) => {
+    if (s.kind === 'tool') {
+      buf.push(s);
+    } else {
+      flush(i);
+      if (s.text) els.push(<span key={i} style={{ whiteSpace: 'pre-wrap' }}>{s.text}</span>);
+    }
+  });
+  flush('end');
+  return els;
 }

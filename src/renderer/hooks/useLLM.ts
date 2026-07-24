@@ -1,26 +1,24 @@
 // src/renderer/hooks/useLLM.ts
 //
-// Chat-state hook (P1.2: wired up the agent tool loop).
+// Chat-state hook.
 //
-// Key fix: previously `send()` only called the legacy `chatStream`/`chat` (plain chat),
-// so P1's `window.api.llm.agent()` was never actually invoked by the UI —
-// the model had no idea 26 tools existed, never drove SolidWorks, and could only
-// answer "I can't see your SolidWorks".
-//
-// Current behaviour:
-//   - OpenAI-compatible protocol (DeepSeek / Kimi / MiniMax / GPT) → goes through the
-//     agent loop, consumes `tool_start` / `tool_result` / `confirm_request` /
-//     `text` / `done` / `error` events, and renders the tool-call flow live
-//     inside the assistant message.
-//   - Anthropic protocol → still uses `chatStream` for now (the agent loop is
-//     currently only implemented on the OpenAI side).
-//
-// Consumer: the `Chat` component.
+// P20: agent activity is now recorded as STRUCTURED steps on the trailing
+// assistant message (`msg.steps`), not string-concatenated into `msg.content`.
+// The old code appended "🔧 调用 X ↳ result" text for every event, so a whole
+// multi-tool turn collapsed into one wall-of-text bubble. Now:
+//   - `text`  → model prose: appended to `content` AND mirrored as a text step
+//   - `tool_start` → push a { kind:'tool', status:'running' } step
+//   - `tool_result` → upsert the matching tool step with status + result
+//     (upsert so a rejected tool, which never fires tool_start, still shows)
+//   - `backup` / `confirm` / `error` → small text steps
+// ChatMessage renders steps in order (prose spans + <ToolCallCard/>). `content`
+// still carries the model prose for cross-turn context + persistence.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   LLMConfig,
   ChatMessage,
+  AgentStep,
   LLMStreamEvent,
   LLMErrorInfo,
 } from '../../shared/types';
@@ -30,14 +28,11 @@ export interface UseLLMOptions {
   initial?: ChatMessage[];
 }
 
-function paramPreview(params?: Record<string, any>): string {
-  if (!params || Object.keys(params).length === 0) return '';
-  try {
-    const s = JSON.stringify(params);
-    return s.length > 120 ? s.slice(0, 120) + '…' : s;
-  } catch {
-    return '';
-  }
+function statusFromResult(result?: string): AgentStep['status'] {
+  const r = (result ?? '').trimStart();
+  if (r.startsWith('❌')) return 'error';
+  if (r.startsWith('⛔')) return 'rejected';
+  return 'ok';
 }
 
 export function useLLM({ config, initial }: UseLLMOptions) {
@@ -46,90 +41,124 @@ export function useLLM({ config, initial }: UseLLMOptions) {
   const [error, setError] = useState<LLMErrorInfo | null>(null);
   const currentRequestId = useRef<string | null>(null);
 
-  // Append a chunk of text to the trailing assistant message
-  const appendToAssistant = useCallback((text: string) => {
+  /** Map the trailing assistant message through `mut` (immutably). */
+  const updateAssistant = useCallback((mut: (m: ChatMessage) => ChatMessage) => {
     setMessages((prev) => {
       const last = prev[prev.length - 1];
       if (!last || last.role !== 'assistant') return prev;
-      return [...prev.slice(0, -1), { ...last, content: last.content + text }];
+      return [...prev.slice(0, -1), mut(last)];
     });
   }, []);
 
-  const setAssistant = useCallback((text: string) => {
-    setMessages((prev) => {
-      const last = prev[prev.length - 1];
-      if (!last || last.role !== 'assistant') return prev;
-      return [...prev.slice(0, -1), { ...last, content: text }];
+  // Append model prose: into content (context/persistence) + mirror as a trailing text step
+  const appendText = useCallback((text: string) => {
+    updateAssistant((m) => {
+      const steps = [...(m.steps ?? [])];
+      const last = steps[steps.length - 1];
+      if (last && last.kind === 'text') {
+        steps[steps.length - 1] = { ...last, text: (last.text ?? '') + text };
+      } else {
+        steps.push({ kind: 'text', text });
+      }
+      return { ...m, content: m.content + text, steps };
     });
-  }, []);
+  }, [updateAssistant]);
 
-  // ===== Legacy streaming-event subscription (used by the Anthropic fallback) =====
+  const setAssistantContent = useCallback((text: string) => {
+    updateAssistant((m) => ({ ...m, content: text }));
+  }, [updateAssistant]);
+
+  const pushToolStep = useCallback((tc: any) => {
+    updateAssistant((m) => ({
+      ...m,
+      steps: [...(m.steps ?? []), {
+        kind: 'tool',
+        id: tc?.id ?? tc?.name,
+        name: tc?.name,
+        params: tc?.parameters,
+        status: 'running',
+      }],
+    }));
+  }, [updateAssistant]);
+
+  // Upsert: fill the last running step with this name/id; if none, append one (rejected path has no tool_start)
+  const resolveToolStep = useCallback((tc: any) => {
+    updateAssistant((m) => {
+      const steps = [...(m.steps ?? [])];
+      const key = tc?.id ?? tc?.name;
+      const status = statusFromResult(tc?.result);
+      for (let i = steps.length - 1; i >= 0; i--) {
+        const s = steps[i];
+        if (s.kind === 'tool' && (s.id === key || s.name === tc?.name) && s.status === 'running') {
+          steps[i] = { ...s, status, result: tc?.result, params: s.params ?? tc?.parameters };
+          return { ...m, steps };
+        }
+      }
+      steps.push({ kind: 'tool', id: key, name: tc?.name, params: tc?.parameters, status, result: tc?.result });
+      return { ...m, steps };
+    });
+  }, [updateAssistant]);
+
+  const pushNote = useCallback((text: string) => {
+    updateAssistant((m) => ({ ...m, steps: [...(m.steps ?? []), { kind: 'text', text }] }));
+  }, [updateAssistant]);
+
+  // ===== Legacy streaming-event subscription (Anthropic fallback path) =====
   useEffect(() => {
     const off = window.api.llm.onStreamEvent((ev: LLMStreamEvent) => {
       if (ev.requestId !== currentRequestId.current) return;
       switch (ev.type) {
         case 'delta':
-          appendToAssistant(ev.chunk);
+          appendText(ev.chunk);
           break;
         case 'done':
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'assistant') return prev;
-            return [
-              ...prev.slice(0, -1),
-              { ...last, content: ev.response.content, code: ev.response.code, codeLanguage: ev.response.codeLanguage },
-            ];
-          });
+          updateAssistant((m) => ({
+            ...m,
+            content: ev.response.content,
+            code: ev.response.code,
+            codeLanguage: ev.response.codeLanguage,
+          }));
           setIsGenerating(false);
           currentRequestId.current = null;
           break;
         case 'error':
           setError(ev.error);
-          appendToAssistant(`\n\n⚠️ ${ev.error.message}`);
+          pushNote(`⚠️ ${ev.error.message}`);
           setIsGenerating(false);
           currentRequestId.current = null;
           break;
       }
     });
     return off;
-  }, [appendToAssistant]);
+  }, [appendText, updateAssistant, pushNote]);
 
-  // ===== Agent event subscription (used by the OpenAI-compatible path) =====
+  // ===== Agent event subscription (main path) =====
   useEffect(() => {
     const off = window.api.llm.onAgentEvent((ev: any) => {
       if (ev.requestId !== currentRequestId.current) return;
       switch (ev.type) {
         case 'start':
-          // Session start (carries `backupPath`) — optional hint, kept quiet for now
           break;
         case 'backup':
-          // P5: surface the auto-backup path to the user when the agent decides to make a destructive tool call
-          if (ev.backupPath) appendToAssistant(`\n\n💾 已自动备份当前文档：\`${ev.backupPath}\``);
+          if (ev.backupPath) pushNote(`💾 已自动备份当前文档：${ev.backupPath}`);
           break;
         case 'text':
-          // Narrative text emitted by the model in a given turn; appended in arrival order
-          if (ev.text) appendToAssistant(ev.text);
+          if (ev.text) appendText(ev.text);
           break;
-        case 'tool_start': {
-          const tc = ev.toolCall;
-          const pv = paramPreview(tc?.parameters);
-          appendToAssistant(`\n\n🔧 调用 **${tc?.name}**${pv ? ` \`${pv}\`` : ''}`);
+        case 'tool_start':
+          pushToolStep(ev.toolCall);
           break;
-        }
-        case 'tool_result': {
-          const tc = ev.toolCall;
-          appendToAssistant(`\n↳ ${tc?.result ?? ''}`);
+        case 'tool_result':
+          resolveToolStep(ev.toolCall);
           break;
-        }
         case 'confirm_request': {
           const tc = ev.toolCall;
-          const pv = paramPreview(tc?.parameters);
+          const pv = tc?.parameters ? JSON.stringify(tc.parameters) : '';
           const ok = window.confirm(
             `AI 想执行可能修改模型的操作：\n\n${tc?.name} ${pv}\n\n是否允许？`,
           );
           const callId = tc?.id ?? tc?.name;
           window.api.llm.confirmReply(ev.requestId, callId, ok);
-          appendToAssistant(`\n\n${ok ? '✅ 已允许' : '⛔ 已拒绝'}：${tc?.name}`);
           break;
         }
         case 'done':
@@ -138,14 +167,14 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           break;
         case 'error':
           setError({ code: 'AGENT_ERROR', message: ev.error } as LLMErrorInfo);
-          appendToAssistant(`\n\n⚠️ ${ev.error}`);
+          pushNote(`⚠️ ${ev.error}`);
           setIsGenerating(false);
           currentRequestId.current = null;
           break;
       }
     });
     return off;
-  }, [appendToAssistant]);
+  }, [appendText, pushToolStep, resolveToolStep, pushNote]);
 
   const send = useCallback(
     async (userInput: string) => {
@@ -154,39 +183,23 @@ export function useLLM({ config, initial }: UseLLMOptions) {
 
       setError(null);
       const userMsg: ChatMessage = { role: 'user', content: trimmed, timestamp: Date.now() };
-      setMessages([...messages, userMsg, { role: 'assistant', content: '', timestamp: Date.now() }]);
+      setMessages((prev) => [...prev, userMsg, { role: 'assistant', content: '', steps: [], timestamp: Date.now() }]);
       setIsGenerating(true);
       const payloadMessages = [...messages, userMsg];
 
-      // OpenAI-compatible protocol → agent tool loop; Anthropic → legacy streaming fallback
-      // P5: Anthropic also has native tool_use, so both protocols run the agent path now.
-      const useAgent = true;
-
-      if (useAgent) {
-        const { requestId, promise } = window.api.llm.agent(config, payloadMessages);
-        currentRequestId.current = requestId;
-        const res = await promise;
-        if (!res.ok) {
-          setError(res.error);
-          setAssistant(`⚠️ ${res.error.message}`);
-          setIsGenerating(false);
-          currentRequestId.current = null;
-        }
-        // The `ok` branch is finalized by the `done` event from `onAgentEvent`
-        return;
-      }
-
-      // —— Anthropic fallback: streaming ——
-      const res = await window.api.llm.chatStream(config, payloadMessages);
+      // Both protocols run the agent path (P5: Anthropic has native tool_use too)
+      const { requestId, promise } = window.api.llm.agent(config, payloadMessages);
+      currentRequestId.current = requestId;
+      const res = await promise;
       if (!res.ok) {
         setError(res.error);
-        setAssistant(`⚠️ ${res.error.message}`);
+        setAssistantContent(`⚠️ ${res.error.message}`);
         setIsGenerating(false);
-        return;
+        currentRequestId.current = null;
       }
-      currentRequestId.current = res.requestId;
+      // The ok branch is finalized by the `done` agent event
     },
-    [config, messages, isGenerating, setAssistant],
+    [config, messages, isGenerating, setAssistantContent],
   );
 
   const cancel = useCallback(async () => {

@@ -17,6 +17,11 @@
 //   - Convergence nudge: when 3 rounds remain, a system note asks the model to
 //     wrap up; on hitting maxRounds a final no-tools turn produces a summary of
 //     what was changed instead of a bare "did not converge".
+//
+// P18 (vision priority reversed): a multimodal MAIN model reads the screenshot
+//   DIRECTLY (lossless) — the dedicated vision model is now only the FALLBACK for
+//   when the main model can't see images. Old order preferred the vision model even
+//   when the main model was multimodal, which threw away detail via image→text.
 
 import type { LLMAdapter } from '../llm/adapter';
 import type { ChatMessage, ToolCall, VisionConfig } from '../../shared/types';
@@ -42,9 +47,10 @@ export interface SidecarAgentOptions {
   confirmTool?: (call: ToolCall) => Promise<boolean>;
   /** P5: lazy session backup — called once, right before the first destructive tool runs */
   backup?: () => Promise<string | null>;
-  /** Vision: dedicated vision model (image-to-text). When unset, fall back to main-model multimodal input */
-  visionConfig?: VisionConfig;
+  /** P18: main model can read images directly (preferred, lossless). */
   mainModelVision?: boolean;
+  /** Fallback vision model (image-to-text) for when the main model is not multimodal. */
+  visionConfig?: VisionConfig;
   /** Convert a local image path returned by the sidecar into a data URL (handlers implement this via Electron's nativeImage) */
   imageToDataUrl: (imagePath: string, format: string) => string;
 }
@@ -56,12 +62,21 @@ const VIRTUAL_TOOLS = [
     function: {
       name: 'analyze_view',
       description:
-        'Capture the current SolidWorks viewport and run visual analysis on it. '
-        + 'Include the specific question you want answered; to change the angle first call '
-        + 'set_view_orientation / rotate_view.',
+        'Ask a specific question about the current SolidWorks view. It captures a screenshot and '
+        + 'answers your question about it — call it repeatedly to ask follow-up questions and drill in. '
+        + 'To interrogate the SAME snapshot across several questions (so the view cannot drift between them), '
+        + 'pass recapture:false to reuse the last screenshot; to look from a new angle first call '
+        + 'set_view_orientation / rotate_view, then analyze_view (recapture defaults to true).',
       parameters: {
         type: 'object',
-        properties: { question: { type: 'string', description: 'The specific question you want the image to answer' } },
+        properties: {
+          question: { type: 'string', description: 'The specific question you want answered about the view' },
+          recapture: {
+            type: 'boolean',
+            description: 'true (default) = screenshot the current view; false = reuse the previous screenshot to ask a follow-up about the same snapshot',
+            default: true,
+          },
+        },
         required: ['question'],
       },
     },
@@ -92,6 +107,10 @@ export async function runSidecarAgent(
   let history: ChatMessage[] = [...messages];
   let finalText = '';
   let backupDone = false;
+
+  // P19: cache the most recent screenshot so a (pure-text or multimodal) model can
+  // ask several follow-up questions about the SAME snapshot without re-capturing.
+  let lastCapture: string | null = null;
 
   await sidecar.start();
   const sidecarTools = await sidecar.listTools(false);
@@ -147,7 +166,8 @@ export async function runSidecarAgent(
 
       // Vision tool on its own path
       if (call.name === 'analyze_view') {
-        const { resultText, imageMessage } = await handleAnalyzeView(call, sidecar, opts);
+        const { resultText, imageMessage, capture } = await handleAnalyzeView(call, sidecar, opts, lastCapture);
+        if (capture) lastCapture = capture;
         call.result = resultText;
         opts.onEvent?.({ type: 'tool_result', toolCall: call });
         // Tool result must immediately follow assistant.tool_calls; the image goes after as its own user message
@@ -201,47 +221,71 @@ export async function runSidecarAgent(
 
 interface AnalyzeViewResult {
   resultText: string;
-  /** Path B: image as a standalone user message; the caller pushes it after the tool result */
+  /** Path A: image as a standalone user message; the caller pushes it after the tool result */
   imageMessage?: ChatMessage;
+  /** P19: the data URL just captured, so the loop can cache it for follow-up questions */
+  capture?: string;
 }
 
-/** analyze_view: capture the screen → image-to-text (dedicated vision model) or direct multimodal main model. */
+/** analyze_view: answer a question about the SW view.
+ *  P18 priority: multimodal main model reads the screenshot directly (lossless);
+ *  otherwise fall back to a dedicated vision model (image→text).
+ *  P19: recapture=false reuses `lastCapture` so the model can ask follow-up
+ *  questions about the same snapshot (openclaw-style visual Q&A). */
 async function handleAnalyzeView(
   call: ToolCall,
   sidecar: SWSidecar,
   opts: SidecarAgentOptions,
+  lastCapture: string | null,
 ): Promise<AnalyzeViewResult> {
   const question = String(call.parameters?.question ?? '请描述当前零件状态');
-  const cap = await sidecar.call('capture_view', {});
-  if (!cap.ok) return { resultText: `截屏失败：${cap.error}` };
+  const recapture = call.parameters?.recapture !== false; // default true
+
+  // P19: resolve the image — fresh capture, or reuse the cached snapshot for a follow-up question
   let dataUrl: string;
-  try {
-    dataUrl = opts.imageToDataUrl(cap.data.image_path, cap.data.format);
-  } catch (e) {
-    return { resultText: `图像读取失败：${e instanceof Error ? e.message : String(e)}` };
+  let reused = false;
+  if (!recapture && lastCapture) {
+    dataUrl = lastCapture;
+    reused = true;
+  } else {
+    const cap = await sidecar.call('capture_view', {});
+    if (!cap.ok) return { resultText: `截屏失败：${cap.error}` };
+    try {
+      dataUrl = opts.imageToDataUrl(cap.data.image_path, cap.data.format);
+    } catch (e) {
+      return { resultText: `图像读取失败：${e instanceof Error ? e.message : String(e)}` };
+    }
   }
 
-  // Path A: dedicated vision model (image-to-text, prompt = the main model's `question`)
+  // Path A (preferred): main model is multimodal → feed the screenshot straight to it (no image→text loss)
+  if (opts.mainModelVision) {
+    opts.onEvent?.({ type: 'image' });
+    if (reused) {
+      // The image is already in history from the earlier call — just steer the model to it
+      return { resultText: `请参考上一张视图截图回答：${question}`, capture: dataUrl };
+    }
+    return {
+      resultText: '已截取当前视图，图像见下一条消息，请据此继续。',
+      imageMessage: { role: 'user', content: `（视图截图，请据此回答：${question}）`, images: [dataUrl] },
+      capture: dataUrl,
+    };
+  }
+
+  // Path B (fallback): main model can't see images → a dedicated vision model answers the question.
+  // Each call forwards the main model's specific question, so a pure-text model can interrogate the
+  // image (and, with recapture:false, keep asking about the same snapshot).
   if (opts.visionConfig) {
     try {
       const desc = await analyzeImage({ question, imageDataUrl: dataUrl, config: opts.visionConfig, signal: opts.signal });
       opts.onEvent?.({ type: 'image' });
-      return { resultText: `【视觉分析】${clip(desc)}` };
+      const tag = reused ? '【视觉分析·同一截图】' : '【视觉分析】';
+      return { resultText: `${tag}${clip(desc)}`, capture: dataUrl };
     } catch (e) {
       return { resultText: `视觉模型分析失败：${e instanceof Error ? e.message : String(e)}` };
     }
   }
 
-  // Path B: main model is itself multimodal → return image as a standalone user message
-  if (opts.mainModelVision) {
-    opts.onEvent?.({ type: 'image' });
-    return {
-      resultText: '已截取当前视图，图像见下一条消息，请据此继续。',
-      imageMessage: { role: 'user', content: `（视图截图，请据此回答：${question}）`, images: [dataUrl] },
-    };
-  }
-
   return {
-    resultText: '未配置视觉模型，且主模型未开启视觉输入。请在「设置 → 视觉模型」中指定一个视觉模型，或勾选“主模型支持视觉”。',
+    resultText: '主模型未开启视觉输入，且未配置备用视觉模型。请在「设置」中勾选“主模型支持视觉理解”（推荐，主模型可直接读图），或配置一个备用视觉模型。',
   };
 }

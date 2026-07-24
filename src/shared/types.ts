@@ -64,6 +64,26 @@ export interface ChatMessage {
   timestamp?: number;
   /** Optional: attached image URLs / data URLs (multimodal message, used when the main model supports vision) */
   images?: string[];
+  /** P17-P22: structured agent turn timeline (text / tool steps). Renderer groups consecutive tool calls into a collapsible block. Older sessions (no `steps`) fall back to `content` + `toolCalls` rendering. */
+  steps?: AgentStep[];
+}
+
+/** P17-P22: one step inside an agent turn (assistant message).
+ *  `kind:'text'` carries the prose; `kind:'tool'` is one tool invocation. */
+export interface AgentStep {
+  kind: 'text' | 'tool';
+  /** text step: the prose fragment (may be empty for tool-only turns) */
+  text?: string;
+  /** tool step: tool call id (matches ToolCall.id) */
+  id?: string;
+  /** tool step: tool name (e.g. 'select_plane', 'unsuppress_component') */
+  name?: string;
+  /** tool step: arguments passed to the tool */
+  params?: Record<string, any>;
+  /** tool step: lifecycle status */
+  status?: 'running' | 'ok' | 'error' | 'rejected';
+  /** tool step: formatted result / error message */
+  result?: string;
 }
 
 export interface LLMUsage {

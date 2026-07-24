@@ -6,6 +6,51 @@
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-07-24
+
+### Added (P17→P22 合并版)
+
+本包合并 P17~P22 全部改动，分包不再单独应用。文件冲突已取最新版
+（P19 含 P18；UI 三件套取 P20/21/22 最终合并版）。
+
+#### P17 — COM 缓存后台预热
+- `sidecar/sw_agent/server.py`：握手后后台线程预热 `EnsureDispatch`，
+  消除首次工具调用几十秒卡顿（用户感知启动后等约半分钟首条指令即不卡）。
+
+#### P18+P19 — 视觉优先级反转 + 视觉 Q&A
+- `src/main/agent/agent-loop-sidecar.ts`：主模型多模态时直接读图（无损），
+  独立视觉模型退为回退。`analyze_view` 加 `recapture` 参数，纯文本模型
+  可就同一张截图连续追问。
+
+#### P20+P21+P22 — 工具调用显示改造
+- 连续工具调用收进可折叠分组块，头部 ⚡ + 动作汇总 + 计数；友好中英名
+  + 灰色 raw 名；运行中转圈、展开看参数与格式化结果。
+
+### Files changed (6 + 1 手改 + 0 删除)
+- `sidecar/sw_agent/server.py` (OVR) — P17 后台预热
+- `src/main/agent/agent-loop-sidecar.ts` (OVR) — P18/P19 视觉路由
+- `src/renderer/hooks/useLLM.ts` (OVR) — P20-22 渲染状态
+- `src/renderer/components/ChatMessage.tsx` (OVR) — 用 ToolCallGroup
+- `src/renderer/components/ToolCallGroup.tsx` (NEW) — 折叠分组块
+- `src/renderer/i18n/tool-labels.ts` (NEW) — 中英名映射
+- `src/shared/types.ts` (手改) — 加 `AgentStep` + `ChatMessage.steps`
+- 删 `src/renderer/components/ToolCallCard.tsx` — 本仓库本就不存在（无操作）
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅（发现并修了 P17-22 包里 ToolCallGroup.tsx 一处 `let→const`）
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 回归清单
+- 启动后等约半分钟发首条指令 → 首个工具调用不卡（P17 预热）
+- 主模型多模态：analyze_view 截图直接进上下文；纯文本模型配视觉模型
+  可追问同一截图（P18/P19）
+- 一轮多工具 → 一个折叠块，头部汇总 + 计数；运行中转圈；点开单行
+  看参数/格式化结果（P20-22）
+- 中英随 locale 切换；深浅色正常；旧会话（无 `steps`）回退 `content`
+  不报错
+
 ## [0.2.14] - 2026-07-24
 
 ### Fixed (P16 — COM 属性/方法歧义修复：'str'/'tuple' object is not callable)
@@ -563,7 +608,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
-[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.14...HEAD
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.15...HEAD
+[0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/raylanlin/Millwright/compare/v0.2.11...v0.2.12
