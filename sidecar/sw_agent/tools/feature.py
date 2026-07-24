@@ -21,7 +21,7 @@ P13 fixes:
 from __future__ import annotations
 
 from ..registry import tool
-from ..bridge import Context, SWError, sw_get
+from ..bridge import Context, SWError, sw_get, DOC_PART
 from .. import units
 
 # swInConfigurationOpts_e
@@ -29,48 +29,48 @@ CFG_THIS = 1
 CFG_ALL = 2
 
 
+def _all_features(ctx: Context):
+    """P32: linked-list tree traversal is unresolvable over COM on some SW installs
+    (DISP_E_MEMBERNOTFOUND even via dynamic dispatch). IFeatureManager::GetFeatures
+    is documented, early-binding friendly, and returns the whole tree at once."""
+    feats = ctx.feat_mgr.GetFeatures(True)
+    return list(feats or [])
+
+
 def _exit_sketch_if_open(ctx: Context):
     if ctx.sketch_mgr.ActiveSketch is not None:
         ctx.sketch_mgr.InsertSketch(True)
 
 
-# P29: extrude/cut/revolve/feature pattern require a part document. In an assembly,
-# the same sketch types become block-sketches — the COM call returns None and the
-# generic "closed sketch" error confuses users. Check doc type first; if it's
-# not a part, raise a precise diagnostic. Also selects the profile sketch under
-# the FeatureManager so FeatureExtrusion3 / FeatureCut4 / FeatureRevolve2
-# attach to the right one (some SolidWorks versions don't auto-attach to
-# ActiveSketch for these calls).
-_DOC_PART = 1
-
-
-def _select_profile_sketch(ctx: Context) -> object:
-    """Return the active profile sketch for FeatureExtrusion3 etc., or raise.
-    Must be called from a part document; assembly/drawing documents can't extrude.
-    """
-    doc_type = sw_get(ctx.model, "GetType")
-    if doc_type != _DOC_PART:
-        raise SWError(
-            f"extrude/cut/revolve require a part document (active doc type is "
-            f"{doc_type}); switch to or create a part."
-        )
-    sk = ctx.sketch_mgr.ActiveSketch
-    if sk is None:
-        raise SWError("no active sketch; call start_sketch + draw a profile first.")
-    # Select it so the manager picks it up
-    ctx.model.Extension.SelectByID2(sk.Name, "SKETCH", 0, 0, 0, False, 0, None, 0)
-    return sk
+def _select_profile_sketch(ctx: Context, sketch: str | None = None):
+    """P29: exiting a sketch clears the selection, so FeatureExtrusion3/FeatureCut4
+    had no target and returned None ("closed sketch" error was misleading).
+    Select the requested sketch by name, or default to the LAST sketch feature."""
+    ctx.clear_selection()
+    name = sketch
+    if not name:
+        # P32: prefer the sketch recorded by start_sketch this session
+        name = ctx.scratch.get("last_sketch")
+    if not name:
+        for f in _all_features(ctx):
+            try:
+                if sw_get(f, "GetTypeName2") == "ProfileFeature":
+                    name = sw_get(f, "Name")
+            except Exception:  # noqa: BLE001
+                continue
+    if not name:
+        raise SWError("no sketch found to extrude — draw a sketch first.")
+    if not ctx.select_by_id(name, "SKETCH"):
+        raise SWError(f"failed to select sketch: {name}")
 
 
 def _find_feature(ctx: Context, name: str):
-    # P16: FirstFeature/GetNextFeature/Name may be method OR propget depending on SW version
-    feat = sw_get(ctx.model, "FirstFeature")
-    guard = 0
-    while feat is not None and guard < 5000:
-        guard += 1
-        if sw_get(feat, "Name") == name:
-            return feat
-        feat = sw_get(feat, "GetNextFeature")
+    for f in _all_features(ctx):
+        try:
+            if sw_get(f, "Name") == name:
+                return f
+        except Exception:  # noqa: BLE001
+            continue
     return None
 
 
@@ -79,12 +79,16 @@ def _find_feature(ctx: Context, name: str):
     params={
         "depth": {"type": "number", "desc": "Extrusion depth (mm)"},
         "both_dir": {"type": "boolean", "desc": "Equal-distance both-direction extrusion", "default": False},
+        "sketch": {"type": "string", "desc": "Sketch name to extrude (defaults to the most recent sketch)", "default": ""},
     },
     category="feature",
 )
-def extrude(ctx: Context, depth: float, both_dir: bool = False):
-    _exit_sketch_if_open(ctx)
-    _select_profile_sketch(ctx)
+def extrude(ctx: Context, depth: float, both_dir: bool = False, sketch: str = ""):
+    ctx.require(DOC_PART, "part")  # P27: solid features are part-only — fail early inside assemblies
+    # P32: manual-modeling order — with an ACTIVE sketch, extrude directly (SW uses it
+    # and auto-exits, like the UI). Only when no sketch is active do we select one.
+    if ctx.sketch_mgr.ActiveSketch is None:
+        _select_profile_sketch(ctx, sketch or None)
     d = units.mm(depth)
     # VERIFY: FeatureExtrusion3 parameter slots (24 args) — verify against macro recorder for the target version
     feat = ctx.feat_mgr.FeatureExtrusion3(
@@ -102,12 +106,14 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False):
     params={
         "depth": {"type": "number", "desc": "Cut depth (mm)"},
         "through_all": {"type": "boolean", "desc": "Cut through all", "default": False},
+        "sketch": {"type": "string", "desc": "Sketch name to cut with (defaults to the most recent sketch)", "default": ""},
     },
     category="feature", destructive=True,
 )
-def cut_extrude(ctx: Context, depth: float, through_all: bool = False):
-    _exit_sketch_if_open(ctx)
-    _select_profile_sketch(ctx)
+def cut_extrude(ctx: Context, depth: float, through_all: bool = False, sketch: str = ""):
+    ctx.require(DOC_PART, "part")
+    if ctx.sketch_mgr.ActiveSketch is None:
+        _select_profile_sketch(ctx, sketch or None)
     d = units.mm(depth)
     # VERIFY: FeatureCut4 parameter slots (25 args)
     feat = ctx.feat_mgr.FeatureCut4(
@@ -122,12 +128,14 @@ def cut_extrude(ctx: Context, depth: float, through_all: bool = False):
 
 @tool(
     "revolve", "Revolve feature (sketch must contain a profile plus a centerline as the axis)",
-    params={"angle": {"type": "number", "desc": "Revolve angle (degrees)", "default": 360}},
+    params={"angle": {"type": "number", "desc": "Revolve angle (degrees)", "default": 360},
+            "sketch": {"type": "string", "desc": "Sketch name to revolve (defaults to the most recent sketch)", "default": ""}},
     category="feature",
 )
-def revolve(ctx: Context, angle: float = 360):
-    _exit_sketch_if_open(ctx)
-    _select_profile_sketch(ctx)
+def revolve(ctx: Context, angle: float = 360, sketch: str = ""):
+    ctx.require(DOC_PART, "part")
+    if ctx.sketch_mgr.ActiveSketch is None:
+        _select_profile_sketch(ctx, sketch or None)
     a = units.deg(angle)
     # VERIFY: FeatureRevolve2 parameter slots
     feat = ctx.feat_mgr.FeatureRevolve2(
@@ -156,11 +164,12 @@ def fillet_edges(ctx: Context, radius: float):
     # 1) snapshot existing Fillet features; 2) run the simplest documented call;
     # 3) if that fails, tell the user to use fillet_all / manual filleting.
     before = set()
-    feat = ctx.model.FirstFeature()
-    while feat is not None:
-        if feat.GetTypeName2() == "Fillet":
-            before.add(feat.Name)
-        feat = feat.GetNextFeature()
+    for f in _all_features(ctx):
+        try:
+            if sw_get(f, "GetTypeName2") == "Fillet":
+                before.add(sw_get(f, "Name"))
+        except Exception:  # noqa: BLE001
+            continue
     created = None
     try:
         # VERIFY: simplest stable form — swFeatureFilletType_e 0 (simple), constant radius.
@@ -172,12 +181,13 @@ def fillet_edges(ctx: Context, radius: float):
         created = None
     if created is None:
         # Some versions return None yet still create the feature; check the snapshot.
-        feat = ctx.model.FirstFeature()
-        while feat is not None:
-            if feat.GetTypeName2() == "Fillet" and feat.Name not in before:
-                created = feat
-                break
-            feat = feat.GetNextFeature()
+        for f in _all_features(ctx):
+            try:
+                if sw_get(f, "GetTypeName2") == "Fillet" and sw_get(f, "Name") not in before:
+                    created = f
+                    break
+            except Exception:  # noqa: BLE001
+                continue
     if created is None:
         raise SWError(
             "fillet failed on this SolidWorks version. Workaround: create one fillet manually, "
@@ -194,16 +204,15 @@ def fillet_edges(ctx: Context, radius: float):
 def fillet_all(ctx: Context, radius: float):
     r = units.mm(radius)
     model = ctx.model
-    feat = model.FirstFeature()
     count = 0
-    while feat is not None:
-        if feat.GetTypeName2() == "Fillet":
-            data = feat.GetDefinition()
-            if data is not None:
-                data.DefaultRadius = r
-                feat.ModifyDefinition(data, model, None)
-                count += 1
-        feat = feat.GetNextFeature()
+    for f in _all_features(ctx):
+        if sw_get(f, "GetTypeName2") != "Fillet":
+            continue
+        data = f.GetDefinition()
+        if data is not None:
+            data.DefaultRadius = r
+            f.ModifyDefinition(data, model, None)
+            count += 1
     ctx.rebuild()
     return {"modified_fillets": count, "radius_mm": radius}
 

@@ -11,7 +11,7 @@ configuration ONLY (the comment claimed "all"); 2 = all configurations.
 from __future__ import annotations
 
 from ..registry import tool
-from ..bridge import Context, SWError
+from ..bridge import Context, SWError, sw_get
 from .. import units
 
 # swInConfigurationOpts_e
@@ -33,6 +33,14 @@ def start_sketch(ctx: Context, plane: str):
     if not ctx.select_plane(plane):
         raise SWError(f"failed to select reference plane: {plane}")
     ctx.sketch_mgr.InsertSketch(True)
+    # P32: remember this sketch's feature name so extrude/cut can target it after
+    # the sketch is exited, without relying on feature-tree traversal.
+    try:
+        active = ctx.sketch_mgr.ActiveSketch
+        if active is not None:
+            ctx.scratch["last_sketch"] = sw_get(active, "Name")
+    except Exception:  # noqa: BLE001 — best-effort
+        pass
     return {"sketch_on": plane}
 
 

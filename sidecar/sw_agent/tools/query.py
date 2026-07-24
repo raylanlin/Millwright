@@ -59,28 +59,30 @@ def bounding_box(ctx: Context):
       params={"limit": {"type": "number", "desc": "Maximum number of items to return", "default": 100}},
       category="query")
 def list_features(ctx: Context, limit: int = 100):
+    # P32: IFeatureManager.GetFeatures instead of linked-list traversal
+    # (the linked-list API is member-not-found over COM on some installs).
     out = []
-    feat = sw_get(ctx.model, "FirstFeature")
-    guard = 0
-    while feat is not None and len(out) < int(limit) and guard < 5000:
-        guard += 1
+    feats = list(ctx.model.FeatureManager.GetFeatures(True) or [])
+    for feat in feats:
+        if len(out) >= int(limit):
+            break
         try:
             tn = sw_get(feat, "GetTypeName2")
-        except Exception:  # noqa: BLE001 — older SW: GetTypeName2 may be absent
+        except Exception:  # noqa: BLE001
             try:
                 tn = sw_get(feat, "GetTypeName")
             except Exception:  # noqa: BLE001
                 tn = ""
-        if tn not in ("HistoryFolder", "SensorFolder", "DocsFolder", "DetailCabinet"):
-            try:
-                out.append({
-                    "name": sw_get(feat, "Name"),
-                    "type": tn,
-                    "suppressed": bool(sw_get(feat, "IsSuppressed")),
-                })
-            except Exception:  # noqa: BLE001 — skip a feature whose members won't read
-                pass
-        feat = sw_get(feat, "GetNextFeature")
+        if tn in ("HistoryFolder", "SensorFolder", "DocsFolder", "DetailCabinet"):
+            continue
+        try:
+            out.append({
+                "name": sw_get(feat, "Name"),
+                "type": tn,
+                "suppressed": bool(sw_get(feat, "IsSuppressed")),
+            })
+        except Exception:  # noqa: BLE001 — skip a feature whose members won't read
+            continue
     return {"count": len(out), "features": out}
 
 

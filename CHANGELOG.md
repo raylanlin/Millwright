@@ -6,6 +6,54 @@
 
 ## [Unreleased]
 
+## [0.2.30] - 2026-07-24
+
+### Fixed (P32 — extrude/特征树根治：GetFeatures + 手工建模顺序)
+
+**诊断**
+
+视觉链路已全通、`new_part` 已正常。剩余 `extrude` / `list_features`
+同一根因：这台 SW 的 COM 解析不到 `FirstFeature`（-2147352573，早绑/动态
+都不行），特征遍历全挂。
+
+### 修复（三层）
+
+1. **手工建模顺序**（用户洞察）：extrude / cut_extrude / revolve **不再先
+   退草图**——有活动草图就直接拉伸（SW 用活动草图并自动退出，与 UI 操作
+   一致）；仅当草图已退出时才按名字选择。**画完即拉伸的主流程从此
+   完全不依赖特征树 API**。
+2. **退出后的选择**：优先 `sketch` 参数 → 会话暂存的 `last_sketch`
+   （start_sketch 现在会记录）→ GetFeatures 找最后一个草图。
+3. **特征遍历**：`list_features` / `_find_feature` / fillet 全家改走
+   `IFeatureManager.GetFeatures(True)`（文档化、早绑友好、一次拿全树）。
+
+### Files changed (3 + 1 手改)
+
+- `sidecar/sw_agent/tools/feature.py` (OVR) — 三层修复，含 P31 全部
+- `sidecar/sw_agent/tools/query.py` (OVR) — list_features 走 GetFeatures
+- `sidecar/sw_agent/tools/sketch.py` (OVR) — start_sketch 记录 last_sketch
+- `sidecar/sw_agent/tools/feature.py` (手改 1 处语法错)
+  - 第 62 行 `raise SWError    if not name:` 是 P32 zip 包里的 copy-paste
+    错（`if not name:` 检查行 + `raise SWError(...)` 行被 merge 成一行），
+    直接 AST SyntaxError，连 pytest collection 都进不去。手改拆成两行。
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 重要部署注意（Raylan 2026-07-24 19:57）
+sidecar 在 `extraResources`，改动必须**重打 installer 并重新安装**才生效——
+纯 build 不刷新 resources（v0.2.29 P31 装的旧 sidecar 缺 P32 三层修复）。
+
+### 装机回归（重装后）
+1. 「画一个直径 40 高 20 的圆柱」→ 草图激活状态直接 extrude（主路径，
+   首个位置参数真实验证）
+2. 先退草图再说「拉伸 20」→ 走 last_sketch 选择，同样成功
+3. 「列出特征树」→ 返回列表（GetFeatures）
+4. 加工链：「顶面挖直径 10 通孔」→ cut_extrude
+
 ## [0.2.29] - 2026-07-24
 
 ### Fixed (P31 — 部署核对 + PNG 截图)
@@ -890,6 +938,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.30]: https://github.com/raylanlin/Millwright/compare/v0.2.29...v0.2.30
 [0.2.29]: https://github.com/raylanlin/Millwright/compare/v0.2.28...v0.2.29
 [0.2.28]: https://github.com/raylanlin/Millwright/compare/v0.2.25...v0.2.28
 [0.2.25]: https://github.com/raylanlin/Millwright/compare/v0.2.24...v0.2.25
