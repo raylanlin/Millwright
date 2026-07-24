@@ -34,6 +34,34 @@ def _exit_sketch_if_open(ctx: Context):
         ctx.sketch_mgr.InsertSketch(True)
 
 
+# P29: extrude/cut/revolve/feature pattern require a part document. In an assembly,
+# the same sketch types become block-sketches — the COM call returns None and the
+# generic "closed sketch" error confuses users. Check doc type first; if it's
+# not a part, raise a precise diagnostic. Also selects the profile sketch under
+# the FeatureManager so FeatureExtrusion3 / FeatureCut4 / FeatureRevolve2
+# attach to the right one (some SolidWorks versions don't auto-attach to
+# ActiveSketch for these calls).
+_DOC_PART = 1
+
+
+def _select_profile_sketch(ctx: Context) -> object:
+    """Return the active profile sketch for FeatureExtrusion3 etc., or raise.
+    Must be called from a part document; assembly/drawing documents can't extrude.
+    """
+    doc_type = sw_get(ctx.model, "GetType")
+    if doc_type != _DOC_PART:
+        raise SWError(
+            f"extrude/cut/revolve require a part document (active doc type is "
+            f"{doc_type}); switch to or create a part."
+        )
+    sk = ctx.sketch_mgr.ActiveSketch
+    if sk is None:
+        raise SWError("no active sketch; call start_sketch + draw a profile first.")
+    # Select it so the manager picks it up
+    ctx.model.Extension.SelectByID2(sk.Name, "SKETCH", 0, 0, 0, False, 0, None, 0)
+    return sk
+
+
 def _find_feature(ctx: Context, name: str):
     # P16: FirstFeature/GetNextFeature/Name may be method OR propget depending on SW version
     feat = sw_get(ctx.model, "FirstFeature")
@@ -56,6 +84,7 @@ def _find_feature(ctx: Context, name: str):
 )
 def extrude(ctx: Context, depth: float, both_dir: bool = False):
     _exit_sketch_if_open(ctx)
+    _select_profile_sketch(ctx)
     d = units.mm(depth)
     # VERIFY: FeatureExtrusion3 parameter slots (24 args) — verify against macro recorder for the target version
     feat = ctx.feat_mgr.FeatureExtrusion3(
@@ -78,6 +107,7 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False):
 )
 def cut_extrude(ctx: Context, depth: float, through_all: bool = False):
     _exit_sketch_if_open(ctx)
+    _select_profile_sketch(ctx)
     d = units.mm(depth)
     # VERIFY: FeatureCut4 parameter slots (25 args)
     feat = ctx.feat_mgr.FeatureCut4(
@@ -97,6 +127,7 @@ def cut_extrude(ctx: Context, depth: float, through_all: bool = False):
 )
 def revolve(ctx: Context, angle: float = 360):
     _exit_sketch_if_open(ctx)
+    _select_profile_sketch(ctx)
     a = units.deg(angle)
     # VERIFY: FeatureRevolve2 parameter slots
     feat = ctx.feat_mgr.FeatureRevolve2(

@@ -6,6 +6,67 @@
 
 ## [Unreleased]
 
+## [0.2.29] - 2026-07-24
+
+### Fixed (P31 — 部署核对 + PNG 截图)
+
+**背景**
+
+最新测试暴露真问题：装机版 sidecar 是旧文件——P30(轮数24)、P29 的
+agent-loop(错误文本)已生效，但 **sidecar 侧的 P27/P29 没进包**：
+- `new_part` 还在创建「装配体5」→ P27 的枚举修复+类型校验不在
+- 装配体里 extrude 报 "closed sketch" 而不是 "requires a part document" → P29 的 feature.py 不在
+
+### P27 fix — document.py DOC_PART 枚举值
+`_PREF = {DOC_PART: 9, ...}` → `{DOC_PART: 8, ...}`。SW 枚举里
+`swDefaultTemplatePart` 是 8，原写 9 是错的，所以 new_part 用错的
+template key 取到了 assembly 的默认值。
+
+### P29 fix #1 — feature.py 增加 doc-type 校验
+新增 `_select_profile_sketch(ctx)` 助手：
+- 校验 `ctx.model.GetType()` 必须是 DOC_PART（装配体/工程图不能 extrude/cut/revolve）
+- 校验有 `ActiveSketch`
+- 调 `SelectByID2` 选中当前草图（部分 SW 版本 FeatureExtrusion3 不会自动挂当前草图）
+- extrude / cut_extrude / revolve 三个工具在原 `_exit_sketch_if_open` 之后立即调用它
+- 失败时给出精确诊断（"extrude/cut/revolve require a part document (active doc type is N)..."），
+  而不是 raw 的 "closed sketch"
+
+### P29 fix #2 — bridge.py 成员降级
+EnsureDispatch 失败时不再直接 `return raw`（裸 IDispatch 在 Python 属性
+查找时会误把 GetType 这种 propget 当方法 → 调用时返回 int → "int object is not callable"），
+改走 `win32com.client.dynamic.Dispatch(raw)`：强制 late-bound dispatch 同时保留
+IDispatch 类型信息，方法解析正确。
+
+### BMP → PNG — 内置 Python 加 pillow
+`scripts/prepare-python.ps1`：
+- `pip install pywin32` → `pip install pywin32 pillow`
+- 幂等检查加 `Test-Path "$dest/Lib/site-packages/PIL"`
+- 自验证加 `import PIL; print('pywin32 + pillow OK')`
+- 构建机上若已有 vendor/python 缓存（缺 pillow），幂等检查会发现 → 自动 `pip install pillow`
+
+### Files changed (4)
+- `sidecar/sw_agent/tools/document.py` (手改) — `_PREF.DOC_PART: 9 → 8`
+- `sidecar/sw_agent/tools/feature.py` (手改) — 新增 `_select_profile_sketch()` + extrude/cut/revolve 三处调用
+- `sidecar/sw_agent/bridge.py` (手改) — EnsureDispatch 失败走 `dynamic.Dispatch()`
+- `scripts/prepare-python.ps1` (OVR) — 加 pillow + 自验证
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 重要部署注意（Raylan 2026-07-24 19:39）
+sidecar 在 `extraResources`，改动必须**重打 installer 并重新安装**才生效——
+纯 build 不刷新 resources。
+构建机上若已有 vendor/python 缓存，**先删 `vendor/python` 再跑 ps1**，
+幂等检查现在会自动装 pillow。
+
+### 装机回归（重装后）
+1. 新建零件 → 应出「零件N」（不是「装配体N」）
+2. 圆柱链路 → start_sketch + sketch_circle + extrude 一气走通
+3. analyze_view → 截图应是 PNG（不是 BMP），发给 MiniMax 不再 400 format-not-allowed
+
 ## [0.2.28] - 2026-07-24
 
 ### Added (P30 — 最大工具轮数可配置，默认 24)
@@ -829,6 +890,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.29]: https://github.com/raylanlin/Millwright/compare/v0.2.28...v0.2.29
 [0.2.28]: https://github.com/raylanlin/Millwright/compare/v0.2.25...v0.2.28
 [0.2.25]: https://github.com/raylanlin/Millwright/compare/v0.2.24...v0.2.25
 [0.2.24]: https://github.com/raylanlin/Millwright/compare/v0.2.23...v0.2.24

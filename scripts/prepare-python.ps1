@@ -6,7 +6,7 @@ $ver = "3.11.9"
 $dest = "vendor/python"
 
 if (Test-Path "$dest/python.exe") {
-  if (Test-Path "$dest/Lib/site-packages/win32com") {
+  if ((Test-Path "$dest/Lib/site-packages/win32com") -and (Test-Path "$dest/Lib/site-packages/PIL")) {
     Write-Host "vendor/python 已就绪，跳过"; exit 0
   }
 }
@@ -24,14 +24,14 @@ $pth = Get-ChildItem "$dest/python*._pth" | Select-Object -First 1
 Add-Content $pth.FullName "Lib\site-packages"
 
 # 装 pip + pywin32
-Write-Host "安装 pip + pywin32..."
+Write-Host "安装 pip + pywin32 + pillow..."
 Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile "$env:TEMP/get-pip.py"
 & "$dest/python.exe" "$env:TEMP/get-pip.py" --no-warn-script-location
-& "$dest/python.exe" -m pip install pywin32 --no-warn-script-location
+& "$dest/python.exe" -m pip install pywin32 pillow --no-warn-script-location
 
 # pywin32 的核心 DLL 要放到解释器旁边才能被找到（embeddable 不跑 postinstall）
 Copy-Item "$dest/Lib/site-packages/pywin32_system32/*.dll" $dest -Force
 
 # 验证
-& "$dest/python.exe" -c "import win32com.client; print('pywin32 OK')"
+& "$dest/python.exe" -c "import win32com.client; import PIL; print('pywin32 + pillow OK')"
 Write-Host "vendor/python 就绪（约 60MB）"

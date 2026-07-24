@@ -88,7 +88,18 @@ class Context:
                 from win32com.client import gencache
                 return gencache.EnsureDispatch(raw)
             except Exception:  # noqa: BLE001 — makepy unavailable → degrade to dynamic dispatch
-                return raw
+                # P29: even when EnsureDispatch fails, wrap in dynamic.Dispatch so the
+                # returned object exposes IDispatch methods/properties correctly. Without
+                # this, raw IDispatch falls back through ambiguous Python attribute lookups
+                # and members like GetType (a property under early binding) get resolved
+                # as a method returning an int — the call site then crashes with
+                # 'int' object is not callable. dynamic.Dispatch forces late-bound dispatch
+                # while preserving the IDispatch type info for method resolution.
+                try:
+                    import win32com.client.dynamic  # noqa: F401
+                    return win32com.client.dynamic.Dispatch(raw)
+                except Exception:  # noqa: BLE001
+                    return raw
         # P24: report the BARE-ProgID error (the meaningful one) — the old code
         # reported the LAST versioned ProgID's error ("invalid class string" for an
         # unregistered .25), masking the real failure cause.

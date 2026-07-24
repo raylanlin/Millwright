@@ -12,7 +12,10 @@ from ..registry import tool
 from ..bridge import Context, SWError, DOC_PART, DOC_ASSEMBLY, DOC_DRAWING, doc_type_name, sw_get
 
 # swUserPreferenceStringValue_e: default templates
-_PREF = {DOC_PART: 9, DOC_ASSEMBLY: 10, DOC_DRAWING: 11}
+# P27: fix DOC_PART key (was 9 = swDefaultTemplatePart; correct value is 8 =
+# swUserPreferenceStringValue_e.swDefaultTemplatePart — SW enum has these as 8/10/11,
+# the 9 was wrong and produced 装配体 instead of 零件).
+_PREF = {DOC_PART: 8, DOC_ASSEMBLY: 10, DOC_DRAWING: 11}
 _EXT_TO_TYPE = {".sldprt": DOC_PART, ".sldasm": DOC_ASSEMBLY, ".slddrw": DOC_DRAWING}
 
 
