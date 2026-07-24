@@ -83,6 +83,15 @@ const VIRTUAL_TOOLS = [
   },
 ];
 
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === 'object') {
+    const o = e as any;
+    return o.message || o.error?.message || JSON.stringify(o);
+  }
+  return String(e);
+}
+
 function clip(s: string): string {
   return s && s.length > TOOL_RESULT_MAX ? s.slice(0, TOOL_RESULT_MAX) + '…(truncated)' : s;
 }
@@ -103,7 +112,7 @@ export async function runSidecarAgent(
   sidecar: SWSidecar,
   opts: SidecarAgentOptions,
 ): Promise<string> {
-  const maxRounds = opts.maxRounds ?? 12;
+  const maxRounds = opts.maxRounds ?? 24; // P30: 12 was too tight for real modeling sessions
   let history: ChatMessage[] = [...messages];
   let finalText = '';
   let backupDone = false;
@@ -253,7 +262,7 @@ async function handleAnalyzeView(
     try {
       dataUrl = opts.imageToDataUrl(cap.data.image_path, cap.data.format);
     } catch (e) {
-      return { resultText: `图像读取失败：${e instanceof Error ? e.message : String(e)}` };
+      return { resultText: `图像读取失败：${errText(e)}` };
     }
   }
 
@@ -281,7 +290,8 @@ async function handleAnalyzeView(
       const tag = reused ? '【视觉分析·同一截图】' : '【视觉分析】';
       return { resultText: `${tag}${clip(desc)}`, capture: dataUrl };
     } catch (e) {
-      return { resultText: `视觉模型分析失败：${e instanceof Error ? e.message : String(e)}` };
+      // P29: e may be an LLMErrorInfo object — String(e) printed "[object Object]" and hid the real cause
+      return { resultText: `视觉模型分析失败：${errText(e)}` };
     }
   }
 

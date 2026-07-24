@@ -376,6 +376,18 @@ export function SettingsModal({
           }}
         />
 
+        {/* P30: Max agent rounds */}
+        <label style={labelStyle}>{tr('settings.maxRounds')}</label>
+        <input
+          type="number"
+          min={4}
+          max={100}
+          value={draft.maxRounds ?? 24}
+          onChange={(e) => update('maxRounds', Math.max(4, Math.min(100, Number(e.target.value) || 24)))}
+          style={{ ...fieldStyle, marginBottom: 4, width: 120 }}
+        />
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 16px 1px' }}>{tr('settings.maxRoundsHint')}</p>
+
         {/* P28: Vision understanding */}
         <label style={labelStyle}>{tr('settings.vision')}</label>
         <label

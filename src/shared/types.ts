@@ -24,6 +24,8 @@ export interface LLMConfig {
   mainModelVision?: boolean;
   /** P5: optional context-window override in tokens (takes precedence over the built-in per-model budget table) */
   contextWindow?: number;
+  /** P30: agent 单次会话最大工具调用轮数(默认 24) */
+  maxRounds?: number;
 }
 
 /** P3: configuration for a dedicated vision model (OpenAI-compatible multimodal) */

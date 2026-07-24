@@ -6,6 +6,46 @@
 
 ## [Unreleased]
 
+## [0.2.28] - 2026-07-24
+
+### Added (P30 — 最大工具轮数可配置，默认 24)
+
+**变更**
+
+- `agent-loop-sidecar.ts`：默认轮数 12 → **24**（含 P29 全部，直接覆盖）
+- `SettingsModal.tsx`：设置面板新增「最大工具轮数」数字输入（4–100，默认 24）
+
+**手改 3 处**
+
+- `src/shared/types.ts`：`LLMConfig` 加 `maxRounds?: number`
+- `src/main/ipc/handlers.ts`：`runSidecarAgent` 改用 `payload.config.maxRounds ?? 24`（VBS 回退路径同步改 `?? 12`）
+- `src/renderer/i18n/strings.ts`：新词条 `settings.maxRounds` + `settings.maxRoundsHint` (zh + en)
+
+### Files changed (5)
+- `src/main/agent/agent-loop-sidecar.ts` (OVR) — 含 P29 全部 + 默认 24
+- `src/renderer/components/SettingsModal.tsx` (OVR) — 含 P28 全部 + maxRounds 输入框
+- `src/shared/types.ts` (手改) — `LLMConfig.maxRounds?: number`
+- `src/main/ipc/handlers.ts` (手改) — 两处 `payload.config.maxRounds ?? 24/12`
+- `src/renderer/i18n/strings.ts` (手改) — `settings.maxRounds` 词条 (zh + en)
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 跳号说明
+v0.2.25 直接跳到 v0.2.28。中间 .26/.27 是内部小修包（settings maxRounds 链路同步测试 + Electron 内部调整），与本主线无关——Raylan 2026-07-24 19:20 紧急修复发布指示直接打 v0.2.28。
+
+### 视觉模型配置提醒（Raylan 2026-07-24 19:21 纠正）
+**MiniMax-M3 是原生多模态模型**（文本+图像+视频混合训练），收图没问题，不需要换视觉模型。建议直接用 M3 做主模型 + 勾选「主模型支持视觉理解」，截图进 P18 主路径（无图生文损耗），连备用视觉模型都省了。
+
+若 [object Object] 失败，多半是接口层（不是模型能力）：
+- Base URL：MiniMax OpenAI 兼容端点是 `https://api.minimax.io/v1`（国内版 `https://api.minimaxi.com/v1`），vision 调用会拼 `/chat/completions`，别多带或少带 `/v1`
+- API Key / 模型名拼写
+
+P29 之后报错会带真实原因（401 / 404 / model not found 一看便知）。
+
 ## [0.2.25] - 2026-07-24
 
 ### Added (P28 — 剩余待办打包：视觉模型配置区 + inline 确认卡片 + agent 问候语)
@@ -789,6 +829,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.28]: https://github.com/raylanlin/Millwright/compare/v0.2.25...v0.2.28
 [0.2.25]: https://github.com/raylanlin/Millwright/compare/v0.2.24...v0.2.25
 [0.2.24]: https://github.com/raylanlin/Millwright/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/raylanlin/Millwright/compare/v0.2.22...v0.2.23

@@ -270,7 +270,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       if (sidecarReady) {
         const text = await runSidecarAgent(adapter, payload.messages, sidecar, {
           requestId,
-          maxRounds: 12,
+          maxRounds: payload.config.maxRounds ?? 24,
           signal: controller.signal,
           onEvent: send,
           confirmTool: (call) => requestUserConfirm(e.sender, requestId, call, send),
@@ -288,7 +288,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       // Only when the sidecar is unavailable do we take the legacy VBS path
       const text = await runAgentLoop(adapter, payload.messages, scriptEngine, {
         requestId,
-        maxRounds: 8,
+        maxRounds: payload.config.maxRounds ?? 12,
         signal: controller.signal,
         onEvent: send,
         backup: async () => {
