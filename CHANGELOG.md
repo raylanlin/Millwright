@@ -6,6 +6,105 @@
 
 ## [Unreleased]
 
+## [0.2.23] - 2026-07-24
+
+### Fixed (P24 — 连接线程初始化 + 真实错误上报)
+
+**症状**
+
+v0.2.22 截图：`list_components` 报 `Cannot connect to SolidWorks ...
+(-2147221005, '无效的类字符串')`，而侧栏绿点（VBS 通道）正常。
+
+**两个问题**
+
+1. **错误上报误导**：`_connect` 只保留**最后一个** ProgID 的错误——
+   `.25` 在任何机器都没注册，报"无效的类字符串"是必然的，掩盖了裸
+   `SldWorks.Application` 的真实失败原因。现在收集全部错误、报**第一个**
+   （裸 ProgID）的。
+2. **线程未初始化 COM**：`_connect` 所在线程没有防御性 `CoInitialize()`。
+   若 RPC 调用线程从未初始化 COM，所有 GetActiveObject 都会以怪异错误
+   失败。现在 `_connect` 开头防御性初始化本线程。
+
+### Fixed (P25 — 侧栏状态栏文档类型本地化)
+
+**问题**：左上角状态栏显示 `SolidWorks · assembly`——直接渲染了 raw
+的 `activeDocumentType`，没走 `docType.*` 词条（下方文档卡片是本地化的，
+这行漏了）。
+
+**修复**：在 `Sidebar.tsx` 加 `docTypeLabel(dt)` 助手，状态栏 `title` +
+visible text 都走 `tr(\`docType.${dt}\`)`。`docType.part/assembly/drawing/unknown`
+词条已存在，`strings.ts` 不用动。
+
+效果：
+- 中文界面：`SolidWorks · 装配体`
+- 英文界面：`SolidWorks · Assembly`
+
+### Files changed (3)
+- `sidecar/sw_agent/bridge.py` (OVR) — P24 防御性 `CoInitialize()` + 收集全部错误报首个 `(primary: ...)`
+- `sidecar/sw_agent/server.py` (OVR，与 P23 同 hash — P24 没改 server.py)
+- `src/renderer/components/Sidebar.tsx` (手改 1 处) — P25 `docTypeLabel()` + 状态栏本地化
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 装机回归（重点）
+- "把动力套装解除压缩" → `list_components` 正常返回组件树
+- **若仍失败**：错误信息这次会带出裸 ProgID 的真实原因（`primary: ...`），
+  直接把那行发我——常见值对照：
+  - `拒绝访问` / `Access denied` → UAC 权限不一致
+  - `操作无法使用`（MK_E_UNAVAILABLE）→ SW 在跑但 ROT 没登记（SW 刚启动未就绪，或权限）
+  - `无效的类字符串` → ProgID 未注册（SW 安装注册表问题）
+- 侧栏状态栏：中文显示 `SolidWorks · 装配体`，英文 `SolidWorks · Assembly`（P25）
+- 切零件/装配体/工程图 → 状态栏后缀跟着变且本地化
+- 无文档 → 只显示 `SolidWorks`（行为不变）
+
+## [0.2.22] - 2026-07-24
+
+### Fixed (P23 — 预热线程 COM 跨线程回归，紧急)
+
+**症状**
+
+v0.2.21 装机：UI 分组卡片正常（✅），但所有工具报
+`SldWorks.Application.ActiveDoc` —— `list_components` 失败、
+`analyze_view` 截屏失败。Python 工具**全不可用**。
+
+**根因**
+
+P17 的预热在**后台线程**里连接 COM 并把对象缓存进共享 `Context._app`。
+COM 对象是单元线程模型（STA），不能跨线程使用——主 RPC 线程随后
+访问 `ctx.model`（→ `ActiveDoc`）全部报 com_error。P17 之前没这问题，
+因为连接总是在 RPC 线程内建立。
+
+**修复**
+
+预热线程改为：自己 `CoInitialize()` → 建**一次性**连接（只为触发
+makepy 缓存生成，这是慢的、且持久化到磁盘的部分）→ 用完丢弃 →
+`CoUninitialize()`。**绝不写共享 ctx**。主线程首次真实调用时重新
+连接，因缓存已备好而很快。
+
+### Files changed (1)
+- `sidecar/sw_agent/server.py` (OVR)
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `pytest sidecar/tests` ✅ 13/13
+
+### 装机回归（重点）
+- "把动力套装解除压缩"：`list_components` 正常返回组件树（v0.2.21
+  报 ActiveDoc 错的场景）
+- 首次工具调用仍不卡（预热的 gen_py 磁盘缓存对主线程连接同样有效）
+- SW 未开时启动 → 无异常
+
+### 跳号说明
+本版本从 v0.2.15 直接跳到 v0.2.22。中间 .16–.21 是社区分发链路里的
+分叉/测试包，与本主线无关——Raylan 2026-07-24 16:41 紧急修复发布指示
+直接打 v0.2.22。
+
 ## [0.2.15] - 2026-07-24
 
 ### Added (P17→P22 合并版)
@@ -612,6 +711,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.23]: https://github.com/raylanlin/Millwright/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/raylanlin/Millwright/compare/v0.2.15...v0.2.22
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14

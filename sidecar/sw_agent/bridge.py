@@ -69,12 +69,19 @@ class Context:
     # ---- Connection ----
     def _connect(self):
         import win32com.client
-        last_err: Exception | None = None
+        # P24: defensively initialize COM on THIS thread. If the calling thread was
+        # never CoInitialize'd, every GetActiveObject fails with confusing errors.
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except Exception:  # noqa: BLE001 — already initialized is fine
+            pass
+        errors: list[str] = []
         for progid in _PROGIDS:
             try:
                 raw = win32com.client.GetActiveObject(progid)
             except Exception as e:  # noqa: BLE001
-                last_err = e
+                errors.append(f"{progid}: {e}")
                 continue
             # P15: prefer early binding so members resolve from the typelib.
             try:
@@ -82,9 +89,13 @@ class Context:
                 return gencache.EnsureDispatch(raw)
             except Exception:  # noqa: BLE001 — makepy unavailable → degrade to dynamic dispatch
                 return raw
+        # P24: report the BARE-ProgID error (the meaningful one) — the old code
+        # reported the LAST versioned ProgID's error ("invalid class string" for an
+        # unregistered .25), masking the real failure cause.
+        primary = errors[0] if errors else "unknown"
         raise SWError(
             "Cannot connect to SolidWorks: make sure SolidWorks is running and has been opened at least once. "
-            f"({last_err})"
+            f"(primary: {primary})"
         )
 
     @property

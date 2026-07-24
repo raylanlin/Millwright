@@ -47,6 +47,11 @@ export function Sidebar({
 }: Props) {
   const tr = useT();
 
+  // P25: localize activeDocumentType through docType.* strings (sidebar status bar
+  // used to render the raw enum, e.g. 'assembly' instead of the localized label).
+  const docTypeLabel = (dt?: string | null) =>
+    dt ? tr(`docType.${dt}`) : tr('sw.noDoc');
+
   const TABS = useMemo<{ key: TabKey; icon: string; label: string }[]>(
     () => [
       { key: 'chat', icon: '💬', label: tr('tab.chat') },
@@ -104,13 +109,13 @@ export function Sidebar({
               }}
               title={
                 swStatus.connected
-                  ? `SolidWorks ${swStatus.version ?? ''} · ${swStatus.activeDocumentType ?? tr('sw.noDoc')}`
+                  ? `SolidWorks ${swStatus.version ?? ''} · ${docTypeLabel(swStatus.activeDocumentType)}`
                   : tr('sw.notConnected')
               }
             >
               SolidWorks
               {swStatus.connected && swStatus.activeDocumentType
-                ? ` · ${swStatus.activeDocumentType}`
+                ? ` · ${docTypeLabel(swStatus.activeDocumentType)}`
                 : ''}
             </span>
           </div>
