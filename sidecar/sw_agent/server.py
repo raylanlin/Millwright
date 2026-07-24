@@ -6,12 +6,17 @@ Methods: ping / list_tools / call.
 Importing tools.* triggers @tool decorator registration.
 
 P17: after emitting the ready handshake, warm up the COM early-binding cache
-in a BACKGROUND thread. The first EnsureDispatch call builds the SolidWorks
-typelib makepy cache (tens of seconds); doing it up-front, while the user is
-still reading the greeting, means the cache is usually ready by the time they
-send their first instruction — moving the one-time stall off the first tool
-call into idle startup time. Warmup failures are swallowed (SW may be closed);
-the real connection path stays the source of truth.
+in a BACKGROUND thread (the first EnsureDispatch builds the SolidWorks typelib
+makepy cache, tens of seconds).
+
+P23 fix: the warmup thread must NOT share its COM object with the RPC thread.
+COM objects are apartment-threaded — the P17 version cached the warm
+connection into the shared Context, and every later access from the main
+thread (ctx.model → ActiveDoc) failed with a cryptic com_error
+("SldWorks.Application.ActiveDoc"). The warmup now runs CoInitialize in its
+own thread, makes a THROWAWAY connection purely to trigger makepy generation
+(the slow, disk-persisted part), and discards it. The main thread's first
+real call re-connects quickly against the warmed cache.
 """
 from __future__ import annotations
 import json
@@ -39,20 +44,34 @@ def _write(obj: dict) -> None:
     sys.stdout.flush()
 
 
-def _warm_up(ctx: Context) -> None:
-    """Best-effort: trigger early-binding cache generation before the first tool call."""
+def _warm_up() -> None:
+    """Best-effort makepy warmup on a throwaway, thread-local connection.
+
+    Never touches the shared Context: COM objects must not cross threads.
+    """
     try:
-        ctx.sw  # property access runs GetActiveObject + gencache.EnsureDispatch
-    except Exception:  # noqa: BLE001 — SW may not be running yet; the real call path will report properly
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        Context().sw  # throwaway connect: GetActiveObject + EnsureDispatch → builds gen_py cache
+    except Exception:  # noqa: BLE001 — SW may not be running; the real call path will report properly
         pass
+    finally:
+        try:
+            import pythoncom
+            pythoncom.CoUninitialize()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def serve() -> None:
     ctx = Context()
     # Readiness signal (used by the Node side for handshake) — emit FIRST so warmup never delays it
     _write({"id": None, "ok": True, "data": {"ready": True, "tool_count": len(registry.TOOLS)}})
-    # P17: warm the COM/makepy cache in the background so the first tool call isn't the one that pays for it
-    threading.Thread(target=_warm_up, args=(ctx,), daemon=True).start()
+    # P17/P23: warm the makepy cache on a throwaway thread-local connection
+    threading.Thread(target=_warm_up, daemon=True).start()
     for raw in sys.stdin:
         raw = raw.strip()
         if not raw:
