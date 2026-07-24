@@ -6,6 +6,43 @@
 
 ## [Unreleased]
 
+## [0.2.25] - 2026-07-24
+
+### Added (P28 — 剩余待办打包：视觉模型配置区 + inline 确认卡片 + agent 问候语)
+
+#### 1. 设置面板视觉配置区（SettingsModal）
+新增「视觉理解」段：
+- 勾选「主模型支持视觉理解」→ AI 直接读 SolidWorks 截图（P18 主路径）
+- 未勾选时展开「备用视觉模型」三个字段（Base URL / API Key / 模型名，OpenAI 兼容），
+  全空 = 未配置。解决 deepseek 纯文本模型没地方配视觉的问题。
+
+#### 2. inline 确认卡片（替换 window.confirm 白框）
+破坏性工具（删特征/切除/抽壳/压缩）请求确认时，聊天内出现琥珀色确认卡
+（友好工具名 + 完整参数 + 允许/拒绝按钮），点击后卡片变为已允许/已拒绝
+状态，点击留痕；主进程 120s 超时默认拒绝逻辑不变。
+
+#### 3. agent 模式问候语
+替换 `app.greeting` 文案：不再说"点执行注入脚本"，改为描述工具直驱 +
+确认机制。
+
+### Files changed (4 + 3 手改)
+- `src/renderer/components/SettingsModal.tsx` (OVR) — 视觉理解段
+- `src/renderer/hooks/useLLM.ts` (OVR) — confirm_request 改推 confirm step；监听 `swcp-confirm` 事件回执主进程
+- `src/renderer/components/ChatMessage.tsx` (OVR) — 渲染 confirm step
+- `src/renderer/components/ConfirmCard.tsx` (NEW) — 琥珀色确认卡组件
+- `src/shared/types.ts` (手改) — `AgentStep.kind` union 加 `'confirm'` + `requestId?: string`
+- `src/renderer/i18n/strings.ts` (手改) — 6 个 vision 词条 + `app.greeting` agent 文案 (zh + en)
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
+### 装机回归
+- 设置 → 出现「视觉理解」段；勾选主模型视觉后备用区隐藏；填备用模型保存后 analyze_view 走图生文
+- 破坏性工具（删特征/切除/抽壳/压缩）→ 聊天内确认卡，允许/拒绝都正常回执；120s 不点默认拒绝
+- 新对话问候语为 agent 文案；确认卡与工具组正确交错渲染
+
 ## [0.2.24] - 2026-07-24
 
 ### Fixed (P26 — 绘图链路两处 COM 修复)
@@ -752,6 +789,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.25]: https://github.com/raylanlin/Millwright/compare/v0.2.24...v0.2.25
 [0.2.24]: https://github.com/raylanlin/Millwright/compare/v0.2.23...v0.2.24
 [0.2.23]: https://github.com/raylanlin/Millwright/compare/v0.2.22...v0.2.23
 [0.2.22]: https://github.com/raylanlin/Millwright/compare/v0.2.15...v0.2.22

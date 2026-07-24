@@ -59,6 +59,15 @@ export function SettingsModal({
     setTestStatus({ kind: 'idle' });
   };
 
+  // P28: update a field of the fallback vision model; all-empty → undefined (feature off)
+  const updateVision = (k: 'baseURL' | 'apiKey' | 'model', v: string) => {
+    setDraft((d) => {
+      const vm = { baseURL: '', apiKey: '', model: '', ...(d.visionModel ?? {}), [k]: v };
+      const empty = !vm.baseURL && !vm.apiKey && !vm.model;
+      return { ...d, visionModel: empty ? undefined : vm };
+    });
+  };
+
   const handleProtocol = (p: 'anthropic' | 'openai') => {
     setDraft((d) => ({
       ...d,
@@ -366,6 +375,60 @@ export function SettingsModal({
             marginBottom: 22,
           }}
         />
+
+        {/* P28: Vision understanding */}
+        <label style={labelStyle}>{tr('settings.vision')}</label>
+        <label
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
+            cursor: 'pointer', color: t.textSecondary, fontSize: 13,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={!!draft.mainModelVision}
+            onChange={(e) => update('mainModelVision', e.target.checked)}
+            style={{ cursor: 'pointer' }}
+          />
+          {tr('settings.mainModelVision')}
+        </label>
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '0 0 12px 1px' }}>
+          {tr('settings.mainModelVisionHint')}
+        </p>
+        {!draft.mainModelVision && (
+          <div
+            style={{
+              border: `1px solid ${t.cardBorder}`, borderRadius: 8,
+              padding: '12px 14px', marginBottom: 22, background: t.cardAlt,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 3 }}>
+              {tr('settings.visionModel')}
+            </div>
+            <p style={{ color: t.textMuted, fontSize: 11, margin: '0 0 10px' }}>
+              {tr('settings.visionModelHint')}
+            </p>
+            <input
+              value={draft.visionModel?.baseURL ?? ''}
+              onChange={(e) => updateVision('baseURL', e.target.value)}
+              placeholder="Base URL (OpenAI-compatible)"
+              style={{ ...fieldStyle, marginBottom: 8 }}
+            />
+            <input
+              type="password"
+              value={draft.visionModel?.apiKey ?? ''}
+              onChange={(e) => updateVision('apiKey', e.target.value)}
+              placeholder="API Key"
+              style={{ ...fieldStyle, marginBottom: 8 }}
+            />
+            <input
+              value={draft.visionModel?.model ?? ''}
+              onChange={(e) => updateVision('model', e.target.value)}
+              placeholder={tr('settings.visionModelName')}
+              style={{ ...fieldStyle, marginBottom: 2 }}
+            />
+          </div>
+        )}
 
         {/* Test status info */}
         {testStatus.kind === 'error' && (

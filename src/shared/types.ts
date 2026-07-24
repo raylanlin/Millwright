@@ -71,7 +71,7 @@ export interface ChatMessage {
 /** P17-P22: one step inside an agent turn (assistant message).
  *  `kind:'text'` carries the prose; `kind:'tool'` is one tool invocation. */
 export interface AgentStep {
-  kind: 'text' | 'tool';
+  kind: 'text' | 'tool' | 'confirm';
   /** text step: the prose fragment (may be empty for tool-only turns) */
   text?: string;
   /** tool step: tool call id (matches ToolCall.id) */
@@ -84,6 +84,8 @@ export interface AgentStep {
   status?: 'running' | 'ok' | 'error' | 'rejected';
   /** tool step: formatted result / error message */
   result?: string;
+  /** P28: confirm step's parent agent requestId (for click → IPC 回执) */
+  requestId?: string;
 }
 
 export interface LLMUsage {

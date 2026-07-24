@@ -152,13 +152,20 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           resolveToolStep(ev.toolCall);
           break;
         case 'confirm_request': {
+          // P28: inline confirm card instead of window.confirm — push a 'confirm'
+          // step; ConfirmCard resolves it via the 'swcp-confirm' window event below.
           const tc = ev.toolCall;
-          const pv = tc?.parameters ? JSON.stringify(tc.parameters) : '';
-          const ok = window.confirm(
-            `AI 想执行可能修改模型的操作：\n\n${tc?.name} ${pv}\n\n是否允许？`,
-          );
-          const callId = tc?.id ?? tc?.name;
-          window.api.llm.confirmReply(ev.requestId, callId, ok);
+          updateAssistant((m) => ({
+            ...m,
+            steps: [...(m.steps ?? []), {
+              kind: 'confirm',
+              id: tc?.id ?? tc?.name,
+              name: tc?.name,
+              params: tc?.parameters,
+              status: 'running',
+              requestId: ev.requestId,
+            }],
+          }));
           break;
         }
         case 'done':
@@ -175,6 +182,27 @@ export function useLLM({ config, initial }: UseLLMOptions) {
     });
     return off;
   }, [appendText, pushToolStep, resolveToolStep, pushNote]);
+
+  // P28: resolve inline confirm cards (dispatched by ConfirmCard — avoids prop drilling)
+  useEffect(() => {
+    const onConfirm = (e: Event) => {
+      const { requestId, callId, approved } = (e as CustomEvent).detail;
+      window.api.llm.confirmReply(requestId, callId, approved);
+      updateAssistant((m) => {
+        const steps = [...(m.steps ?? [])];
+        for (let i = steps.length - 1; i >= 0; i--) {
+          const s = steps[i];
+          if (s.kind === 'confirm' && s.id === callId && s.status === 'running') {
+            steps[i] = { ...s, status: approved ? 'ok' : 'rejected' };
+            break;
+          }
+        }
+        return { ...m, steps };
+      });
+    };
+    window.addEventListener('swcp-confirm', onConfirm);
+    return () => window.removeEventListener('swcp-confirm', onConfirm);
+  }, [updateAssistant]);
 
   const send = useCallback(
     async (userInput: string) => {

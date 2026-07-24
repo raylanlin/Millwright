@@ -10,6 +10,7 @@ import type { ChatMessage as ChatMsg, ScriptResult, AgentStep } from '../../shar
 import type { ThemeTokens } from '../themes';
 import { useT } from '../i18n/LocaleContext';
 import { ToolCallGroup } from './ToolCallGroup';
+import { ConfirmCard } from './ConfirmCard';
 
 interface Props {
   msg: ChatMsg;
@@ -139,6 +140,9 @@ function renderSteps(steps: AgentStep[], t: ThemeTokens) {
   steps.forEach((s, i) => {
     if (s.kind === 'tool') {
       buf.push(s);
+    } else if (s.kind === 'confirm') {
+      flush(i);
+      els.push(<ConfirmCard key={i} step={s} t={t} />);
     } else {
       flush(i);
       if (s.text) els.push(<span key={i} style={{ whiteSpace: 'pre-wrap' }}>{s.text}</span>);

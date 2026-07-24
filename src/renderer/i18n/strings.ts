@@ -15,7 +15,7 @@ type Dict = Record<string, string>;
 const zh: Dict = {
   // App
   'app.greeting':
-    '你好，我是 Millwright。\n\n先到左下角「设置」配置 AI 服务商（Anthropic / OpenAI / DeepSeek / Kimi / MiniMax …），之后就能用自然语言驱动 SolidWorks。\n\n当 AI 回复里包含代码，你可以直接点「执行」把脚本注入 SolidWorks，或「复制」到自己的宏环境中用。',
+    '你好，我是 Millwright。\n\n先到左下角「设置」配置 AI 服务商，之后用自然语言告诉我要做什么——我会直接调用 SolidWorks 工具执行（画草图、建特征、改尺寸、装配、导出、查询都可以）。\n\n涉及修改模型的操作会先弹出确认卡片，你点「允许」才会执行。',
   'app.clearChat': '清空对话',
   'app.riskConfirm': '检测到潜在风险：\n\n{issues}\n\n仍要继续执行吗？',
   // Tabs (nav short labels)
@@ -82,6 +82,12 @@ const zh: Dict = {
   'settings.optional': '（可选）',
   'settings.systemPromptPlaceholder': '留空使用内置默认提示词（SolidWorks 自动化专家）',
   'settings.testing': '测试中…',
+  'settings.vision': '视觉理解',
+  'settings.mainModelVision': '主模型支持视觉理解',
+  'settings.mainModelVisionHint': '勾选后 AI 可直接查看 SolidWorks 截图(仅在你的主模型确实支持图像输入时勾选,否则视觉请求会报错)',
+  'settings.visionModel': '备用视觉模型',
+  'settings.visionModelHint': '主模型不支持视觉时使用:填一个 OpenAI 兼容的多模态端点(如 GLM-4V / Qwen-VL),AI 提问、它看图作答',
+  'settings.visionModelName': '模型名,如 glm-4v-plus / qwen-vl-max',
   'settings.testSuccess': '✓ 连接成功',
   'settings.testFail': '✕ 连接失败',
   'settings.test': '测试连接',
@@ -139,7 +145,7 @@ const zh: Dict = {
 
 const en: Dict = {
   'app.greeting':
-    "Hi, I'm Millwright.\n\nOpen Settings (bottom-left) to configure an AI provider (Anthropic / OpenAI / DeepSeek / Kimi / MiniMax …), then drive SolidWorks with plain language.\n\nWhen a reply contains code, click Run to inject the script into SolidWorks, or Copy to use it in your own macro environment.",
+    "Hi, I'm Millwright.\n\nConfigure an AI provider in Settings (bottom-left), then just tell me what to do — I drive SolidWorks directly through tools (sketching, features, dimensions, assembly, export, queries).\n\nAnything that modifies the model shows a confirmation card first; nothing runs until you approve it.",
   'app.clearChat': 'Clear chat',
   'app.riskConfirm': 'Potential risks detected:\n\n{issues}\n\nContinue anyway?',
   'tab.chat': 'Chat',
@@ -198,6 +204,12 @@ const en: Dict = {
   'settings.optional': '(optional)',
   'settings.systemPromptPlaceholder': 'Leave empty to use the built-in default (SolidWorks automation expert)',
   'settings.testing': 'Testing…',
+  'settings.vision': 'Vision understanding',
+  'settings.mainModelVision': 'Main model supports vision',
+  'settings.mainModelVisionHint': 'When checked the AI reads SolidWorks screenshots directly (only check if your main model really accepts image input, otherwise vision requests will fail)',
+  'settings.visionModel': 'Fallback vision model',
+  'settings.visionModelHint': "Used when the main model cannot see images: an OpenAI-compatible multimodal endpoint (e.g. GLM-4V / Qwen-VL) answers the AI's questions about the screenshot",
+  'settings.visionModelName': 'Model name, e.g. glm-4v-plus / qwen-vl-max',
   'settings.testSuccess': '✓ Connected',
   'settings.testFail': '✕ Connection failed',
   'settings.test': 'Test connection',
