@@ -2,13 +2,7 @@ name: Build Windows Installer
 
 on:
   push:
-    branches: [master, main]
     tags: ['v*']
-    # 日常 commit（docs/scripts）不跑完整打包，省 CI 分钟
-    paths-ignore:
-      - '**.md'
-      - 'scripts/precommit-check.sh'
-      - '.github/**'
   workflow_dispatch:  # 允许手动触发
 
 permissions:
