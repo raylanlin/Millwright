@@ -1,3 +1,5 @@
+target-version = "py39"
+
 [lint]
 # sidecar 代码大量使用 try/except 容错（COM 版本差异），这是设计意图
 ignore = [

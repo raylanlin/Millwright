@@ -22,9 +22,9 @@ P13 fixes:
 """
 from __future__ import annotations
 
-from ..registry import tool
-from ..bridge import Context, SWError, sw_get, DOC_PART
 from .. import units
+from ..bridge import DOC_PART, Context, SWError, sw_get
+from ..registry import tool
 
 # swInConfigurationOpts_e
 CFG_THIS = 1
@@ -139,8 +139,14 @@ def _select_profile_sketch(ctx: Context, sketch: str | None = None):
     ctx.clear_selection()
     name = sketch
     if not name:
-        # P32: prefer the sketch recorded by start_sketch this session
-        name = ctx.scratch.get("last_sketch")
+        # P32: prefer the sketch recorded by start_sketch this session.
+        # P45: …but only if it still exists — deleting a sketch left this pointing at a
+        # dead name, so extrude selected nothing and reported "no closed sketch".
+        cached = ctx.scratch.get("last_sketch")
+        if cached and _find_feature(ctx, cached) is not None:
+            name = cached
+        else:
+            ctx.scratch.pop("last_sketch", None)
     if not name:
         for f in _all_features(ctx):
             try:
@@ -407,19 +413,34 @@ def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = "
 
 
 @tool(
-    "fillet_edges", "Fillet the currently selected edges (select edges in SolidWorks first)",
-    params={"radius": {"type": "number", "desc": "Fillet radius (mm)"}},
+    "fillet_edges", "Round edges of the solid. Say WHICH edges — no manual picking needed",
+    params={
+        "radius": {"type": "number", "desc": "Fillet radius (mm)"},
+        "edges": {
+            "type": "string", "enum": ["vertical", "horizontal", "circular", "all", "selected"],
+            "desc": "vertical = the upright edges (e.g. the four corners of a plate) · horizontal = edges lying flat · circular = round edges · all = every edge · selected = whatever is already selected in SolidWorks",
+            "default": "vertical",
+        },
+    },
     category="feature",
 )
-def fillet_edges(ctx: Context, radius: float):
-    if ctx.selected_count() < 1:
-        raise SWError("please select edges to fillet first.")
+def fillet_edges(ctx: Context, radius: float, edges: str = "vertical"):
+    # P45: previously this REQUIRED a human to pre-select edges in SolidWorks, so from
+    # chat it could only ever fail. Now it selects the described edge set itself.
+    if edges == "selected":
+        if ctx.selected_count() < 1:
+            raise SWError("nothing is selected — pass edges=vertical/horizontal/circular/all instead.")
+        picked = ctx.selected_count()
+    else:
+        # P45.1: clear first. A leftover selection from the previous tool is why one run
+        # "succeeded" by rounding the four hole edges instead of the requested junction.
+        ctx.clear_selection()
+        picked = ctx.select_edges(edges)
+        if picked == 0:
+            raise SWError(f"no {edges} edges found on the solid.")
     r = units.mm(radius)
     before = _feature_names(ctx)
     errors: list = []
-    # P42: FeatureFillet3's documented layout — swFeatureFilletType_e 0 (simple/constant
-    # radius) plus flag word 195 seen in recorder output; the trailing array slots are
-    # empty tuples (no per-edge overrides). com_call settles the arity per version.
     args = [
         195, r, 0, 0, 0, 0, 0, 0,
         (), (), (), (), (), (), (),
@@ -431,10 +452,10 @@ def fillet_edges(ctx: Context, radius: float):
     )
     if created is None:
         raise SWError(
-            "fillet failed — check the selected edges are valid for a constant-radius fillet. "
-            f"(attempts: {' | '.join(errors[-3:])})"
+            f"fillet failed on {picked} {edges} edge(s) — the radius may be too large for the "
+            f"geometry. (attempts: {' | '.join(errors[-3:])})"
         )
-    return {"feature": sw_get(created, "Name"), "radius_mm": radius}
+    return {"feature": sw_get(created, "Name"), "radius_mm": radius, "edges": edges, "count": picked}
 
 
 @tool(
@@ -510,19 +531,28 @@ def shell(ctx: Context, thickness: float, outward: bool = False):
 
 
 @tool(
-    "linear_pattern", "Linearly pattern the selected features (pre-select the features + a direction edge/axis)",
+    "linear_pattern", "Repeat a feature in a straight line — give the feature name and a direction",
     params={
         "count": {"type": "integer", "desc": "Total instance count (including the original)"},
         "spacing": {"type": "number", "desc": "Spacing (mm)"},
+        "feature": {"type": "string", "desc": "Name of the feature to repeat, e.g. 切除-拉伸1 (use list_features to see names). Omit to use the current selection", "default": ""},
+        "direction": {"type": "string", "enum": ["x", "y", "z"], "desc": "Direction to repeat along", "default": "x"},
     },
     category="feature",
 )
-def linear_pattern(ctx: Context, count: int, spacing: float):
-    if ctx.selected_count() < 2:
-        raise SWError("please select the features to pattern plus the direction reference (edge/axis) first.")
+def linear_pattern(ctx: Context, count: int, spacing: float, feature: str = "", direction: str = "x"):
+    # P45: selects the feature (mark 4) and a direction edge (mark 1) itself — this used
+    # to demand a manual pre-selection, which no chat-driven agent could satisfy.
+    if feature:
+        ctx.clear_selection()
+        if not ctx.select_feature(feature, mark=4):
+            raise SWError(f"feature not found: {feature} (check list_features for the exact name)")
+    elif ctx.selected_count() < 1:
+        raise SWError("give feature= (the feature to repeat) or select it in SolidWorks first.")
+    if not ctx.select_axis_edge(direction, append=True, mark=1):
+        raise SWError(f"no straight edge along {direction} to use as the pattern direction.")
     before = _feature_names(ctx)
     errors: list = []
-    # P42: FeatureLinearPattern layout (dir-1 count/spacing, then dir-2 unused, then flags)
     args = [
         int(count), units.mm(spacing), 1, 0.01, False, False, "NULL", "NULL",
         False, False, False, False, False, False, True, True, False, False, 0, 0,
@@ -534,25 +564,32 @@ def linear_pattern(ctx: Context, count: int, spacing: float):
         args, errors, min_args=8, verify=lambda: _new_feature_of(ctx, before, "LPattern", "Pattern"),
     )
     if feat is None:
-        raise SWError(
-            "linear pattern failed — select the feature(s) AND a straight edge/axis for the "
-            f"direction. (attempts: {' | '.join(errors[-3:])})"
-        )
-    return {"feature": sw_get(feat, "Name"), "count": int(count), "spacing_mm": spacing}
+        raise SWError(f"linear pattern failed. (attempts: {' | '.join(errors[-3:])})")
+    return {"feature": sw_get(feat, "Name"), "count": int(count), "spacing_mm": spacing, "direction": direction}
 
 
 @tool(
-    "circular_pattern", "Circular pattern the selected features (pre-select the features + one axis)",
+    "circular_pattern", "Repeat a feature around an axis — give the feature name; the part's cylindrical face is used as the axis",
     params={
         "count": {"type": "integer", "desc": "Total instance count (including the original)"},
         "angle": {"type": "number", "desc": "Total angle (degrees)", "default": 360},
+        "feature": {"type": "string", "desc": "Name of the feature to repeat (list_features shows names). Omit to use the current selection", "default": ""},
         "equal_spacing": {"type": "boolean", "desc": "Space instances equally", "default": True},
     },
     category="feature",
 )
-def circular_pattern(ctx: Context, count: int, angle: float = 360, equal_spacing: bool = True):
-    if ctx.selected_count() < 2:
-        raise SWError("please select the features to pattern plus a reference axis first.")
+def circular_pattern(ctx: Context, count: int, angle: float = 360, feature: str = "",
+                     equal_spacing: bool = True):
+    if feature:
+        ctx.clear_selection()
+        if not ctx.select_feature(feature, mark=4):
+            raise SWError(f"feature not found: {feature}")
+    elif ctx.selected_count() < 1:
+        raise SWError("give feature= (the feature to repeat) or select it in SolidWorks first.")
+    # P45: SolidWorks accepts a cylindrical face as the rotation axis, which spares the
+    # agent from needing a reference axis to exist.
+    if not ctx.select_cylindrical_face(append=True, mark=1):
+        raise SWError("no cylindrical face to rotate around — create one, or add a reference axis.")
     before = _feature_names(ctx)
     errors: list = []
     args = [
@@ -566,27 +603,32 @@ def circular_pattern(ctx: Context, count: int, angle: float = 360, equal_spacing
         args, errors, min_args=4, verify=lambda: _new_feature_of(ctx, before, "CirPattern", "Pattern"),
     )
     if feat is None:
-        raise SWError(
-            "circular pattern failed — select the feature(s) AND an axis (a temporary axis "
-            f"or reference axis). (attempts: {' | '.join(errors[-3:])})"
-        )
+        raise SWError(f"circular pattern failed. (attempts: {' | '.join(errors[-3:])})")
     return {"feature": sw_get(feat, "Name"), "count": int(count), "angle_deg": angle}
 
 
 @tool(
-    "mirror_feature", "Mirror the selected features across a reference plane (pre-select the features)",
-    params={"plane": {"type": "string", "desc": "Symmetry plane: front / top / right, or the name of a plane you created"}},
+    "mirror_feature", "Mirror features across a plane — give the feature names",
+    params={
+        "plane": {"type": "string", "desc": "Symmetry plane: front / top / right, or the name of a plane you created"},
+        "features": {"type": "string", "desc": "Comma-separated feature names to mirror, e.g. 凸台-拉伸3,切除-拉伸2 (list_features shows names). Omit to use the current selection", "default": ""},
+    },
     category="feature",
 )
-def mirror_feature(ctx: Context, plane: str):
-    if ctx.selected_count() < 1:
-        raise SWError("please select features to mirror first.")
+def mirror_feature(ctx: Context, plane: str, features: str = ""):
+    # P45: features are selected BY NAME (mark 1) and the plane with mark 2 — the old
+    # version needed a human pre-selection and always reported "produced nothing".
+    if features:
+        ctx.clear_selection()
+        names = [n.strip() for n in features.split(",") if n.strip()]
+        for i, n in enumerate(names):
+            if not ctx.select_feature(n, append=i > 0, mark=1):
+                raise SWError(f"feature not found: {n}")
+    elif ctx.selected_count() < 1:
+        raise SWError("give features= (names to mirror) or select them in SolidWorks first.")
     key = (plane or "").strip()
-    if key.lower() in ("front", "top", "right"):
-        ok = ctx.select_plane(key, append=True, mark=2)
-    else:
-        # P42: mirror across ANY reference plane, matching start_sketch's behaviour
-        ok = bool(ctx.select_by_id(key, "PLANE", append=True, mark=2))
+    ok = (ctx.select_plane(key, append=True, mark=2) if key.lower() in ("front", "top", "right")
+          else bool(ctx.select_by_id(key, "PLANE", append=True, mark=2)))
     if not ok:
         raise SWError(f"failed to select the symmetry plane: {plane}")
     before = _feature_names(ctx)
@@ -597,10 +639,7 @@ def mirror_feature(ctx: Context, plane: str):
         min_args=4, verify=lambda: _new_feature_of(ctx, before, "Mirror"),
     )
     if feat is None:
-        raise SWError(
-            "mirror failed — check the selected features can be mirrored across this plane. "
-            f"(attempts: {' | '.join(errors[-3:])})"
-        )
+        raise SWError(f"mirror failed. (attempts: {' | '.join(errors[-3:])})")
     return {"feature": sw_get(feat, "Name"), "plane": plane}
 
 

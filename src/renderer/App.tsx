@@ -16,6 +16,7 @@ import { Sidebar, type TabKey } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ChatInput, type ChatInputHandle } from './components/ChatInput';
 import { SettingsModal } from './components/SettingsModal';
+import { ApprovalPicker } from './components/ApprovalPicker';
 import { Automations } from './components/Automations';
 import { ToolsList } from './components/ToolsList';
 import { ErrorBanner } from './components/ErrorBanner';
@@ -306,6 +307,16 @@ export default function App() {
                 {thinkingRound > 1 ? tr('chat.thinkingRound', { round: thinkingRound }) : tr('chat.thinking')}
               </div>
             )}
+            <ApprovalPicker
+              mode={config.approvalMode ?? 'normal'}
+              onChange={(m) => {
+                const next = { ...config, approvalMode: m };
+                setConfig(next);
+                void window.api.config.save(next);
+              }}
+              t={t}
+              disabled={isGenerating}
+            />
             <ChatInput
               ref={inputRef}
               t={t}

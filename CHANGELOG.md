@@ -6,6 +6,80 @@
 
 ## [Unreleased]
 
+## [0.2.41] - 2026-07-25
+
+### Fixed (P45 — 考题暴露的真因：补齐"选择几何"能力 + 自选几何 + 闭合轮廓)
+
+考题失败暴露了三类根因，本包全部修掉。同时回补了 P43 误增的 P45 评审问题（坐标轴映射、Select4 不接 mark、fillet_edges 选择未清空 + 集合名校验位置错、方向名宽容性）。
+
+#### 1. `start_sketch(face=...)` 从头就没生效（修）
+
+报错 `<unknown>.GetBodies2` —— 之前挂在 `ModelDocExtension` 上，实际在 **`IPartDoc`**。整个面草图失效，模型只能回退建 `基准面1`/`基准面2`（截图里那两个飘着的面）。
+
+修：`bridge.solid_bodies()` 依次在 `model` / `Extension` 上找 `GetBodies2`，拿到实体再继续。
+
+#### 2. 三个工具自己完成选择（最关键）
+
+`fillet_edges` / `linear_pattern` / `mirror_feature` 原本假设用户已经在 SolidWorks 里点好边/特征。日志里看得清清楚楚：连试三次全失败，模型只能删掉单孔手画四个孔绕路，把 65 轮预算烧光。
+
+修：三个工具自选几何。
+
+| 工具 | 新用法 | 内部做法 |
+| --- | --- | --- |
+| `fillet_edges` | `edges="vertical"`（竖边/水平/圆形/全部/已选） | 遍历实体边，按曲线类型+方向分类后逐条 Select |
+| `linear_pattern` | `feature="切除-拉伸1", direction="x"` | 特征按名选 (mark 4) + 找一条沿该轴的直边作方向 (mark 1) |
+| `circular_pattern` | `feature="…"` | 特征 (mark 4) + **圆柱面当旋转轴** (mark 1)，不需要先建参考轴 |
+| `mirror_feature` | `features="凸台-拉伸3,切除-拉伸2"` | 按名多选 (mark 1) + 基准面 (mark 2) |
+
+新增底层能力（`bridge.py`）：`select_edges` / `select_axis_edge` / `select_cylindrical_face` / `select_feature` / `_select_entity`。
+
+#### 3. 闭合轮廓的新工具 `sketch_polyline`
+
+三次 `sketch_line` 端点不会自动焊接，profile 不闭合 → 拉伸必失败。
+
+```
+sketch_polyline(points="30,15 30,50 55,15")
+```
+
+自动闭合回起点。提示词已改为"闭合轮廓一律用它"。
+
+顺带修了一个真 bug：删掉草图后 `last_sketch` 指向已不存在的名字，导致 extrude 选不到东西却报"没有闭合草图"（误导性报错）。现在会校验缓存的草图是否还在。
+
+#### 4. 审批选择器在输入框旁（`ApprovalPicker.tsx`）
+
+P43 把审批档位埋在设置里不对——这是**每个任务临时决定**的事，不该是全局设置。新增紧凑按钮在输入框旁：显示当前档位，点开是四档弹层（带说明），AUTO 档整个按钮变琥珀色以示醒目。设置面板保留作为默认值。
+
+#### 5. 自查修正（P45.1 已合入本包）
+
+复核时发现会让上述修复全部白改的三个问题：
+
+- **坐标轴映射错了**：SolidWorks 世界坐标是 **Y 轴朝上**（Front=XY/法向 +Z, Top=XZ/法向 +Y, Right=YZ/法向 +X）。之前按 Z 朝上写导致 `face="top"` 找错面。已改为 Y-up：`top=(0,1,0)` / `front=(0,0,1)`；竖边判据改用 `abs(dy) > 0.95`。
+- **`Select4` 不接受 mark**：`IEntity::Select4(Append, Callout)` 没有 mark 参数。带 mark 时优先 `Select2(append, mark)`，不带 mark 时才用 `Select4`。
+- **`fillet_edges` 没清选择 + 边集合名校验位置错**：每次先 `clear_selection()`；校验提到函数开头。
+- **阵列方向名更宽容**：`direction` 除 x/y/z 也接受 `up`(=Y) / `width`(=X) / `depth`(=Z)。
+
+#### 6. UI：补回 P43 zh 段漏加的审批词条
+
+P43 那一轮 zh 段 edit 表面上成功但实际没加到 zh Dict（en 段有、zh 段空）。本包一并补上 `settings.approval.*` zh 词条 + 短标签 + `chat.thinking*` + `chat.thinkingRound*`。
+
+#### 文件落位（6 个文件覆盖 + 3 处手改）
+
+```
+sidecar/sw_agent/bridge.py                     覆盖（修 GetBodies2 + 选择能力）
+sidecar/sw_agent/tools/feature.py              覆盖（三个工具自选几何 + 陈旧草图守卫）
+sidecar/sw_agent/tools/sketch.py               覆盖（+ sketch_polyline）
+src/main/llm/prompts.ts                        覆盖（工具用法要点）
+src/renderer/components/ApprovalPicker.tsx     新增
+src/renderer/i18n/strings.ts                   手改①（zh 段补 P43 漏的 + P45 Short 词条；en 段 P45 Short）
+src/renderer/App.tsx                           手改②（挂 ApprovalPicker + onChange → setConfig + save）
+```
+
+#### 仍未做（需要真机测）
+
+`create_reference_point` / `export_stl` —— 参数少、失败模式明显（文件在或不在），没加自适应搜索。测到报错发我。
+
+bump 0.2.40 → 0.2.41
+
 ## [0.2.40] - 2026-07-25
 
 ### Added (P43 — 待办清零：面草图 + 审批分级 + confirm 双发根治)

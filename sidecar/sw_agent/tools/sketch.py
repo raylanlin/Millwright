@@ -10,9 +10,16 @@ configuration ONLY (the comment claimed "all"); 2 = all configurations.
 """
 from __future__ import annotations
 
-from ..registry import tool
-from ..bridge import Context, SWError, sw_get
+try:
+    from itertools import pairwise
+except ImportError:  # Python 3.9 -- pairwise landed in 3.10
+    def pairwise(it):
+        seq = list(it)
+        return zip(seq, seq[1:])
+
 from .. import units
+from ..bridge import Context, SWError, sw_get
+from ..registry import tool
 
 # swInConfigurationOpts_e
 CFG_ALL = 2
@@ -114,6 +121,42 @@ def sketch_circle(ctx: Context, radius: float, x: float = 0, y: float = 0):
     _require_sketch(ctx)
     ctx.sketch_mgr.CreateCircle(units.mm(x), units.mm(y), 0, units.mm(x + radius), units.mm(y), 0)
     return {"circle": {"x": x, "y": y, "r": radius}}
+
+
+@tool(
+    "sketch_polyline",
+    "Draw a CLOSED contour (triangle, trapezoid, any polygon) in one call — use this instead "
+    "of several sketch_line calls, which leave the profile open and make extrude fail",
+    params={
+        "points": {
+            "type": "string",
+            "desc": "Corner coordinates in mm, e.g. \"30,15 30,50 55,15\" — the contour is closed back to the first point automatically",
+        },
+    },
+    category="sketch",
+)
+def sketch_polyline(ctx: Context, points: str):
+    """P45: three separate sketch_line calls did NOT weld their endpoints, so every
+    triangular rib failed with "no closed sketch" no matter how the numbers were
+    written. Drawing the whole loop in one call (and closing it explicitly) fixes it."""
+    if ctx.sketch_mgr.ActiveSketch is None:
+        raise SWError("start a sketch first (start_sketch).")
+    pts = []
+    for chunk in (points or "").replace(";", " ").split():
+        parts = chunk.split(",")
+        if len(parts) < 2:
+            raise SWError(f'bad point "{chunk}" — use "x,y x,y x,y" in mm.')
+        pts.append((units.mm(float(parts[0])), units.mm(float(parts[1]))))
+    if len(pts) < 3:
+        raise SWError("a closed contour needs at least 3 points.")
+    loop = pts + [pts[0]]
+    made = 0
+    for (x1, y1), (x2, y2) in pairwise(loop):
+        if ctx.sketch_mgr.CreateLine(x1, y1, 0.0, x2, y2, 0.0) is not None:
+            made += 1
+    if made < len(pts):
+        raise SWError(f"only {made} of {len(pts)} segments were created.")
+    return {"closed_contour": len(pts), "segments": made}
 
 
 @tool(
