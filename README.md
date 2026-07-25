@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner-hero.png" alt="Millwright — Talk to your CAD" />
+  <img src="assets/banner-hero.png" alt="Millwright — Let AI operate SolidWorks, not just write code" />
 </p>
 
 <p align="center">
@@ -9,12 +9,18 @@
 <h1 align="center">Millwright</h1>
 
 <p align="center">
-  <strong>The open-source AI machinist for SolidWorks — talk to your CAD.</strong>
+  <strong>Let AI operate SolidWorks — not generate macros.</strong>
 </p>
 
 <p align="center">
+  The open-source AI workbench that directly drives SolidWorks through native tool calling,<br/>
+  structured reasoning, and a real visual feedback loop.
+</p>
+
+<p align="center">
+  <a href="#why-millwright">Why Millwright</a> ·
+  <a href="#features">Features</a> ·
   <a href="#quick-start">Quick Start</a> ·
-  <a href="#how-it-works">How it works</a> ·
   <a href="#supported-ai-providers">AI providers</a> ·
   <a href="docs/ARCHITECTURE.md">Architecture</a> ·
   <a href="docs/CONTRIBUTING.md">Contributing</a> ·
@@ -22,40 +28,101 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.4-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.37-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
   <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white" alt="python" />
-  <img src="https://img.shields.io/badge/tests-167_passed-brightgreen" alt="tests" />
+  <img src="https://img.shields.io/badge/tests-167_JS_%2B_13_Python-brightgreen" alt="tests" />
   <img src="https://img.shields.io/badge/license-Apache_2.0-orange" alt="license" />
 </p>
 
 ---
 
-Describe what you want in plain language — *"sketch a 50×30 rectangle on the front plane and extrude it 20 mm"* — and Millwright drives SolidWorks to do it. The AI plans the work, calls real modeling tools one step at a time, reads structured results back, and corrects itself as it goes.
+## Stop generating macros
 
-**You choose the AI backend.** Claude, GPT-4o, DeepSeek, Kimi, MiniMax, Qwen, or a local Ollama model — anything speaking the Anthropic or OpenAI-compatible protocol. The code is open; you pay only your own API usage.
+Most AI CAD assistants generate VBA or Python scripts and leave you to copy, paste, debug, and run them yourself.
 
-> Existing CAD AI tools lock you into one provider at \$16–417/mo. Millwright is free and provider-agnostic.
+Millwright doesn't. It calls **~50 native SolidWorks tools directly** — sketch, feature, assembly, export, and query operations — one step at a time. Every call returns a structured result, the AI reads it, and decides what to do next. No macro editing. No guessing whether it worked.
+
+```
+You:  Create a mounting bracket with four M6 holes.
+
+Millwright:
+  ✓ Create Sketch
+  ✓ Rectangle (80 × 50)
+  ✓ Extrude Boss (10 mm)
+  ✓ Hole Wizard × 4
+  ✓ Add Fillets
+  ✓ Capture Viewport
+  ✓ Vision Verification
+  Done.
+```
+
+**You choose the AI backend.** Claude, GPT-4o, DeepSeek, Kimi, MiniMax, Qwen, GLM, or a local Ollama model — anything speaking the Anthropic or OpenAI-compatible protocol. The code is open; you only pay for your own API usage.
 
 | | Typical CAD AI SaaS | **Millwright** |
 |---|---|---|
-| AI backend | Fixed by plan | **Any model you choose** |
-| Pricing | \$16–417 / month | **Free** (you bring your own API key) |
+| Automation | Prompt → one-shot macro you paste & run | **Agentic tool loop with self-correction** |
+| AI backend | Fixed by plan | **Any model you choose (BYO key)** |
+| Pricing | \$16–417 / month | **Free — open source** |
 | Source | Closed | **Open (Apache-2.0)** |
-| Automation | Prompt → one-shot script | **Agentic tool loop with self-correction** |
-| Visual feedback | — | **Screenshots the viewport & reasons over it** |
+| Verification | None | **Screenshots the model & reasons over it** |
+| SolidWorks versions | Often pinned to one | **Adapts across versions at runtime** |
+
+## Why Millwright
+
+- 🛠 **Real tool-driving, not code generation.** The AI never hands you a macro to copy-paste — it calls native SolidWorks operations directly and decides its next move from the structured result of the last one.
+- ⚙️ **Dual-engine runtime.** A Python sidecar talks to SolidWorks over early-bound COM for full capability. If the sidecar can't start, Millwright automatically falls back to a built-in VBScript engine — and says so in the chat, instead of silently losing functionality.
+- 🔀 **Cross-version adaptive.** SolidWorks' COM API shifts parameter counts and member names across releases. Millwright discovers available signatures at runtime, falls back to dynamic dispatch when a member is missing, and probes extrusion direction automatically — no version hardcoded.
+- 👁 **Seeing is believing.** The AI can screenshot the model and look at it: multimodal models read the image directly, text-only models get a dedicated vision model in the loop, and you can keep asking follow-up questions about the same screenshot. It checks its own work visually before moving on, and looks before it acts when something goes wrong.
+- 🔒 **Safety boundaries.** Destructive operations show a confirmation card with the tool name and full parameters — nothing runs without a click. Documents are backed up automatically before destructive edits. Legacy scripts are blacklist-validated. CAD files never leave your machine; only text is sent to the AI.
+- 📦 **Zero-dependency install.** The installer bundles its own Python runtime and `pywin32` — no separate setup, works out of the box.
+- 🔌 **Protocol-agnostic.** Native Anthropic and OpenAI-compatible support, hand-written `fetch` + SSE, no vendor lock-in. DeepSeek, MiniMax, GLM, and friends all work the same way.
 
 ## Features
 
-- **Natural language → real modeling.** English or Chinese in; sketches, features, assemblies, and exports out.
-- **Agentic tool loop.** The model calls structured, single-purpose tools (`create_sketch`, `extrude`, `chamfer`, `mass_properties`, …), receives JSON results, and chains multiple steps to finish a task — recovering from errors instead of failing silently.
-- **Native function calling.** Tools are injected into the model via the standard `tools` API, not stuffed into a prompt. One source of truth — the tools describe themselves.
-- **Visual understanding.** The agent can reorient, rotate, and screenshot the model, then analyze it — either through a **dedicated vision model** (image→text) or by feeding the image straight to a **multimodal main model**.
-- **Resident execution engine.** A persistent Python sidecar drives the SolidWorks COM API directly (via `pywin32`), holding one connection across many steps.
-- **Safety first.** Per-language script validation, automatic pre-execution backup, and a confirmation gate before any destructive operation.
-- **Developer-friendly.** 167 unit tests, typed IPC boundary, and a `SKIP_SW_CONNECT` mode for UI-only development without SolidWorks.
+- **Native tool calling.** Tools are injected into the model through the standard `tools` API, not stuffed into a prompt — one source of truth, and the tools describe themselves.
+- **Agentic tool loop.** Observe → reason → act. The model chains multiple tool calls, reads structured JSON back from each one, and recovers from errors instead of failing silently.
+- **Visual understanding.** Reorient, rotate, screenshot, and analyze the model — via a multimodal main model or a dedicated vision model.
+- **Resident execution engine.** A persistent Python sidecar holds one COM connection open across an entire multi-step task.
+- **Developer-friendly.** 167 TypeScript/Node tests plus a Python suite (`pytest sidecar/tests`) for the sidecar, a typed IPC boundary, and a `SKIP_SW_CONNECT` mode for UI-only development without SolidWorks installed.
+
+## Cross-version compatibility
+
+SolidWorks' COM API is not stable across releases: method signatures change, optional parameters appear or vanish, enum values evolve, and member names differ from version to version. Hardcoding against one release doesn't hold up.
+
+```
+Tool Request → Signature Discovery → Available COM Members → Dynamic Dispatch → Execute
+```
+
+Millwright discovers the best available API at execution time instead of assuming a fixed version, handling different parameter counts, missing COM members, multiple overload candidates, and differing extrusion directions automatically. One runtime, no version-specific builds.
+
+This is actively hardened against real SolidWorks installs rather than tested in the abstract — for example, `cut_extrude` and `extrude` now search parameter-count and signature variants at runtime until one succeeds, converging automatically on whatever a given machine's SolidWorks build expects. Four multi-parameter APIs are already macro-recorder verified (`add_mate`, document/template constants, sketch primitives, `chamfer`); ten more — `revolve`, `fillet_edges`, `shell`, `linear_pattern`, `circular_pattern`, `mirror_feature`, `create_reference_point`, `export_stl`, and the underlying signatures for `extrude`/`cut_extrude` — are tracked in the [verification backlog](docs/VERIFY-ISSUES.md) and welcome real-hardware confirmation.
+
+## Safety, by default
+
+AI should never be allowed to silently destroy CAD data.
+
+```
+Delete Feature → Confirmation Card → User Approval → Automatic Backup → Execute
+```
+
+- **Confirmation gate.** Destructive operations — delete feature/body/sketch, replace components, overwrite an export — show the tool name and full parameters and require an explicit click before running.
+- **Automatic backup.** The current document is backed up before any destructive operation, so you can always recover.
+- **Script validation.** Legacy VBScript execution is checked against a blacklist and dangerous-API detection before it ever reaches SolidWorks.
+- **Local-first data.** CAD files never leave your machine — only the minimal text context needed for reasoning is sent to the AI provider.
+
+## Vision feedback loop
+
+Most CAD automation stops the moment the API call returns. Millwright keeps going — it actually looks at the model.
+
+```
+Create Feature → Capture View → Vision Model → Compare With Request → Need Changes? → Continue Editing
+```
+
+- **Multimodal main model** (Claude, GPT-4o, Gemini, Qwen-VL, …): screenshots go straight to the model, no extra step.
+- **Text-only main model:** the screenshot is routed to an independent vision model, and its description feeds back into the planner — so even text-only LLMs can reason about CAD geometry.
 
 ## Quick Start
 
@@ -95,10 +162,11 @@ npm run dev
 | Anthropic | Anthropic | `https://api.anthropic.com` | `claude-sonnet-5` / `claude-opus-5` |
 | OpenAI | OpenAI | `https://api.openai.com/v1` | `gpt-5.6` |
 | Alibaba Bailian (Qwen) | OpenAI-compatible | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-3.8max` |
+| Zhipu (GLM) | OpenAI-compatible | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.6` |
 | SiliconFlow | OpenAI-compatible | `https://api.siliconflow.cn/v1` | — |
 | Ollama (local) | OpenAI-compatible | `http://localhost:11434/v1` | — |
 
-> Agentic tool calling requires a model that supports function calling. DeepSeek, Kimi K3, and MiniMax M3 are first-class targets.
+> Agentic tool calling requires a model that supports function calling. DeepSeek, Kimi K3, MiniMax M3, and GLM-4.6 are first-class targets.
 
 ## Examples
 
@@ -142,7 +210,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 - Windows 10/11 (64-bit)
 - SolidWorks 2017+
-- Python 3.9+ with `pywin32` and `pillow` (for the sidecar)
+- Python 3.9+ with `pywin32` and `pillow` (bundled by the installer; required manually when running from source)
 - Node.js 20+ (development only)
 
 ## Documentation
@@ -170,11 +238,13 @@ Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especi
 
 ## Roadmap
 
-- [x] **v0.1** — MVP (Electron + LLM + COM + tools)
-- [x] **v0.2** — Stable base, CI, docs
-- [x] **v0.2.4** — Python sidecar, agentic tool loop, visual understanding, Apache-2.0 open source ← *current*
-- [ ] **v0.3** — Full tool coverage, macro-verified parameters, streaming tool calls
+- [x] **v0.1** — MVP: Electron + LLM adapters + VBS/COM bridge + first tool set
+- [x] **v0.2** — Python sidecar, agentic tool loop, dual-engine fallback, vision feedback, confirmation cards, Apache-2.0 open source
+- [x] **v0.2.4 → v0.2.37** — Extensive real-hardware hardening ← *current*: early-bound COM dispatch, cross-version adaptive parameter discovery for `extrude`/`cut_extrude`, idempotent confirmation cards, degraded-mode reporting when the sidecar can't start, PNG screenshots for vision, configurable tool-call rounds
+- [ ] **v0.3** — Full tool coverage, remaining `#VERIFY` parameters confirmed on real installs, streaming tool calls
 - [ ] **v1.0** — MCP server, multi-CAD support
+
+> Millwright is young and moves fast — most releases so far have come from fixing real COM-binding and cross-version quirks reported from actual SolidWorks installs, tracked in [CHANGELOG.md](CHANGELOG.md) and the [verification backlog](docs/VERIFY-ISSUES.md).
 
 ## Name
 
