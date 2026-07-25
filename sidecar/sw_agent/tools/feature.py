@@ -79,20 +79,25 @@ def _find_feature(ctx: Context, name: str):
     params={
         "depth": {"type": "number", "desc": "Extrusion depth (mm)"},
         "both_dir": {"type": "boolean", "desc": "Equal-distance both-direction extrusion", "default": False},
+        "flip": {"type": "boolean", "desc": "Extrude to the opposite side of the sketch plane", "default": False},
         "sketch": {"type": "string", "desc": "Sketch name to extrude (defaults to the most recent sketch)", "default": ""},
     },
     category="feature",
 )
-def extrude(ctx: Context, depth: float, both_dir: bool = False, sketch: str = ""):
+def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = False, sketch: str = ""):
     ctx.require(DOC_PART, "part")  # P27: solid features are part-only — fail early inside assemblies
     # P32: manual-modeling order — with an ACTIVE sketch, extrude directly (SW uses it
     # and auto-exits, like the UI). Only when no sketch is active do we select one.
     if ctx.sketch_mgr.ActiveSketch is None:
         _select_profile_sketch(ctx, sketch or None)
     d = units.mm(depth)
-    # VERIFY: FeatureExtrusion3 parameter slots (24 args) — verify against macro recorder for the target version
+    # P37: FeatureExtrusion3 slots are (Sd, Flip, Dir, T1, T2, D1, D2, …):
+    #   Sd  = SINGLE direction (both_dir → False)
+    #   Dir = reverse direction (the "flip" the caller asks for)
+    # The old code fed both_dir into the Dir slot, so "both directions" silently
+    # became "reverse direction" and there was no way to control which side.
     feat = ctx.feat_mgr.FeatureExtrusion3(
-        True, False, bool(both_dir), 0, 0, d, d if both_dir else 0,
+        not both_dir, False, bool(flip), 0, 0, d, d if both_dir else 0,
         False, False, False, False, 0, 0, False, False, False, False,
         True, True, True, 0, 0, False,
     )
@@ -102,84 +107,110 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False, sketch: str = ""
 
 
 @tool(
-    "cut_extrude", "Cut material using the current sketch",
+    "cut_extrude", "Cut material using the current sketch (a through hole is direction-agnostic: pass through_all=true)",
     params={
-        "depth": {"type": "number", "desc": "Cut depth (mm)"},
-        "through_all": {"type": "boolean", "desc": "Cut through all", "default": False},
+        "depth": {"type": "number", "desc": "Cut depth (mm); ignored when through_all is true"},
+        "through_all": {"type": "boolean", "desc": "Cut through the whole body — use this for through holes", "default": False},
+        "flip": {"type": "boolean", "desc": "Cut toward the opposite side of the sketch plane (rarely needed — direction is auto-detected)", "default": False},
         "sketch": {"type": "string", "desc": "Sketch name to cut with (defaults to the most recent sketch)", "default": ""},
     },
     category="feature", destructive=True,
 )
-def cut_extrude(ctx: Context, depth: float, through_all: bool = False, sketch: str = ""):
+def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
+                flip: bool = False, sketch: str = ""):
     ctx.require(DOC_PART, "part")
-    if ctx.sketch_mgr.ActiveSketch is None:
-        _select_profile_sketch(ctx, sketch or None)
-    d = units.mm(depth)
+
+    # P37: remember which sketch to cut with. A failed cut (or SW auto-exiting the
+    # active sketch) drops the selection, so every retry must re-select by name.
+    target = sketch or None
+    active = ctx.sketch_mgr.ActiveSketch
+    if active is not None:
+        if not target:
+            try:
+                target = sw_get(active, "Name")
+            except Exception:  # noqa: BLE001
+                target = None
+    if not target:
+        target = ctx.scratch.get("last_sketch")
+
+    d = units.mm(depth) if depth else units.mm(1)
     end = 1 if through_all else 0  # swEndConditions_e: 0=Blind, 1=ThroughAll
 
-    # P34: FeatureCut4 arg count / member differs across SW versions — SW2023+ resolves
-    # FeatureCut5 and the FeatureCut4 wrapper mis-typed, giving DISP_E_PARAMNOTOPTIONAL
-    # (-2147352561, "参数不是可选的"). Instead of pinning one positional signature, try
-    # the documented signatures in order and detect success by a new feature appearing
-    # in the tree (some versions return None even on success). First one that produces a
-    # feature wins — auto-adapts to the installed version.
-    before = set()
-    for f in _all_features(ctx):
-        try:
-            before.add(sw_get(f, "Name"))
-        except Exception:  # noqa: BLE001
-            continue
-
-    # master arg list (26 slots); we try progressively shorter tails for older APIs
-    args = [
-        True, False, False, end, 0, d, 0,
-        False, False, False, False, 0.0, 0.0,
-        False, False, False, False,
-        True, True, True, False, False, False, True, False, False,
-    ]
-    last_err = None
-    made = None
-    for member in ("FeatureCut5", "FeatureCut4", "FeatureCut3"):
-        fn = getattr(ctx.feat_mgr, member, None)
-        if fn is None:
-            continue
-        for n in (26, 25, 24, 23):
+    def names() -> set:
+        out = set()
+        for ft in _all_features(ctx):
             try:
-                made = fn(*args[:n])
-            except Exception as e:  # noqa: BLE001 — wrong arity/type → try the next
-                last_err = e
-                made = None
-                continue
-            if made is not None:
-                break
-            # some versions return None yet still create it — check the tree
-            for f in _all_features(ctx):
-                try:
-                    if sw_get(f, "Name") not in before and "Cut" in (sw_get(f, "GetTypeName2") or ""):
-                        made = f
-                        break
-                except Exception:  # noqa: BLE001
-                    continue
-            if made is not None:
-                break
-        if made is not None:
-            break
-
-    if made is None:
-        # final tree check (a cut may have landed despite errors)
-        for f in _all_features(ctx):
-            try:
-                if sw_get(f, "Name") not in before and "Cut" in (sw_get(f, "GetTypeName2") or ""):
-                    made = f
-                    break
+                out.add(sw_get(ft, "Name"))
             except Exception:  # noqa: BLE001
                 continue
+        return out
+
+    def new_cut(before: set):
+        for ft in _all_features(ctx):
+            try:
+                if sw_get(ft, "Name") not in before and "Cut" in (sw_get(ft, "GetTypeName2") or ""):
+                    return ft
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
+    errors: list = []
+
+    def attempt(single_dir: bool, reverse: bool):
+        """One cut attempt. Re-selects the sketch, then tries the documented
+        FeatureCut members / arities until one produces a Cut feature."""
+        if ctx.sketch_mgr.ActiveSketch is None:
+            try:
+                _select_profile_sketch(ctx, target)
+            except SWError as e:
+                errors.append(str(e))
+                return None
+        before = names()
+        # (Sd, Flip, Dir, T1, T2, D1, D2, …) — 26-slot master list, shorter tails for older APIs
+        args = [
+            single_dir, False, reverse, end, end if not single_dir else 0,
+            d, d if not single_dir else 0,
+            False, False, False, False, 0.0, 0.0,
+            False, False, False, False,
+            True, True, True, False, False, False, True, False, False,
+        ]
+        for member in ("FeatureCut5", "FeatureCut4", "FeatureCut3"):
+            fn = getattr(ctx.feat_mgr, member, None)
+            if fn is None:
+                continue
+            for n in (26, 25, 24, 23):
+                made = None
+                try:
+                    made = fn(*args[:n])
+                except Exception as e:  # noqa: BLE001 — wrong arity/type → next
+                    errors.append(f"{member}/{n}: {e}")
+                    continue
+                if made is None:
+                    made = new_cut(before)  # some versions return None yet still create it
+                if made is not None:
+                    return made
+        return None
+
+    # P37: WRONG DIRECTION was the real cause of "profile doesn't lie on/through the
+    # solid" — the caller cannot know which way SW will cut from a given plane. Try the
+    # requested direction, then the reverse, then symmetric (both ways); first wins.
+    made = attempt(True, bool(flip))
     if made is None:
+        made = attempt(True, not bool(flip))
+    if made is None:
+        made = attempt(False, False)
+
+    if made is None:
+        tail = "; ".join(errors[-2:]) if errors else "no COM error reported"
         raise SWError(
-            "cut failed: make sure the sketch profile lies on/through the solid. "
-            f"(last COM error: {last_err})"
+            "cut failed in both directions — the sketch profile probably does not overlap "
+            f"the solid (sketch: {target or 'unknown'}). ({tail})"
         )
-    return {"feature": sw_get(made, "Name"), "depth_mm": depth, "through_all": through_all}
+    return {
+        "feature": sw_get(made, "Name"),
+        "through_all": through_all,
+        "depth_mm": None if through_all else depth,
+    }
 
 
 @tool(

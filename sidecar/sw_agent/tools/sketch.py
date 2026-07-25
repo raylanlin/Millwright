@@ -24,14 +24,24 @@ def _require_sketch(ctx: Context):
 
 
 @tool(
-    "start_sketch", "Start a new sketch on the specified reference plane and enter edit mode",
-    params={"plane": {"type": "string", "enum": ["front", "top", "right"], "desc": "Reference plane"}},
+    "start_sketch", "Start a new sketch on a reference plane and enter edit mode",
+    params={"plane": {"type": "string", "desc": "front / top / right, or the name of a plane you created with create_plane (e.g. 基准面1, Plane1)"}},
     category="sketch",
 )
 def start_sketch(ctx: Context, plane: str):
     ctx.clear_selection()
-    if not ctx.select_plane(plane):
-        raise SWError(f"failed to select reference plane: {plane}")
+    key = (plane or "").strip()
+    ok = ctx.select_plane(key) if key.lower() in ("front", "top", "right") else False
+    if not ok:
+        # P37: sketch on ANY reference plane in the tree. Previously only the three
+        # default planes worked, so a plane the agent had just created with
+        # create_plane ("基准面1") failed with "unknown plane".
+        ok = bool(ctx.select_by_id(key, "PLANE"))
+    if not ok:
+        raise SWError(
+            f"failed to select plane: {plane} — use front/top/right, "
+            "or an existing plane name (list_features shows RefPlane entries)"
+        )
     ctx.sketch_mgr.InsertSketch(True)
     # P32: remember this sketch's feature name so extrude/cut can target it after
     # the sketch is exited, without relying on feature-tree traversal.

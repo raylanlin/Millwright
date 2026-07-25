@@ -6,6 +6,58 @@
 
 ## [Unreleased]
 
+## [0.2.35] - 2026-07-25
+
+### Added (P37+P38 — 切除方向 / 任意基准面 / 确认卡重复)
+
+#### P37 — 切除失败的真因
+
+**诊断**：两个问题。
+
+① 切除没有方向控制（主因）。圆柱从上视基准面拉伸，孔草图也在上视基准面
+—— 切除方向朝实体外侧时 SW 报"轮廓不在实体上"。模型无法控制方向，只能
+瞎试（删草图→建基准面→换 revolve，越走越远）。
+
+修复：`cut_extrude` 自动试三次——给定方向→反向→双向对称，第一个成功即止；
+每次重试前按名字重新选中草图（失败会丢选择）。新增 `flip` 参数供显式指定。
+报错改为汇总最后两次真实 COM 错误。
+
+顺带修`extrude`的真 bug：`both_dir` 之前喂进了反向槽位（`Sd = not both_dir`、
+`Dir = flip`），"双向拉伸"实际是"反向拉伸"。现在 `flip` 参数生效。
+
+② `start_sketch` 只认 front/top/right。它自己 `create_plane` 建了「基准面1」
+却报 `unknown plane: 基准面1`。现在树里任何 RefPlane 都能画草图。
+
+③ 提示词补建模要点：打孔只用 `cut_extrude(through_all)`，不要用 revolve；
+方向由工具自动处理；连续失败 2 次停下问用户。
+
+#### P38 — 确认卡重复
+
+**诊断**：同一次调用渲染成两张卡（一张待确认 + 一张已允许），`confirm_request`
+到渲染层被处理了两次。
+
+**修复（UI 侧幂等）**：同 id 已有 running 的 confirm/tool 步→不再重复 push；
+回执按 `requestId:callId` 去重；tool_result 解析**所有**同 id 的 running 步。
+
+### Files changed (4 + 3 手改)
+- `sidecar/sw_agent/tools/feature.py` (OVR) — P37 切除方向控制 + extrude flip fix
+- `sidecar/sw_agent/tools/sketch.py` (OVR) — P37 任意 RefPlane 可画草图
+- `src/main/llm/prompts.ts` (OVR) — P37 建模要点提示词；手改反引号转义 + DEFAULT→AGENT
+- `src/renderer/hooks/useLLM.ts` (OVR) — P38 确认卡幂等
+- `src/main/llm/index.ts` (手改) — `DEFAULT_SYSTEM_PROMPT → AGENT_SYSTEM_PROMPT`
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `python -m compileall -q sidecar/sw_agent` ✅
+
+### 装机回归
+1. 「在圆柱顶面中心挖直径 10 的通孔」→ **一次成功**，不再删草图/建基准面/换 revolve
+2. 破坏性操作 → **一张确认卡**，允许后变「已允许」，无残留
+3. `create_plane` → `start_sketch("基准面1")` → 可正常画草图
+4. 「拉伸方向反了」→ `extrude(flip=true)`
+
 ## [0.2.34] - 2026-07-25
 
 ### Fixed (P36 — 修 feature.py 语法错误，sidecar 一直启动不了的真因)
