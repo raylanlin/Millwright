@@ -6,6 +6,81 @@
 
 ## [Unreleased]
 
+## [0.2.40] - 2026-07-25
+
+### Added (P43 — 待办清零：面草图 + 审批分级 + confirm 双发根治)
+
+一次装完 7 项交付。所有手改走主进程 / 类型层，UI 默认行为不变。
+
+#### 1. 模型面上开草图（复杂件质量的关键）
+
+`start_sketch` 新增 `face` 参数：`face="top"`（也可 bottom/front/back/left/right）直接在实体的**最外侧对应朝向平面**上开草图，等于在 SolidWorks 里点一下那个面。
+
+实现：`bridge.select_face()` 遍历实体所有面，取法向与请求方向一致（dot ≥ 0.95）且沿该轴最外侧的平面，用 `Select4/Select2/Select` 三段兜底选中，再 `InsertSketch`。
+
+**为什么重要**：之前每个高一层的特征都得手算高度建偏移面。提示词也同步改为"直接在面上开草图，不要为此建基准面"。
+
+#### 2. 审批严格度分级（含 AUTO）
+
+| 档位 | 行为 |
+| --- | --- |
+| `strict` 严格 | 每个工具都要批准 |
+| `normal` 标准（默认） | 仅破坏性操作 |
+| `permissive` 宽松 | 仅不可逆操作（删特征/保存/导出） |
+| **`auto` AUTO** | 全程零打扰，完全自主 |
+
+AUTO 的安全底座是执行前自动备份照跑，整段任务可回滚。
+
+#### 3. confirm 双发根治（不再靠 UI 兜）
+
+根因找到：`agent-loop` 发一次 `confirm_request`，`handlers.ts` 的 `requestUserConfirm` 里**又发一次**——两处各发一次，UI 靠去重才没炸但主进程里其实跑了两次事件。
+
+现在 agent 循环是唯一发送方，`requestUserConfirm` 只保留 pending map + timer + sender void 占位避免 unused 警告。
+
+#### 4. 思考指示（体感）
+
+模型思考那几十秒界面不再冻住：新增 `thinking` 事件（带轮次），`useLLM` 暴露 `thinkingRound`。UI 在 `<Chat>` 和 `<ChatInput>` 之间挂转圈 + 轮次文案。
+
+> 真正的 token 级流式需要给适配器加 `chatWithToolsStream`（SSE 边收边解析工具调用），那是独立一块，没做。
+
+#### 5. 建模质量提示词（先规划再动手）
+
+六条硬要求：先写完整方案（尺寸/基准面/坐标/顺序）再动工；同张草图画完所有轮廓；中空件 `shell` 失败要改走"大轮廓+内腔切除"而**不是留实心**；收尾必须倒角+材料+`analyze_view` 核对；不许攒基准面；总结不许描述与屏幕不符的零件。
+
+#### 6. P42 合并（多参 API 自适应）
+
+`revolve`（新增 `cut` 旋转切除）/ `fillet_edges` / `shell` / 两种阵列 / `mirror_feature`（支持任意基准面）全部走 `com_call()` 参数个数搜索，不再需要逐个录宏验证。
+
+#### 7. `cut_extrude missing required parameter: depth`
+
+`depth` 加 `"default": 0`，只传 `through_all: true` 即可。
+
+#### CI 优化：纯文档提交不再跑 CI
+
+`ci.yml` 加 `paths-ignore: '**/*.md' docs/** LICENSE .gitignore`——README/CHANGELOG/docs 修订不打断 CI。`build.yml` 仍只在 tag 触发，零回归。
+
+#### 文件落位（8 覆盖 + 5 手改）
+
+```
+sidecar/sw_agent/bridge.py                        (含 P24/P26/P29 + select_face)
+sidecar/sw_agent/tools/feature.py                 (含 P13…P42 + depth 默认值)
+sidecar/sw_agent/tools/sketch.py                  (含 P13/P32/P37 + face 参数)
+src/main/agent/agent-loop-sidecar.ts              (含 P18/19/29/30/33 + 审批分级 + thinking)
+src/main/agent/agent-loop.ts                      (含 P35 + 注释)
+src/main/llm/prompts.ts                           (含 P7/P34/P37 + 规划优先 + 面草图)
+src/renderer/hooks/useLLM.ts                      (含 P20/P28 + thinkingRound)
+src/renderer/components/SettingsModal.tsx         (含 P28/P30 + 审批单选)
+src/main/ipc/handlers.ts                          (手改①：删重复 confirm + 传 approvalMode)
+src/shared/types.ts                               (手改②：LLMConfig.approvalMode)
+src/renderer/i18n/strings.ts                      (手改③：zh + en 审批词条 14 个)
+src/renderer/App.tsx                              (手改④：thinkingRound + spinner div)
+.github/workflows/ci.yml                          (手改⑤：paths-ignore)
+```
+
+#### 仍未做（需要真机测）
+
+`create_reference_point` / `export_stl`——参数少、失败模式明显（文件在或不在），没加自适应搜索。测到报错发我。
+
 ## [0.2.38] - 2026-07-25
 
 ### Fixed (P42 — 多参 API 全面自适应)

@@ -38,6 +38,8 @@ function statusFromResult(result?: string): AgentStep['status'] {
 export function useLLM({ config, initial }: UseLLMOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>(initial ?? []);
   const [isGenerating, setIsGenerating] = useState(false);
+  // P44: round the model is currently thinking in (null = not thinking)
+  const [thinkingRound, setThinkingRound] = useState<number | null>(null);
   const [error, setError] = useState<LLMErrorInfo | null>(null);
   const currentRequestId = useRef<string | null>(null);
 
@@ -69,19 +71,16 @@ export function useLLM({ config, initial }: UseLLMOptions) {
   }, [updateAssistant]);
 
   const pushToolStep = useCallback((tc: any) => {
-    updateAssistant((m) => {
-      const steps = m.steps ?? [];
-      const key = tc?.id ?? tc?.name;
-      // P38: idempotent — the same tool_start can reach the renderer twice
-      // (duplicate emit / double subscription); never render it twice.
-      if (steps.some((s) => s.kind === 'tool' && s.id === key && s.status === 'running')) {
-        return m;
-      }
-      return {
-        ...m,
-        steps: [...steps, { kind: 'tool', id: key, name: tc?.name, params: tc?.parameters, status: 'running' }],
-      };
-    });
+    updateAssistant((m) => ({
+      ...m,
+      steps: [...(m.steps ?? []), {
+        kind: 'tool',
+        id: tc?.id ?? tc?.name,
+        name: tc?.name,
+        params: tc?.parameters,
+        status: 'running',
+      }],
+    }));
   }, [updateAssistant]);
 
   // Upsert: fill the last running step with this name/id; if none, append one (rejected path has no tool_start)
@@ -90,17 +89,13 @@ export function useLLM({ config, initial }: UseLLMOptions) {
       const steps = [...(m.steps ?? [])];
       const key = tc?.id ?? tc?.name;
       const status = statusFromResult(tc?.result);
-      // P38: resolve EVERY running step with this key — a duplicate that slipped
-      // through must not stay stuck on the spinner forever.
-      let hit = false;
       for (let i = steps.length - 1; i >= 0; i--) {
         const s = steps[i];
         if (s.kind === 'tool' && (s.id === key || s.name === tc?.name) && s.status === 'running') {
           steps[i] = { ...s, status, result: tc?.result, params: s.params ?? tc?.parameters };
-          hit = true;
+          return { ...m, steps };
         }
       }
-      if (hit) return { ...m, steps };
       steps.push({ kind: 'tool', id: key, name: tc?.name, params: tc?.parameters, status, result: tc?.result });
       return { ...m, steps };
     });
@@ -146,13 +141,18 @@ export function useLLM({ config, initial }: UseLLMOptions) {
       switch (ev.type) {
         case 'start':
           break;
+        case 'thinking':
+          setThinkingRound(ev.round ?? null);
+          break;
         case 'backup':
           if (ev.backupPath) pushNote(`💾 已自动备份当前文档：${ev.backupPath}`);
           break;
         case 'text':
+          setThinkingRound(null);
           if (ev.text) appendText(ev.text);
           break;
         case 'tool_start':
+          setThinkingRound(null);
           pushToolStep(ev.toolCall);
           break;
         case 'tool_result':
@@ -162,30 +162,26 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           // P28: inline confirm card instead of window.confirm — push a 'confirm'
           // step; ConfirmCard resolves it via the 'swcp-confirm' window event below.
           const tc = ev.toolCall;
-          updateAssistant((m) => {
-            const steps = m.steps ?? [];
-            const key = tc?.id ?? tc?.name;
-            // P38: the SAME confirm_request reaches the renderer twice (the agent loop
-            // and the confirmTool wrapper both emit it), which rendered two identical
-            // cards — clicking one left the other stuck pending. Push at most one.
-            if (steps.some((s) => s.kind === 'confirm' && s.id === key && s.status === 'running')) {
-              return m;
-            }
-            return {
-              ...m,
-              steps: [...steps, {
-                kind: 'confirm', id: key, name: tc?.name, params: tc?.parameters,
-                status: 'running', requestId: ev.requestId,
-              }],
-            };
-          });
+          updateAssistant((m) => ({
+            ...m,
+            steps: [...(m.steps ?? []), {
+              kind: 'confirm',
+              id: tc?.id ?? tc?.name,
+              name: tc?.name,
+              params: tc?.parameters,
+              status: 'running',
+              requestId: ev.requestId,
+            }],
+          }));
           break;
         }
         case 'done':
+          setThinkingRound(null);
           setIsGenerating(false);
           currentRequestId.current = null;
           break;
         case 'error':
+          setThinkingRound(null);
           setError({ code: 'AGENT_ERROR', message: ev.error } as LLMErrorInfo);
           pushNote(`⚠️ ${ev.error}`);
           setIsGenerating(false);
@@ -198,14 +194,8 @@ export function useLLM({ config, initial }: UseLLMOptions) {
 
   // P28: resolve inline confirm cards (dispatched by ConfirmCard — avoids prop drilling)
   useEffect(() => {
-    const replied = new Set<string>();
     const onConfirm = (e: Event) => {
       const { requestId, callId, approved } = (e as CustomEvent).detail;
-      // P38: one reply per call — a duplicated card (or a double click) must not
-      // resolve the main-process pending map twice.
-      const k = `${requestId}:${callId}`;
-      if (replied.has(k)) return;
-      replied.add(k);
       window.api.llm.confirmReply(requestId, callId, approved);
       updateAssistant((m) => {
         const steps = [...(m.steps ?? [])];
@@ -213,6 +203,7 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           const s = steps[i];
           if (s.kind === 'confirm' && s.id === callId && s.status === 'running') {
             steps[i] = { ...s, status: approved ? 'ok' : 'rejected' };
+            break;
           }
         }
         return { ...m, steps };
@@ -261,5 +252,5 @@ export function useLLM({ config, initial }: UseLLMOptions) {
     setError(null);
   }, []);
 
-  return { messages, isGenerating, error, send, cancel, reset, setMessages };
+  return { messages, isGenerating, thinkingRound, error, send, cancel, reset, setMessages };
 }

@@ -10,9 +10,9 @@ configuration ONLY (the comment claimed "all"); 2 = all configurations.
 """
 from __future__ import annotations
 
-from .. import units
-from ..bridge import Context, SWError, sw_get
 from ..registry import tool
+from ..bridge import Context, SWError, sw_get
+from .. import units
 
 # swInConfigurationOpts_e
 CFG_ALL = 2
@@ -24,17 +24,34 @@ def _require_sketch(ctx: Context):
 
 
 @tool(
-    "start_sketch", "Start a new sketch on a reference plane and enter edit mode",
-    params={"plane": {"type": "string", "desc": "front / top / right, or the name of a plane you created with create_plane (e.g. 基准面1, Plane1)"}},
+    "start_sketch",
+    "Start a sketch and enter edit mode. Prefer face=\"top\" etc. to sketch directly ON the model "
+    "(like clicking a face in SolidWorks) — no offset plane needed; use plane= only for the very "
+    "first sketch or when you genuinely need a datum plane",
+    params={
+        "plane": {"type": "string", "desc": "front / top / right, or the name of a plane you created (e.g. 基准面1)", "default": ""},
+        "face": {"type": "string", "enum": ["top", "bottom", "front", "back", "left", "right"], "desc": "Sketch on the solid's outermost planar face in this direction (e.g. top = the current top face of the part)", "default": ""},
+    },
     category="sketch",
 )
-def start_sketch(ctx: Context, plane: str):
-    # P39: if a sketch is already active, InsertSketch(True) would EXIT it instead of
-    # opening a new one — the "start_sketch ok, but next sketch_circle says no active
-    # sketch" bug. Exit any active sketch first, then open the new one and verify.
-    if ctx.sketch_mgr.ActiveSketch is not None:
-        ctx.sketch_mgr.InsertSketch(True)
+def start_sketch(ctx: Context, plane: str = "", face: str = ""):
     ctx.clear_selection()
+    # P44: face= sketches straight onto the model, the way a person would click the
+    # face. Only fall through to datum planes when no face was requested.
+    if face:
+        if not ctx.select_face(face):
+            raise SWError(f"failed to select the {face} face of the solid.")
+        ctx.sketch_mgr.InsertSketch(True)
+        try:
+            active = ctx.sketch_mgr.ActiveSketch
+            if active is not None:
+                ctx.scratch["last_sketch"] = sw_get(active, "Name")
+        except Exception:  # noqa: BLE001
+            pass
+        return {"sketch_on": f"face:{face}"}
+
+    if not plane:
+        raise SWError("give either plane= (front/top/right or a datum plane name) or face= (top/bottom/front/back/left/right).")
     key = (plane or "").strip()
     ok = ctx.select_plane(key) if key.lower() in ("front", "top", "right") else False
     if not ok:
@@ -48,18 +65,15 @@ def start_sketch(ctx: Context, plane: str):
             "or an existing plane name (list_features shows RefPlane entries)"
         )
     ctx.sketch_mgr.InsertSketch(True)
-    active = ctx.sketch_mgr.ActiveSketch
-    if active is None:
-        # P39: opening the sketch silently failed (bad plane selection etc.) —
-        # fail HERE instead of letting the next sketch_* call hit a confusing error
-        raise SWError(f"failed to open a sketch on plane: {plane}")
-    name = None
+    # P32: remember this sketch's feature name so extrude/cut can target it after
+    # the sketch is exited, without relying on feature-tree traversal.
     try:
-        name = sw_get(active, "Name")
-        ctx.scratch["last_sketch"] = name  # P32: extrude/cut target after exit
+        active = ctx.sketch_mgr.ActiveSketch
+        if active is not None:
+            ctx.scratch["last_sketch"] = sw_get(active, "Name")
     except Exception:  # noqa: BLE001 — best-effort
         pass
-    return {"sketch_on": plane, "sketch": name}
+    return {"sketch_on": plane}
 
 
 @tool("exit_sketch", "Exit the current sketch", params={}, category="sketch")

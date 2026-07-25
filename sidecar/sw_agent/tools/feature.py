@@ -22,9 +22,9 @@ P13 fixes:
 """
 from __future__ import annotations
 
-from .. import units
-from ..bridge import DOC_PART, Context, SWError, sw_get
 from ..registry import tool
+from ..bridge import Context, SWError, sw_get, DOC_PART
+from .. import units
 
 # swInConfigurationOpts_e
 CFG_THIS = 1
@@ -199,7 +199,7 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = Fal
 @tool(
     "cut_extrude", "Cut material using the current sketch (a through hole is direction-agnostic: pass through_all=true)",
     params={
-        "depth": {"type": "number", "desc": "Cut depth (mm); ignored when through_all is true"},
+        "depth": {"type": "number", "desc": "Cut depth (mm); omit or 0 when through_all is true", "default": 0},
         "through_all": {"type": "boolean", "desc": "Cut through the whole body — use this for through holes", "default": False},
         "flip": {"type": "boolean", "desc": "Cut toward the opposite side of the sketch plane (rarely needed — direction is auto-detected)", "default": False},
         "sketch": {"type": "string", "desc": "Sketch name to cut with (defaults to the most recent sketch)", "default": ""},

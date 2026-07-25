@@ -30,7 +30,9 @@ import { truncateMessages } from '../llm/context-window';
 import { analyzeImage } from '../llm/vision';
 
 export interface AgentEvent {
-  type: 'start' | 'text' | 'tool_start' | 'tool_result' | 'confirm_request' | 'image' | 'backup' | 'done' | 'error';
+  type: 'start' | 'text' | 'tool_start' | 'tool_result' | 'confirm_request' | 'image' | 'backup' | 'thinking' | 'done' | 'error';
+  /** P44: 1-based round index, sent with 'thinking' so the UI can show live progress */
+  round?: number;
   requestId?: string;
   text?: string;
   toolCall?: ToolCall;
@@ -45,6 +47,9 @@ export interface SidecarAgentOptions {
   onEvent?: (ev: AgentEvent) => void;
   /** Confirmation gate for destructive tools */
   confirmTool?: (call: ToolCall) => Promise<boolean>;
+  /** P43: approval strictness — 'strict' asks for every tool · 'normal' destructive only
+   *  (previous behaviour) · 'permissive' irreversible only · 'auto' never asks. */
+  approvalMode?: 'strict' | 'normal' | 'permissive' | 'auto';
   /** P5: lazy session backup — called once, right before the first destructive tool runs */
   backup?: () => Promise<string | null>;
   /** P18: main model can read images directly (preferred, lossless). */
@@ -128,6 +133,21 @@ export async function runSidecarAgent(
     sidecarTools.filter((t) => t.x_meta?.destructive).map((t) => t.function.name),
   );
 
+  // P43: which calls stop for approval. 'auto' runs unattended — the lazy session backup
+  // below is what makes that safe (the whole run stays rollback-able). 'permissive' still
+  // gates operations a feature-tree rollback cannot undo (file writes, deletions).
+  const mode = opts.approvalMode ?? 'normal';
+  const IRREVERSIBLE = new Set([
+    'delete_feature', 'save_as', 'save_document', 'export_file', 'export_stl',
+  ]);
+  const wantsConfirm = (name: string): boolean => {
+    if (!opts.confirmTool) return false;
+    if (mode === 'auto') return false;
+    if (mode === 'strict') return true;
+    if (mode === 'permissive') return IRREVERSIBLE.has(name);
+    return destructive.has(name) || IRREVERSIBLE.has(name);
+  };
+
   /** Lazy one-shot backup before anything destructive touches the document */
   const ensureBackup = async () => {
     if (backupDone || !opts.backup) return;
@@ -158,6 +178,12 @@ export async function runSidecarAgent(
       });
     }
 
+    // P44: this call blocks for tens of seconds; tell the UI so it can show a live
+
+    // "thinking · round N" indicator instead of freezing after the last tool card.
+
+    opts.onEvent?.({ type: 'thinking', round: round + 1 });
+
     const resp = await adapter.chatWithTools(history, opts.signal, tools);
     if (resp.content) {
       finalText = resp.content;
@@ -167,6 +193,13 @@ export async function runSidecarAgent(
       opts.onEvent?.({ type: 'done', text: finalText });
       return finalText;
     }
+
+    // P33: guarantee a unique id per tool call. Without it, two same-named calls
+    // (e.g. the model retrying cut_extrude) both collapse to callId=name, so the
+    // confirm cards collide and clicking one resolves the other.
+    resp.toolCalls.forEach((c, i) => {
+      if (!c.id) c.id = `${c.name}-r${round}-${i}-${Date.now().toString(36)}`;
+    });
 
     history.push({ role: 'assistant', content: resp.content ?? '', toolCalls: resp.toolCalls });
 
@@ -185,10 +218,13 @@ export async function runSidecarAgent(
         continue;
       }
 
-      // Destructive-tool confirmation gate
-      if (destructive.has(call.name) && opts.confirmTool) {
+      // Confirmation gate (P43: scope depends on the configured approval mode).
+      // P44: the ONLY place confirm_request is emitted — handlers.ts emitted it a SECOND
+      // time inside requestUserConfirm, which is why one call produced two identical cards.
+      if (wantsConfirm(call.name)) {
         opts.onEvent?.({ type: 'confirm_request', toolCall: call });
-        const ok = await opts.confirmTool(call);
+        // wantsConfirm() guarantees opts.confirmTool is defined when it returns true
+        const ok = await opts.confirmTool!(call);
         if (!ok) {
           const r = `⛔ 用户拒绝执行 ${call.name}`;
           call.result = r;

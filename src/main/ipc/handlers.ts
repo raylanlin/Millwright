@@ -50,7 +50,6 @@ function requestUserConfirm(
   sender: Electron.WebContents,
   requestId: string,
   call: ToolCall,
-  sendEvent: (ev: AgentEvent) => void,
 ): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const callId = call.id ?? call.name;
@@ -66,8 +65,9 @@ function requestUserConfirm(
       pendingConfirms.delete(key);
       resolve(ok);
     });
-    sendEvent({ type: 'confirm_request', toolCall: call });
-    // `sender` is intentionally retained (avoids an "unused" warning)
+    // Note: confirm_request is now emitted by agent-loop (single source of truth).
+    // See comment in agent-loop.ts around emitConfirmRequest. Sending here caused
+    // a double card per destructive call (P43 root-cause fix).
     void sender;
   });
 }
@@ -273,9 +273,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
         const text = await runSidecarAgent(adapter, payload.messages, sidecar, {
           requestId,
           maxRounds: payload.config.maxRounds ?? 24,
+          approvalMode: payload.config.approvalMode ?? 'normal',
           signal: controller.signal,
           onEvent: send,
-          confirmTool: (call) => requestUserConfirm(e.sender, requestId, call, send),
+          confirmTool: (call) => requestUserConfirm(e.sender, requestId, call),
           visionConfig: enrichedConfig.visionModel,
           mainModelVision: !!enrichedConfig.mainModelVision,
           imageToDataUrl,
@@ -300,7 +301,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           const r = await backupActiveDocument(bridge);
           return r.backupPath ?? null;
         },
-        confirmTool: (call) => requestUserConfirm(e.sender, requestId, call, send),
+        confirmTool: (call) => requestUserConfirm(e.sender, requestId, call),
       });
       return { ok: true, text, requestId };
     } catch (err) {

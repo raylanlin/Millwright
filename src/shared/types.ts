@@ -26,6 +26,8 @@ export interface LLMConfig {
   contextWindow?: number;
   /** P30: agent 单次会话最大工具调用轮数(默认 24) */
   maxRounds?: number;
+  /** P43: 审批严格度 —— strict 每个工具 / normal 破坏性(默认) / permissive 仅不可逆 / auto 全自动 */
+  approvalMode?: 'strict' | 'normal' | 'permissive' | 'auto';
 }
 
 /** P3: configuration for a dedicated vision model (OpenAI-compatible multimodal) */

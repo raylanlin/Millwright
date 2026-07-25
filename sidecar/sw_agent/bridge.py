@@ -20,7 +20,6 @@ Key conventions:
   "no connection / no document" error handling lives here, in one place.
 """
 from __future__ import annotations
-
 from typing import Any
 
 # swDocumentTypes_e
@@ -89,18 +88,7 @@ class Context:
                 from win32com.client import gencache
                 return gencache.EnsureDispatch(raw)
             except Exception:  # noqa: BLE001 — makepy unavailable → degrade to dynamic dispatch
-                # P29: even when EnsureDispatch fails, wrap in dynamic.Dispatch so the
-                # returned object exposes IDispatch methods/properties correctly. Without
-                # this, raw IDispatch falls back through ambiguous Python attribute lookups
-                # and members like GetType (a property under early binding) get resolved
-                # as a method returning an int — the call site then crashes with
-                # 'int' object is not callable. dynamic.Dispatch forces late-bound dispatch
-                # while preserving the IDispatch type info for method resolution.
-                try:
-                    import win32com.client.dynamic
-                    return win32com.client.dynamic.Dispatch(raw)
-                except Exception:  # noqa: BLE001
-                    return raw
+                return raw
         # P24: report the BARE-ProgID error (the meaningful one) — the old code
         # reported the LAST versioned ProgID's error ("invalid class string" for an
         # unregistered .25), masking the real failure cause.
@@ -163,6 +151,72 @@ class Context:
         return bool(
             self.model.Extension.SelectByID2(name, typ, x, y, z, append, mark, callout, 0)
         )
+
+    def _variant_null(self):
+        import pythoncom
+        from win32com.client import VARIANT
+        return VARIANT(pythoncom.VT_DISPATCH, None)
+
+    def select_face(self, which: str, append=False, mark=0) -> bool:
+        """P44: select the outermost planar face of the solid facing `which`.
+
+        Sketching straight onto a model face is how people actually model — without
+        it every feature above the base needed a hand-computed offset plane, which
+        is why complex parts ended up littered with 基准面N and mis-positioned
+        geometry. Picks the planar face whose normal points along the requested
+        axis and which sits furthest along it, then selects it so InsertSketch
+        starts a sketch right there.
+        """
+        axes = {
+            "top": (0, 0, 1), "bottom": (0, 0, -1),
+            "front": (0, -1, 0), "back": (0, 1, 0),
+            "right": (1, 0, 0), "left": (-1, 0, 0),
+        }
+        key = (which or "").lower()
+        if key not in axes:
+            raise SWError(f"unknown face: {which} (expected top/bottom/front/back/left/right)")
+        ax, ay, az = axes[key]
+
+        bodies = self.model.Extension.GetBodies2(0, True)  # 0 = swSolidBody
+        if not bodies:
+            raise SWError("no solid body to sketch on — create a feature first.")
+        best, best_d = None, None
+        for body in (bodies if isinstance(bodies, (list, tuple)) else [bodies]):
+            faces = body.GetFaces()
+            for face in (faces or []):
+                try:
+                    surf = face.GetSurface()
+                    if not surf.IsPlane():
+                        continue
+                    n = face.Normal            # 3 doubles, outward normal
+                    dot = n[0] * ax + n[1] * ay + n[2] * az
+                    if dot < 0.95:             # not facing the requested direction
+                        continue
+                    box = face.GetBox()        # xmin,ymin,zmin,xmax,ymax,zmax
+                    # distance along the requested axis (outermost face wins)
+                    d = (box[0] + box[3]) / 2 * ax + (box[1] + box[4]) / 2 * ay + (box[2] + box[5]) / 2 * az
+                except Exception:  # noqa: BLE001 — skip faces whose members won't read
+                    continue
+                if best_d is None or d > best_d:
+                    best, best_d = face, d
+        if best is None:
+            raise SWError(f"no planar face facing {which} was found on the solid.")
+
+        callout = self._variant_null()
+        for member, args in (
+            ("Select4", (append, callout)),
+            ("Select2", (append, mark)),
+            ("Select", (append,)),
+        ):
+            fn = getattr(best, member, None)
+            if fn is None:
+                continue
+            try:
+                if fn(*args):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
 
     def select_plane(self, which: str, append=False, mark=0) -> bool:
         """Select a reference plane; auto-handles both English and localized (zh-CN) templates."""

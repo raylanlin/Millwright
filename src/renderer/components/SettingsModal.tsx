@@ -376,6 +376,38 @@ export function SettingsModal({
           }}
         />
 
+        {/* P43: Approval strictness */}
+        <label style={labelStyle}>{tr('settings.approval')}</label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 6 }}>
+          {(['strict', 'normal', 'permissive', 'auto'] as const).map((m) => (
+            <label
+              key={m}
+              style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer',
+                color: t.textSecondary, fontSize: 13, lineHeight: 1.5,
+              }}
+            >
+              <input
+                type="radio"
+                name="approvalMode"
+                checked={(draft.approvalMode ?? 'normal') === m}
+                onChange={() => update('approvalMode', m)}
+                style={{ cursor: 'pointer', marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontWeight: 600, color: m === 'auto' ? t.warnText : t.text }}>
+                  {tr(`settings.approval.${m}`)}
+                </span>
+                <br />
+                <span style={{ color: t.textMuted, fontSize: 11 }}>{tr(`settings.approval.${m}Hint`)}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '0 0 18px 1px' }}>
+          {tr('settings.approvalNote')}
+        </p>
+
         {/* P30: Max agent rounds */}
         <label style={labelStyle}>{tr('settings.maxRounds')}</label>
         <input

@@ -41,7 +41,7 @@ export default function App() {
   const { status: swStatus, loading: swLoading, reconnect } = useSWStatus();
 
   // —— Chat ——
-  const { messages, isGenerating, error: llmError, send, cancel, reset, setMessages } = useLLM({
+  const { messages, isGenerating, thinkingRound, error: llmError, send, cancel, reset, setMessages } = useLLM({
     config,
     initial: INITIAL_MESSAGES,
   });
@@ -300,6 +300,12 @@ export default function App() {
               onRunScript={handleRunScript}
               onCopyCode={handleCopyCode}
             />
+            {thinkingRound !== null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 16px 10px', color: t.textMuted, fontSize: 12 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', border: `2px solid ${t.btnPrimary}`, borderTopColor: 'transparent', animation: 'swcp-spin 0.8s linear infinite' }} />
+                {thinkingRound > 1 ? tr('chat.thinkingRound', { round: thinkingRound }) : tr('chat.thinking')}
+              </div>
+            )}
             <ChatInput
               ref={inputRef}
               t={t}

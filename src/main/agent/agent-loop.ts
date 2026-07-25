@@ -122,6 +122,7 @@ export async function runAgentLoop(
       if (opts.signal?.aborted) throw new Error('已取消');
 
       let resultText: string;
+      // P44: sole emitter of confirm_request on this path too (see agent-loop-sidecar)
       if (confirmList.has(call.name) && opts.confirmTool) {
         opts.onEvent?.({ type: 'confirm_request', toolCall: call });
         const approved = await opts.confirmTool(call);
