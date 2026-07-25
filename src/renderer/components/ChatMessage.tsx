@@ -42,6 +42,10 @@ export function ChatMessage({
 
   const hasSteps = !isUser && !!msg.steps && msg.steps.length > 0;
 
+  // P48: an assistant message with nothing in it yet (the placeholder pushed on send,
+  // or a round that only ran tools) used to paint an empty grey bubble.
+  if (!isUser && !hasSteps && !msg.content && !msg.code) return null;
+
   return (
     <div
       style={{

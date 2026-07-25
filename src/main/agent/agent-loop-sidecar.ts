@@ -127,6 +127,35 @@ export async function runSidecarAgent(
   // ask several follow-up questions about the SAME snapshot without re-capturing.
   let lastCapture: string | null = null;
 
+  // P47: the user can attach screenshots ("this fillet is on the wrong edge"). A
+  // multimodal main model reads them as-is; for a text-only main model we run each
+  // image through the configured vision model and fold its description into the text,
+  // so pointing at a picture works on every provider.
+  if (!opts.mainModelVision) {
+    for (const msg of history) {
+      if (msg.role !== 'user' || !msg.images?.length) continue;
+      const shots = msg.images;
+      delete msg.images;
+      if (!opts.visionConfig) {
+        msg.content = `${msg.content}\n\n（用户附了 ${shots.length} 张图，但当前主模型不支持读图、也未配置备用视觉模型 —— 请让用户在「设置 → 视觉理解」里配置，或用文字描述问题。）`;
+        continue;
+      }
+      for (let i = 0; i < shots.length; i++) {
+        try {
+          const desc = await analyzeImage({
+            question: msg.content || '请详细描述这张图里的内容与可见问题。',
+            imageDataUrl: shots[i],
+            config: opts.visionConfig,
+            signal: opts.signal,
+          });
+          msg.content = `${msg.content}\n\n【用户附图 ${i + 1} 的视觉分析】${clip(desc)}`;
+        } catch (e) {
+          msg.content = `${msg.content}\n\n（附图 ${i + 1} 分析失败：${errText(e)}）`;
+        }
+      }
+    }
+  }
+
   await sidecar.start();
   const sidecarTools = await sidecar.listTools(false);
   const tools = [...VIRTUAL_TOOLS, ...sidecarTools];
@@ -237,6 +266,7 @@ export async function runSidecarAgent(
       // time inside requestUserConfirm, which is why one call produced two identical cards.
       if (wantsConfirm(call.name)) {
         opts.onEvent?.({ type: 'confirm_request', toolCall: call });
+        // wantsConfirm() guarantees opts.confirmTool is defined when it returns true
         const ok = await opts.confirmTool!(call);
         if (!ok) {
           const r = `⛔ 用户拒绝执行 ${call.name}`;

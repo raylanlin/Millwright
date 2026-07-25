@@ -178,6 +178,13 @@ export function useLLM({ config, initial }: UseLLMOptions) {
         case 'done':
           setThinkingRound(null);
           setIsGenerating(false);
+          // P48: a round that yielded neither prose nor tools left a blank bubble behind
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            const empty = last && last.role === 'assistant' && !last.content && !last.code
+              && !(last.steps && last.steps.length);
+            return empty ? prev.slice(0, -1) : prev;
+          });
           currentRequestId.current = null;
           break;
         case 'error':
@@ -214,12 +221,18 @@ export function useLLM({ config, initial }: UseLLMOptions) {
   }, [updateAssistant]);
 
   const send = useCallback(
-    async (userInput: string) => {
+    async (userInput: string, images?: string[]) => {
       const trimmed = userInput.trim();
-      if (!trimmed || isGenerating) return;
+      // P47: a screenshot on its own is a valid message ("look at this")
+      if ((!trimmed && !images?.length) || isGenerating) return;
 
       setError(null);
-      const userMsg: ChatMessage = { role: 'user', content: trimmed, timestamp: Date.now() };
+      const userMsg: ChatMessage = {
+        role: 'user',
+        content: trimmed || '（见附图）',
+        timestamp: Date.now(),
+        ...(images?.length ? { images } : {}),
+      };
       setMessages((prev) => [...prev, userMsg, { role: 'assistant', content: '', steps: [], timestamp: Date.now() }]);
       setIsGenerating(true);
       const payloadMessages = [...messages, userMsg];
@@ -243,8 +256,18 @@ export function useLLM({ config, initial }: UseLLMOptions) {
     if (currentRequestId.current) {
       await window.api.llm.cancel(currentRequestId.current);
       currentRequestId.current = null;
-      setIsGenerating(false);
     }
+    // P48: the spinner kept turning after Stop because only isGenerating was cleared —
+    // the thinking indicator has its own state and nothing reset it. Clear both, and
+    // drop the placeholder assistant bubble if the run produced nothing at all.
+    setThinkingRound(null);
+    setIsGenerating(false);
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      const empty = last && last.role === 'assistant' && !last.content && !last.code
+        && !(last.steps && last.steps.length);
+      return empty ? prev.slice(0, -1) : prev;
+    });
   }, []);
 
   const reset = useCallback((keepFirst = true) => {

@@ -6,6 +6,51 @@
 
 ## [Unreleased]
 
+## [0.2.45] - 2026-07-26
+
+### Added (P47 + P48 + P49 — 几何双路由 / 内联工具条 / 空气泡与双提示)
+
+#### P49：几何读取双路由（核心：修倒角/面草图全线失败）
+
+上一轮 `edges="all"` 和 `face="top"` 双双落空。两者都没有报 "could not read the part's solid bodies"，说明 P46 实体枚举成功了，但**这台机器的 `IBody2.GetFaces()` / `GetEdges()` 返回空**。`list_features` 一直好使。
+
+修：新增 `bridge.geometry()` 返回 `(faces, edges, trace)`，两条独立路线——
+- **路线 A**：实体 → `GetFaces`/`GetEdges`（原路）
+- **路线 B**：拿不到面就走**特征树**（`GetFeatures(True)` → 每个特征 `GetFaces()`），边再从这些面上取
+- `trace` 记录每条路线实际计数，**所有报错都带上它**（`bodies=1 faces=0 edges=0` / `features=16 faces=6` / `edges-from-faces=24`），下次失败一眼定位
+
+`select_edges` / `select_face` / `select_axis_edge` / `select_cylindrical_face` 全部改用。顺带：面法向读不到时改用 `GetSurface().PlaneParams`；所有边都分类不了会单独报"读到 N 条边但一条都分类不了（GetCurve 不可用?）"。
+
+#### P47：输入框内联工具条 + 图片上传
+
+- 工具条移进输入框内：`+` 附图 · 审批模式（图标+文字+▾），无边框悬停浅底；AUTO 档文字变琥珀色
+- 图片三种方式：点 `+` / **Ctrl+V 粘贴截图** / 拖进输入框；最多 4 张带缩略图；只发图不打字也能发
+- 贯通 agent：多模态主模型直接读图；**纯文本主模型**先送备用视觉模型转描述再折进消息；两者都没配会明确提示，不静默丢图
+
+#### P48：空气泡 / 双提示重叠 / 终止后还转圈
+
+- 空 assistant 消息不渲染，并在 `done`/`cancel` 时从历史移除（不留脏数据进会话存档）
+- `cancel()` 同时清 `thinkingRound`（转圈的是它）
+- 双提示：删掉旧的「正在生成…」，只留带轮次的「正在思考…」
+
+#### 文件落位（6 覆盖 + 5 手改）
+
+```
+sidecar/sw_agent/bridge.py                      覆盖（P49 双路由）
+src/main/agent/agent-loop-sidecar.ts            覆盖（P46 nudge + P47 图片预处理）
+src/renderer/hooks/useLLM.ts                    覆盖（P47 send(images) + P48 清理）
+src/renderer/components/ChatMessage.tsx         覆盖（P48 空消息不渲染）
+src/renderer/components/ChatInput.tsx           覆盖（P47 内联工具条 + 附图）
+src/renderer/components/ApprovalPicker.tsx      覆盖（P47 内联样式 + SVG 图标）
+src/renderer/i18n/strings.ts                    手改①（input.attachImage/removeImage + 删 chat.generating）
+src/renderer/App.tsx                            手改②④（删独立 ApprovalPicker → 传 prop；handleSend 接受 images）
+src/shared/types.ts                             手改③（已存在 ChatMessage.images，无需修改）
+sidecar/sw_agent/tools/sketch.py                手改⑤（pairwise 兼容层 — P46 已修，本包验过）
+.ruff.toml                                      手改⑤（target-version = "py39" — P46 已修，本包验过）
+```
+
+bump 0.2.42 → 0.2.45
+
 ## [0.2.42] - 2026-07-25
 
 ### Fixed (P46 — 实体枚举修复 + 写完方案自动开工 + Python 3.9 兼容)

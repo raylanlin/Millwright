@@ -16,7 +16,6 @@ import { Sidebar, type TabKey } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ChatInput, type ChatInputHandle } from './components/ChatInput';
 import { SettingsModal } from './components/SettingsModal';
-import { ApprovalPicker } from './components/ApprovalPicker';
 import { Automations } from './components/Automations';
 import { ToolsList } from './components/ToolsList';
 import { ErrorBanner } from './components/ErrorBanner';
@@ -107,11 +106,11 @@ export default function App() {
     return () => clearTimeout(tid);
   }, [messages, isGenerating, persistSession]);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback((images?: string[]) => {
     const value = input.trim();
-    if (!value || isGenerating) return;
+    if ((!value && !images?.length) || isGenerating) return;
     setInput('');
-    send(value);
+    send(value, images);
   }, [input, isGenerating, send]);
 
   const handleClear = useCallback(() => {
@@ -307,16 +306,6 @@ export default function App() {
                 {thinkingRound > 1 ? tr('chat.thinkingRound', { round: thinkingRound }) : tr('chat.thinking')}
               </div>
             )}
-            <ApprovalPicker
-              mode={config.approvalMode ?? 'normal'}
-              onChange={(m) => {
-                const next = { ...config, approvalMode: m };
-                setConfig(next);
-                void window.api.config.save(next);
-              }}
-              t={t}
-              disabled={isGenerating}
-            />
             <ChatInput
               ref={inputRef}
               t={t}
@@ -325,6 +314,12 @@ export default function App() {
               onSend={handleSend}
               onCancel={cancel}
               isGenerating={isGenerating}
+              approvalMode={config.approvalMode ?? 'normal'}
+              onApprovalChange={(m) => {
+                const next = { ...config, approvalMode: m };
+                setConfig(next);
+                void window.api.config.save(next);
+              }}
               placeholder={
                 !config.apiKey
                   ? tr('input.placeholderNoKey')

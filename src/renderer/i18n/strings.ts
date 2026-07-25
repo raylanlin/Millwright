@@ -33,8 +33,9 @@ const zh: Dict = {
   'input.enterHint': 'Enter 发送 / Shift+Enter 换行',
   'input.cancel': '取消生成',
   'input.send': '发送 (Enter)',
-  // Chat
-  'chat.generating': '正在生成…',
+  // P47: image attach hint
+  'input.attachImage': '添加图片（也可直接粘贴截图或拖进来）',
+  'input.removeImage': '移除',
   // Message
   'msg.toolCalls': '调用工具：',
   'msg.copy': '复制',
@@ -111,6 +112,7 @@ const zh: Dict = {
   'settings.approval.normalShort': '标准',
   'settings.approval.permissiveShort': '宽松',
   'settings.approval.autoShort': 'AUTO',
+  // P48: 删掉「正在生成…」,只留带轮次的「正在思考…」
   'chat.thinking': '正在思考…',
   'chat.thinkingRound': '正在思考…(第 {round} 轮)',
   // Error banner
@@ -180,7 +182,9 @@ const en: Dict = {
   'input.enterHint': 'Enter to send · Shift+Enter for newline',
   'input.cancel': 'Cancel generation',
   'input.send': 'Send (Enter)',
-  'chat.generating': 'Generating…',
+  // P47: image attach hint
+  'input.attachImage': 'Add an image (or just paste / drop a screenshot)',
+  'input.removeImage': 'Remove',
   'msg.toolCalls': 'Tool calls:',
   'msg.copy': 'Copy',
   'msg.run': 'Run',

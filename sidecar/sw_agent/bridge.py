@@ -213,6 +213,80 @@ class Context:
             f"or report this: {'; '.join(errs[-3:])}"
         )
 
+    def all_features(self):
+        """Feature-tree listing — works on installs where body enumeration doesn't."""
+        try:
+            return list(self.feat_mgr.GetFeatures(True) or [])
+        except Exception:  # noqa: BLE001
+            return []
+
+    def geometry(self):
+        """P49: return (faces, edges, trace) for the current part.
+
+        Two independent routes, because IBody2.GetFaces/GetEdges came back EMPTY on a
+        real install even though the solid was plainly on screen — which surfaced as the
+        nonsense "no edges matched" / "no planar face facing top". Route B uses the same
+        call list_features already proves works there. `trace` carries per-route counts,
+        so any failure reports what was actually tried.
+        """
+        faces, edges, trace = [], [], []
+
+        # Route A — solid bodies
+        try:
+            found = self.solid_bodies()
+        except SWError as e:
+            found = []
+            trace.append(f"bodies: {e}")
+        for b in found:
+            for member, sink in (("GetFaces", faces), ("GetEdges", edges)):
+                try:
+                    got = getattr(b, member)() or []
+                    sink.extend(list(got) if isinstance(got, (list, tuple)) else [got])
+                except Exception as ex:  # noqa: BLE001
+                    trace.append(f"body.{member}: {ex}")
+        if found:
+            trace.append(f"bodies={len(found)} faces={len(faces)} edges={len(edges)}")
+
+        # Route B — faces off the feature tree
+        if not faces:
+            feats = self.all_features()
+            for ft in feats:
+                try:
+                    got = ft.GetFaces() or []
+                except Exception:  # noqa: BLE001 — folders and datums have no faces
+                    continue
+                faces.extend(list(got) if isinstance(got, (list, tuple)) else [got])
+            trace.append(f"features={len(feats)} faces={len(faces)}")
+
+        # Edges off whatever faces we ended up with
+        if not edges:
+            for fa in faces:
+                try:
+                    got = fa.GetEdges() or []
+                except Exception:  # noqa: BLE001
+                    continue
+                edges.extend(list(got) if isinstance(got, (list, tuple)) else [got])
+            trace.append(f"edges-from-faces={len(edges)}")
+
+        return faces, edges, trace
+
+    def _face_normal(self, face):
+        """Outward normal of a planar face — IFace2.Normal, else the plane's own params."""
+        try:
+            n = face.Normal
+            if n and len(n) >= 3:
+                return (n[0], n[1], n[2])
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            surf = face.GetSurface()
+            if surf.IsPlane():
+                p = surf.PlaneParams  # normal xyz, then a point on the plane
+                return (p[0], p[1], p[2])
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
     def _select_entity(self, ent, append: bool, mark: int) -> bool:
         """P45.1: when a MARK is required, Select2 must come first — IEntity::Select4
         takes (Append, Callout) and has no mark parameter, so preferring it silently
@@ -252,36 +326,35 @@ class Context:
         return None, None
 
     def select_edges(self, which: str = "all", append=False, mark=0) -> int:
-        """P45: select edges BY DESCRIPTION so the agent can actually reach them.
-
-        fillet_edges / patterns / mirror all required a human to pre-select geometry in
-        SolidWorks first, which made them unusable from chat — the model kept retrying
-        them and eventually worked around the missing capability by deleting and
-        redrawing features. Now: 'vertical' / 'horizontal' / 'circular' / 'all'.
-        Returns how many edges were selected.
-        """
+        """Select edges BY DESCRIPTION: vertical / horizontal / circular / all."""
         key = (which or "all").lower()
         if key not in ("vertical", "horizontal", "circular", "all"):
-            # P45.1: validated up front — this check used to sit inside the edge loop,
-            # so a bad name passed silently whenever the body had no readable edges.
             raise SWError(f"unknown edge set: {which} (expected vertical/horizontal/circular/all)")
-        n = 0
+        _faces, edges, trace = self.geometry()
+        if not edges:
+            raise SWError(f"could not read any edge of the solid ({'; '.join(trace)})")
+        n, unread = 0, 0
         first = not append
-        for body in self.solid_bodies():
-            for edge in (body.GetEdges() or []):
-                kind, info = self._edge_kind(edge)
-                if kind is None:
-                    continue
-                # P45.1: "vertical" means along the model's UP axis, which is Y in SW
-                if key == "vertical" and not (kind == "line" and abs(info[1]) > 0.95):
-                    continue
-                if key == "horizontal" and not (kind == "line" and abs(info[1]) < 0.05):
-                    continue
-                if key == "circular" and kind != "circle":
-                    continue
-                if self._select_entity(edge, append or not first, mark):
-                    n += 1
-                    first = False
+        for edge in edges:
+            kind, info = self._edge_kind(edge)
+            if kind is None:
+                unread += 1
+                continue
+            # "vertical" = along the model's UP axis, which is Y in SolidWorks
+            if key == "vertical" and not (kind == "line" and abs(info[1]) > 0.95):
+                continue
+            if key == "horizontal" and not (kind == "line" and abs(info[1]) < 0.05):
+                continue
+            if key == "circular" and kind != "circle":
+                continue
+            if self._select_entity(edge, append or not first, mark):
+                n += 1
+                first = False
+        if n == 0 and unread == len(edges):
+            raise SWError(
+                f"read {len(edges)} edges but could not classify any (GetCurve unavailable?) "
+                f"({'; '.join(trace)})"
+            )
         return n
 
     def select_axis_edge(self, axis: str, append=False, mark=0) -> bool:
@@ -293,8 +366,9 @@ class Context:
         }.get((axis or "").lower())
         if want is None:
             raise SWError(f"unknown direction: {axis} (expected x/y/z)")
-        for body in self.solid_bodies():
-            for edge in (body.GetEdges() or []):
+        _faces, edges, _trace = self.geometry()
+        for edge in edges:
+            if True:
                 kind, d = self._edge_kind(edge)
                 if kind != "line":
                     continue
@@ -305,8 +379,9 @@ class Context:
 
     def select_cylindrical_face(self, append=False, mark=0) -> bool:
         """Select a cylindrical face — SolidWorks accepts it as a rotation axis."""
-        for body in self.solid_bodies():
-            for face in (body.GetFaces() or []):
+        faces, _edges, _trace = self.geometry()
+        for face in faces:
+            if True:
                 try:
                     if face.GetSurface().IsCylinder():
                         if self._select_entity(face, append, mark):
@@ -345,30 +420,28 @@ class Context:
             raise SWError(f"unknown face: {which} (expected top/bottom/front/back/left/right)")
         ax, ay, az = axes[key]
 
-        bodies = self.solid_bodies()
-        if not bodies:
-            raise SWError("no solid body to sketch on — create a feature first.")
+        faces, _edges, trace = self.geometry()
+        if not faces:
+            raise SWError(f"could not read any face of the solid ({'; '.join(trace)})")
         best, best_d = None, None
-        for body in (bodies if isinstance(bodies, (list, tuple)) else [bodies]):
-            faces = body.GetFaces()
-            for face in (faces or []):
-                try:
-                    surf = face.GetSurface()
-                    if not surf.IsPlane():
-                        continue
-                    n = face.Normal            # 3 doubles, outward normal
-                    dot = n[0] * ax + n[1] * ay + n[2] * az
-                    if dot < 0.95:             # not facing the requested direction
-                        continue
-                    box = face.GetBox()        # xmin,ymin,zmin,xmax,ymax,zmax
-                    # distance along the requested axis (outermost face wins)
-                    d = (box[0] + box[3]) / 2 * ax + (box[1] + box[4]) / 2 * ay + (box[2] + box[5]) / 2 * az
-                except Exception:  # noqa: BLE001 — skip faces whose members won't read
-                    continue
-                if best_d is None or d > best_d:
-                    best, best_d = face, d
+        for face in faces:
+            n = self._face_normal(face)
+            if n is None:
+                continue
+            if n[0] * ax + n[1] * ay + n[2] * az < 0.95:   # not facing the requested way
+                continue
+            try:
+                box = face.GetBox()   # xmin,ymin,zmin,xmax,ymax,zmax
+                d = ((box[0] + box[3]) / 2 * ax + (box[1] + box[4]) / 2 * ay
+                     + (box[2] + box[5]) / 2 * az)
+            except Exception:  # noqa: BLE001
+                d = 0.0
+            if best_d is None or d > best_d:
+                best, best_d = face, d
         if best is None:
-            raise SWError(f"no planar face facing {which} was found on the solid.")
+            raise SWError(
+                f"no planar face facing {which} among {len(faces)} faces ({'; '.join(trace)})"
+            )
 
         return self._select_entity(best, append, mark)
 
