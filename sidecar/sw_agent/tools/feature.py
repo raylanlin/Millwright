@@ -156,6 +156,49 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
 
     errors: list = []
 
+    def attempt_definition(reverse: bool):
+        """P39: property-based cut creation — IFeatureManager.CreateDefinition(swFmCut)
+        + IExtrudeFeatureData2 setters + CreateFeature. No giant positional signature
+        to guess (every positional arity of FeatureCut3/4 raised DISP_E_PARAMNOTOPTIONAL
+        on this install), and it is the API SolidWorks documents for automation."""
+        try:
+            from win32com.client import constants  # populated by makepy (P17 warmup)
+            fm_cut = getattr(constants, "swFmCut", None)
+        except Exception:  # noqa: BLE001
+            fm_cut = None
+        if fm_cut is None:
+            errors.append("definition path unavailable: constants.swFmCut not resolved")
+            return None
+        if ctx.sketch_mgr.ActiveSketch is None:
+            try:
+                _select_profile_sketch(ctx, target)
+            except SWError as e:
+                errors.append(str(e))
+                return None
+        before = names()
+        try:
+            data = ctx.feat_mgr.CreateDefinition(fm_cut)
+            if data is None:
+                errors.append("CreateDefinition(swFmCut) returned None")
+                return None
+            # forward direction end condition; swEndCondBlind=0 / swEndCondThroughAll=1
+            data.SetEndCondition(True, end)
+            if not through_all:
+                data.SetDepth(True, d)
+            try:
+                data.ReverseDirection = bool(reverse)
+            except Exception:  # noqa: BLE001 — property name varies on old versions
+                pass
+            made = ctx.feat_mgr.CreateFeature(data)
+            if made is None:
+                made = new_cut(before)
+            if made is None:
+                errors.append(f"CreateFeature(reverse={reverse}) made nothing")
+            return made
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"definition(reverse={reverse}): {e}")
+            return None
+
     def attempt(single_dir: bool, reverse: bool):
         """One cut attempt. Re-selects the sketch, then tries the documented
         FeatureCut members / arities until one produces a Cut feature."""
@@ -191,20 +234,23 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
                     return made
         return None
 
-    # P37: WRONG DIRECTION was the real cause of "profile doesn't lie on/through the
-    # solid" — the caller cannot know which way SW will cut from a given plane. Try the
-    # requested direction, then the reverse, then symmetric (both ways); first wins.
-    made = attempt(True, bool(flip))
+    # P39: definition path first (both directions), then P37's positional trials.
+    made = attempt_definition(bool(flip))
+    if made is None:
+        made = attempt_definition(not bool(flip))
+    if made is None:
+        made = attempt(True, bool(flip))
     if made is None:
         made = attempt(True, not bool(flip))
     if made is None:
         made = attempt(False, False)
 
     if made is None:
-        tail = "; ".join(errors[-2:]) if errors else "no COM error reported"
+        # P39: report EVERYTHING tried — the old 2-error tail pointed at the wrong API
+        detail = " | ".join(errors) if errors else "no COM error reported"
         raise SWError(
-            "cut failed in both directions — the sketch profile probably does not overlap "
-            f"the solid (sketch: {target or 'unknown'}). ({tail})"
+            "cut failed — the sketch profile may not overlap the solid "
+            f"(sketch: {target or 'unknown'}). attempts: {detail}"
         )
     return {
         "feature": sw_get(made, "Name"),

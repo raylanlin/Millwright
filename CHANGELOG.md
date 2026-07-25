@@ -6,6 +6,52 @@
 
 ## [Unreleased]
 
+## [0.2.36] - 2026-07-25
+
+### Fixed (P39 — 属性式切除 + start_sketch 真 bug)
+
+这轮日志三个发现：
+
+**① 切除失败的真因**
+
+FeatureCut3/4 **所有参数长度**都报 `-2147352561 非选择性的参数`——不是
+方向问题（P37 方向重试已生效、两个方向都试了），是位置参数这条路本身
+不可靠。
+
+修复：改用 SolidWorks 文档推荐的**属性式 API**：
+```python
+data = feat_mgr.CreateDefinition(constants.swFmCut)
+data.SetEndCondition(True, 1)   # ThroughAll / Blind
+data.SetDepth(True, d)          # blind 时
+data.ReverseDirection = flip
+feat = feat_mgr.CreateFeature(data)
+```
+不猜参数个数，跨版本稳定。方向自动重试保留（definition 正向 → definition
+反向 → 位置参数三组后备）。报错改为**汇总全部尝试**。
+
+**② start_sketch 的真 bug（最后一个日志段）**
+
+「start_sketch 成功 → sketch_circle 说没有激活草图」：已有草图激活时再
+start_sketch，`InsertSketch(True)` 把旧草图**关掉**了而不是开新草图。
+
+修复：start_sketch 先退出激活草图再开新的；开完校验 `ActiveSketch`，
+失败当场报错（不再让下一个 sketch_* 撞上误导性错误）。
+
+### Files changed (2)
+- `sidecar/sw_agent/tools/feature.py` (OVR) — 属性式 API + 汇总全部尝试错误
+- `sidecar/sw_agent/tools/sketch.py` (OVR) — start_sketch 防覆盖旧草图
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `python -m compileall -q sidecar/sw_agent` ✅
+
+### 装机回归
+1. 新建零件 → 圆柱 → 「顶面挖直径 10 通孔」→ 一次成功（definition 路径）
+2. 草图激活时再 start_sketch → 旧草图正常退出、新草图正常打开
+3. 若 definition 路径也失败 → 报错里能看到**每一步**的真实 COM 错误
+
 ## [0.2.35] - 2026-07-25
 
 ### Added (P37+P38 — 切除方向 / 任意基准面 / 确认卡重复)

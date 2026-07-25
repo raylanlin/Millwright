@@ -29,6 +29,11 @@ def _require_sketch(ctx: Context):
     category="sketch",
 )
 def start_sketch(ctx: Context, plane: str):
+    # P39: if a sketch is already active, InsertSketch(True) would EXIT it instead of
+    # opening a new one — the "start_sketch ok, but next sketch_circle says no active
+    # sketch" bug. Exit any active sketch first, then open the new one and verify.
+    if ctx.sketch_mgr.ActiveSketch is not None:
+        ctx.sketch_mgr.InsertSketch(True)
     ctx.clear_selection()
     key = (plane or "").strip()
     ok = ctx.select_plane(key) if key.lower() in ("front", "top", "right") else False
@@ -43,15 +48,18 @@ def start_sketch(ctx: Context, plane: str):
             "or an existing plane name (list_features shows RefPlane entries)"
         )
     ctx.sketch_mgr.InsertSketch(True)
-    # P32: remember this sketch's feature name so extrude/cut can target it after
-    # the sketch is exited, without relying on feature-tree traversal.
+    active = ctx.sketch_mgr.ActiveSketch
+    if active is None:
+        # P39: opening the sketch silently failed (bad plane selection etc.) —
+        # fail HERE instead of letting the next sketch_* call hit a confusing error
+        raise SWError(f"failed to open a sketch on plane: {plane}")
+    name = None
     try:
-        active = ctx.sketch_mgr.ActiveSketch
-        if active is not None:
-            ctx.scratch["last_sketch"] = sw_get(active, "Name")
+        name = sw_get(active, "Name")
+        ctx.scratch["last_sketch"] = name  # P32: extrude/cut target after exit
     except Exception:  # noqa: BLE001 — best-effort
         pass
-    return {"sketch_on": plane}
+    return {"sketch_on": plane, "sketch": name}
 
 
 @tool("exit_sketch", "Exit the current sketch", params={}, category="sketch")
