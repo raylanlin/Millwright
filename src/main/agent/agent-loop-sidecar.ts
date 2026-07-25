@@ -119,6 +119,7 @@ export async function runSidecarAgent(
 ): Promise<string> {
   const maxRounds = opts.maxRounds ?? 24; // P30: 12 was too tight for real modeling sessions
   let history: ChatMessage[] = [...messages];
+  let nudged = false;
   let finalText = '';
   let backupDone = false;
 
@@ -190,6 +191,19 @@ export async function runSidecarAgent(
       opts.onEvent?.({ type: 'text', text: resp.content });
     }
     if (!resp.toolCalls || resp.toolCalls.length === 0) {
+      // P46: models habitually write the plan and STOP, waiting for approval that was
+      // never asked for — the user then has to type "continue". Nudge once: push the
+      // plan into history and tell it to proceed. Only on the first round, and only
+      // once, so a genuine "I have a question for you" answer still ends the turn.
+      if (round === 0 && !nudged && (resp.content ?? '').length > 80) {
+        nudged = true;
+        history.push({ role: 'assistant', content: resp.content ?? '' });
+        history.push({
+          role: 'user',
+          content: '按上述方案继续执行，现在开始调用工具。不需要我批准，遇到需要确认的破坏性操作时系统会自动询问我。',
+        });
+        continue;
+      }
       opts.onEvent?.({ type: 'done', text: finalText });
       return finalText;
     }
@@ -223,7 +237,6 @@ export async function runSidecarAgent(
       // time inside requestUserConfirm, which is why one call produced two identical cards.
       if (wantsConfirm(call.name)) {
         opts.onEvent?.({ type: 'confirm_request', toolCall: call });
-        // wantsConfirm() guarantees opts.confirmTool is defined when it returns true
         const ok = await opts.confirmTool!(call);
         if (!ok) {
           const r = `⛔ 用户拒绝执行 ${call.name}`;

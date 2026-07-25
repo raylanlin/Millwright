@@ -435,9 +435,14 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical"):
         # P45.1: clear first. A leftover selection from the previous tool is why one run
         # "succeeded" by rounding the four hole edges instead of the requested junction.
         ctx.clear_selection()
+        # P46: select_edges now raises with a real reason when the bodies can't be read,
+        # so a zero here genuinely means "no edge matched that description".
         picked = ctx.select_edges(edges)
         if picked == 0:
-            raise SWError(f"no {edges} edges found on the solid.")
+            raise SWError(
+                f"no {edges} edges matched. vertical = along the part's up axis, "
+                "horizontal = flat, circular = round; try edges=\"all\" to see if any edge qualifies."
+            )
     r = units.mm(radius)
     before = _feature_names(ctx)
     errors: list = []

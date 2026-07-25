@@ -159,22 +159,59 @@ class Context:
         return VARIANT(pythoncom.VT_DISPATCH, None)
 
     def solid_bodies(self):
-        """P45: GetBodies2 lives on IPartDoc, NOT on ModelDocExtension — calling it on
-        Extension raised '<unknown>.GetBodies2', which silently broke every face-based
-        operation (face sketching fell back to building datum planes)."""
-        for owner in (self.model, getattr(self.model, "Extension", None)):
-            if owner is None:
-                continue
+        """P46: GetBodies2 is declared on **IPartDoc**, not IModelDoc2 — and under early
+        binding `self.model` is typed as IModelDoc2, so the member simply isn't there
+        ('<unknown>.GetBodies2'). Reaching it needs an explicit CastTo, or plain
+        IDispatch. Previously the failure was swallowed and an empty list returned,
+        which surfaced as the misleading "no vertical edges found on the solid" even
+        though the part was sitting right there on screen.
+        """
+        errs = []
+
+        def _try(owner, label):
             fn = getattr(owner, "GetBodies2", None)
             if fn is None:
-                continue
+                errs.append(f"{label}: member absent")
+                return None
             try:
-                bodies = fn(0, True)  # 0 = swSolidBody
-            except Exception:  # noqa: BLE001
-                continue
-            if bodies:
-                return list(bodies) if isinstance(bodies, (list, tuple)) else [bodies]
-        return []
+                bodies = fn(0, True)  # 0 = swSolidBody, True = visible only
+            except Exception as ex:  # noqa: BLE001
+                errs.append(f"{label}: {ex}")
+                return None
+            if not bodies:
+                errs.append(f"{label}: returned no bodies")
+                return None
+            return list(bodies) if isinstance(bodies, (list, tuple)) else [bodies]
+
+        import win32com.client as wc
+
+        # a) the properly-typed IPartDoc interface
+        try:
+            got = _try(wc.CastTo(self.model, "IPartDoc"), "IPartDoc")
+            if got:
+                return got
+        except Exception as ex:  # noqa: BLE001
+            errs.append(f"CastTo(IPartDoc): {ex}")
+
+        # b) plain IDispatch — resolves members the typed wrapper is missing
+        try:
+            from win32com.client import dynamic
+            raw = getattr(self.model, "_oleobj_", self.model)
+            got = _try(dynamic.Dispatch(raw), "dynamic")
+            if got:
+                return got
+        except Exception as ex:  # noqa: BLE001
+            errs.append(f"dynamic: {ex}")
+
+        # c) as-is (works when the doc was late-bound to begin with)
+        got = _try(self.model, "model")
+        if got:
+            return got
+
+        raise SWError(
+            "could not read the part's solid bodies — create a solid feature first, "
+            f"or report this: {'; '.join(errs[-3:])}"
+        )
 
     def _select_entity(self, ent, append: bool, mark: int) -> bool:
         """P45.1: when a MARK is required, Select2 must come first — IEntity::Select4

@@ -6,6 +6,43 @@
 
 ## [Unreleased]
 
+## [0.2.42] - 2026-07-25
+
+### Fixed (P46 — 实体枚举修复 + 写完方案自动开工 + Python 3.9 兼容)
+
+#### 1. 「找不到竖边」的真因：实体一个都没枚举到
+
+`GetBodies2` 声明在 **`IPartDoc`** 上，而 `ctx.model` 被定型为 `IModelDoc2`，该接口/`Extension` 上都没有该成员。P45 的 try/except 把失败吞掉返回空列表，伪装成"找不到竖边"。
+
+修：`solid_bodies()` 三段路依次尝试——`CastTo(model, "IPartDoc")` → 纯 IDispatch 动态调度 → 原样调用；全失败时明确报错（带真实原因），不再静默返回空。`fillet_edges` 报错也区分了"读不到实体"和"没有边匹配此描述"。
+
+#### 2. 写完方案就停，要人喊 continue
+
+模型习惯性停下等确认。两处修：
+- **提示词**：明确"写完立刻在同一轮继续调用工具开工，不要停下来等用户说继续"
+- **循环层自动续跑**：首轮若只有文字（>80 字）且无工具调用，把方案压进历史 + 追加"按上述方案继续执行"再跑一轮。只在第一轮、只做一次——模型真要问问题时仍正常结束。
+
+#### 3. Python 3.9 兼容（装机版不受影响）
+
+`itertools.pairwise` 需要 Python 3.10+。内置 embeddable 是 3.11.9 所以装机版没事，但从源码跑或用系统 3.9 的用户会边车启动失败 → 静默回退 VBS。
+
+修：加 try/except 兼容层，.ruff.toml 加 `target-version = "py39"` 避免 ruff 再提超版本建议。
+
+#### 4. 修复隐患
+
+`DEFAULT_SYSTEM_PROMPT` 模板边界反引号被 escape 脚本误伤（4186fc1），连带 `agent-loop-sidecar.ts` `opts.confirmTool!` 断言被 P46 覆盖。本包一并修正。
+
+#### 文件落位（4 文件覆盖）
+
+```
+sidecar/sw_agent/bridge.py             (P45.1 + IPartDoc 枚举修复)
+sidecar/sw_agent/tools/feature.py      (P45.1 + 报错区分)
+src/main/agent/agent-loop-sidecar.ts   (P44 + 首轮自动续跑)
+src/main/llm/prompts.ts                (P45 + 立即开工)
+```
+
+bump 0.2.41 → 0.2.42
+
 ## [0.2.41] - 2026-07-25
 
 ### Fixed (P45 — 考题暴露的真因：补齐"选择几何"能力 + 自选几何 + 闭合轮廓)
