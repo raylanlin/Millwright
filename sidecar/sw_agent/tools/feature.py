@@ -59,7 +59,6 @@ def _select_profile_sketch(ctx: Context, sketch: str | None = None):
             except Exception:  # noqa: BLE001
                 continue
     if not name:
-        raise SWError    if not name:
         raise SWError("no sketch found to extrude — draw a sketch first.")
     if not ctx.select_by_id(name, "SKETCH"):
         raise SWError(f"failed to select sketch: {name}")

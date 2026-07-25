@@ -6,6 +6,54 @@
 
 ## [Unreleased]
 
+## [0.2.34] - 2026-07-25
+
+### Fixed (P36 — 修 feature.py 语法错误，sidecar 一直启动不了的真因)
+
+**根因（P35 的诊断信息直接抓出来了）**
+
+```
+File "...\resources\sidecar\sw_agent\tools\feature.py", line 62
+    raise SWError    if not name:
+                     ^
+SyntaxError: invalid syntax
+```
+
+P32 补丁在 `_select_profile_sketch` 处留下了一行残缺代码（`raise SWError`
+后面粘上了下一个 `if`）。Python 导入 `sw_agent` 时立刻 SyntaxError →
+边车 code=1 退出 → 一路静默回退 VBS。
+
+**这解释了 v0.2.30 起的全部症状**：P27/P29/P32/P34 都在 sidecar 里，
+而 sidecar 从 P32 那版起就再也没启动过。
+
+**修复**
+
+`sidecar/sw_agent/tools/feature.py` 覆盖（含 P13/P16/P27/P32/P34 全部），
+删掉多余的那半行，恢复为正常 `raise SWError("no sketch found...")`。
+
+### Added（CI 门禁扩展）
+
+`scripts/precommit-check.sh` 新增两条 Python 门禁：
+- `python -m compileall -q sidecar/sw_agent` — sidecar 语法自检
+- `_bootstrap.py ping` — 起一次边车看能否握手（`ready` 输出）
+
+typecheck / eslint / node test 只管 TS，Python 语法错（如残缺 raise 行）
+不会被它们发现，但会直接炸掉整个 sidecar。此次 P36 之后有了覆盖。
+
+### Files changed (2)
+- `sidecar/sw_agent/tools/feature.py` (OVR) — 含 P13/P16/P27/P32/P34 + 语法修复
+- `scripts/precommit-check.sh` (OVR) — 新增 2 条 Python 门禁
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+- `python -m compileall -q sidecar/sw_agent` ✅
+
+### 装机回归（重装后）
+**第一句：新建一个空白零件** → 工具名显示 `new_part`（不是 `create_part`）
+就说明主路径终于通了。
+
 ## [0.2.33] - 2026-07-25
 
 ### Fixed (P35 — 禁止静默降级：定位到全部症状的根因)

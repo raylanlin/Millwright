@@ -48,4 +48,24 @@ if ! git -C "$R" diff --cached CHANGELOG.md | grep -q "^+## \[$V\]"; then
   exit 1
 fi
 
+# ---- Python sidecar 语法 + 握手（P36，2026-07-25） ----
+# typecheck / eslint / node test 只管 TS，Python 语法错（如残缺 raise 行）
+# 不会被它们发现，但会直接炸掉整个 sidecar。
+py=$(command -v python3 || command -v python)
+if [ -n "$py" ] && [ -d "$R/sidecar/sw_agent" ]; then
+  SIDECAR_FILES=$(echo "$S" | grep -E '^sidecar/')
+  if [ -n "$SIDECAR_FILES" ]; then
+    "$py" -m compileall -q "$R/sidecar/sw_agent" || {
+      echo "❌ Python 语法错误（sidecar 启动会 crash → VBS 回退）"
+      exit 1
+    }
+    # 更强的：起一次边车看能否握手（需要 python 支持 json 输入）
+    if echo '{"id":1,"method":"ping","params":{}}' | "$py" "$R/sidecar/_bootstrap.py" 2>&1 | grep -q 'ready'; then
+      echo "  sidecar ping OK"
+    else
+      echo "  ⚠️  sidecar ping 未返回 ready（可能缺 win32com / 不在 Windows 上 — CI 可忽略）"
+    fi
+  fi
+fi
+
 echo "✅ 门禁通过（$(echo "$S" | wc -l) 个文件）"
