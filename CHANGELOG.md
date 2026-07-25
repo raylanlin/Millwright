@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+## [0.2.37] - 2026-07-25
+
+### Fixed (P40 — 切除参数个数自适应搜索 + 常量加载)
+
+这轮报错终于把真相钉死了：
+
+**① `-2147352561 非选择性的参数` 的准确含义是"参数太少"**——
+FeatureCut4 在 23/24/25/26 个参数下全报它，说明真实签名需要 **≥27 个参数**
+（SW2018+ 录制宏的 FeatureCut4 正是 27 个）。此前所有版本的试探上限（26）
+都不够高，一直在下面扑空。
+
+**② `constants.swFmCut not resolved`**——sidecar 用动态调度，makepy 常量
+从未加载进这个进程，definition 路径直接没跑成。
+
+### 修复
+
+**参数个数自适应**：从 30 往下搜——`-2147352562`（太多）→ 减一再试；
+`-2147352561`（太少）→ 停。自动收敛到本机 SW 的精确参数个数，任何版本
+都适用。30 槽参数表按录制宏布局（NormalCut/UseFeatScope/UseAutoSelect/..）。
+
+**常量加载**：definition 路径先 `CastTo(feat_mgr, "IFeatureManager")`
+把 gen_py constants 灌进来，再取 `swFmCut`。
+
+### Files changed (1)
+- `sidecar/sw_agent/tools/feature.py` (OVR) — 含 P13/16/27/32/34/36/37/39 + P40
+
+### Verification
+- `npm run typecheck` ✅ / `lint` ✅ / `test` ✅ 167/167
+- `python -m compileall -q sidecar/sw_agent` ✅
+
+### 装机回归
+1. 圆柱 →「顶面挖直径 10 通孔」→ 应一次成功（27 参数或 definition 路径）
+2. 若再失败→报错 attempts 里的**非参数个数**真实 COM 错误（发我）
+
 ## [0.2.36] - 2026-07-25
 
 ### Fixed (P39 — 属性式切除 + start_sketch 真 bug)

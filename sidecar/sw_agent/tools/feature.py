@@ -162,9 +162,16 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
         to guess (every positional arity of FeatureCut3/4 raised DISP_E_PARAMNOTOPTIONAL
         on this install), and it is the API SolidWorks documents for automation."""
         try:
-            from win32com.client import constants  # populated by makepy (P17 warmup)
-            fm_cut = getattr(constants, "swFmCut", None)
-        except Exception:  # noqa: BLE001
+            import win32com.client as wc
+            fm_cut = getattr(wc.constants, "swFmCut", None)
+            if fm_cut is None:
+                # P40: the sidecar talks to SW via dynamic dispatch, so makepy constants
+                # are never loaded into this process. CastTo an early-bound interface
+                # (gen_py cache exists thanks to the P17 warmup) to populate them.
+                wc.CastTo(ctx.feat_mgr, "IFeatureManager")
+                fm_cut = getattr(wc.constants, "swFmCut", None)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"constants load: {e}")
             fm_cut = None
         if fm_cut is None:
             errors.append("definition path unavailable: constants.swFmCut not resolved")
@@ -200,8 +207,11 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
             return None
 
     def attempt(single_dir: bool, reverse: bool):
-        """One cut attempt. Re-selects the sketch, then tries the documented
-        FeatureCut members / arities until one produces a Cut feature."""
+        """P40: adaptive-arity positional call. The earlier fixed trials (23–26 args)
+        ALL raised DISP_E_PARAMNOTOPTIONAL = "too few args" — the real signature needs
+        MORE (SW2018+ macro recorder emits FeatureCut4 with 27). Search downward from
+        30: -2147352562 (bad count) → try fewer; -2147352561 (param not optional) →
+        every larger count already failed, stop; anything else = the REAL call."""
         if ctx.sketch_mgr.ActiveSketch is None:
             try:
                 _select_profile_sketch(ctx, target)
@@ -209,29 +219,52 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
                 errors.append(str(e))
                 return None
         before = names()
-        # (Sd, Flip, Dir, T1, T2, D1, D2, …) — 26-slot master list, shorter tails for older APIs
-        args = [
+        # 30-slot master list, macro-recorder layout:
+        # 0 Sd, 1 Flip, 2 Dir, 3 T1, 4 T2, 5 D1, 6 D2, 7-10 Dchk/Ddir, 11-12 Dang,
+        # 13-16 offset/translate, 17 NormalCut, 18 UseFeatScope, 19 UseAutoSelect,
+        # 20-22 assembly opts, 23+ start-condition/optimize padding
+        base = [
             single_dir, False, reverse, end, end if not single_dir else 0,
             d, d if not single_dir else 0,
             False, False, False, False, 0.0, 0.0,
             False, False, False, False,
-            True, True, True, False, False, False, True, False, False,
+            False, True, True, True, True, True,
+            False, 0, 0.0, False, False, 0, False,
         ]
-        for member in ("FeatureCut5", "FeatureCut4", "FeatureCut3"):
+
+        def hr_of(e) -> int:
+            v = getattr(e, "hresult", None)
+            if isinstance(v, int):
+                return v
+            s = str(e)
+            for code in (-2147352561, -2147352562):
+                if str(code) in s:
+                    return code
+            return 0
+
+        for member in ("FeatureCut4", "FeatureCut3", "FeatureCut"):
             fn = getattr(ctx.feat_mgr, member, None)
             if fn is None:
                 continue
-            for n in (26, 25, 24, 23):
-                made = None
+            for n in range(30, 21, -1):
                 try:
-                    made = fn(*args[:n])
-                except Exception as e:  # noqa: BLE001 — wrong arity/type → next
-                    errors.append(f"{member}/{n}: {e}")
-                    continue
+                    made = fn(*base[:n])
+                except Exception as e:  # noqa: BLE001
+                    hr = hr_of(e)
+                    if hr == -2147352562:  # too many args → try fewer
+                        continue
+                    if hr == -2147352561:  # too few — larger counts already failed
+                        errors.append(f"{member}: no arity in 22..30 accepted (needs >30?)" if n == 30
+                                      else f"{member}: arity gap at {n} (param-not-optional)")
+                        break
+                    errors.append(f"{member}/{n}: {e}")  # the REAL call failed
+                    break
                 if made is None:
                     made = new_cut(before)  # some versions return None yet still create it
                 if made is not None:
                     return made
+                errors.append(f"{member}/{n}: accepted but produced no Cut feature")
+                break
         return None
 
     # P39: definition path first (both directions), then P37's positional trials.
