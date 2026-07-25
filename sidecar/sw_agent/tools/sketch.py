@@ -10,9 +10,9 @@ configuration ONLY (the comment claimed "all"); 2 = all configurations.
 """
 from __future__ import annotations
 
-from ..registry import tool
-from ..bridge import Context, SWError, sw_get
 from .. import units
+from ..bridge import Context, SWError, sw_get
+from ..registry import tool
 
 # swInConfigurationOpts_e
 CFG_ALL = 2

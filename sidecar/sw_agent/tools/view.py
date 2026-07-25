@@ -5,12 +5,13 @@ zoom, switch display modes, then capture a screenshot of the current state.
 These are the "hands" and "eyes" of the visual analysis loop.
 """
 from __future__ import annotations
+
 import os
 import tempfile
 
-from ..registry import tool
-from ..bridge import Context, SWError
 from .. import units
+from ..bridge import Context, SWError
+from ..registry import tool
 
 # swStandardViews_e
 _VIEWS = {
@@ -123,7 +124,7 @@ def capture_view(ctx: Context, width: int = 1280, height: int = 960, fit: bool =
     # Prefer PNG (smaller, more universal for multimodal); fall back to BMP if PIL is unavailable — Node side uses nativeImage as a fallback
     out, fmt = bmp, "bmp"
     try:
-        from PIL import Image  # noqa
+        from PIL import Image
         png = bmp[:-4] + ".png"
         Image.open(bmp).save(png, "PNG")
         out, fmt = png, "png"

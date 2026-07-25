@@ -4,19 +4,28 @@ and P13 regression points (plane table, chamfer args, config scope).
 Run: pytest sidecar/tests -q
 """
 from __future__ import annotations
+
 import math
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pytest  # noqa: E402
+import pytest
+from sw_agent import registry, units
+from sw_agent.bridge import _PLANES, _PROGIDS, SWError
 
-from sw_agent import registry, units  # noqa: E402
-from sw_agent.bridge import _PLANES, _PROGIDS, SWError  # noqa: E402
 # Trigger tool registration
-from sw_agent.tools import view, document, sketch, feature, reference, assembly, export, query  # noqa: F401, E402
-
+from sw_agent.tools import (  # noqa: F401
+    assembly,
+    document,
+    export,
+    feature,
+    query,
+    reference,
+    sketch,
+    view,
+)
 
 # ---- units ----
 

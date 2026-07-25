@@ -6,10 +6,19 @@ creation, and use the no-[out] IModelDoc2::SaveAs overload for save/export
 Exceptions are surfaced directly to the agent.
 """
 from __future__ import annotations
+
 import os
 
+from ..bridge import (
+    DOC_ASSEMBLY,
+    DOC_DRAWING,
+    DOC_PART,
+    Context,
+    SWError,
+    doc_type_name,
+    sw_get,
+)
 from ..registry import tool
-from ..bridge import Context, SWError, DOC_PART, DOC_ASSEMBLY, DOC_DRAWING, doc_type_name, sw_get
 
 # swUserPreferenceStringValue_e: default templates
 # P27: fix DOC_PART key (was 9 = swDefaultTemplatePart; correct value is 8 =

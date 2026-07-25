@@ -5,6 +5,7 @@ Users and LLMs naturally think in mm / degrees, so all tool entry points
 convert here. Never pass raw user numbers straight into the API.
 """
 from __future__ import annotations
+
 import math
 
 

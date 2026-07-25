@@ -20,9 +20,9 @@ P13 fixes:
 """
 from __future__ import annotations
 
-from ..registry import tool
-from ..bridge import Context, SWError, sw_get, DOC_PART
 from .. import units
+from ..bridge import DOC_PART, Context, SWError, sw_get
+from ..registry import tool
 
 # swInConfigurationOpts_e
 CFG_THIS = 1

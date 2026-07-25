@@ -7,8 +7,10 @@ call() dispatches uniformly, validates required arguments, and wraps the
 return value / exceptions into a structured result.
 """
 from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .bridge import Context, SWError
 

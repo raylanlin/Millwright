@@ -19,6 +19,7 @@ own thread, makes a THROWAWAY connection purely to trigger makepy generation
 real call re-connects quickly against the warmed cache.
 """
 from __future__ import annotations
+
 import json
 import sys
 import threading
@@ -27,15 +28,15 @@ from . import registry
 from .bridge import Context
 
 # Trigger tool registration (the import order also defines category display order)
-from .tools import (  # noqa: F401  E402
-    view,
-    document,
-    sketch,
-    feature,
-    reference,
+from .tools import (  # noqa: F401
     assembly,
+    document,
     export,
+    feature,
     query,
+    reference,
+    sketch,
+    view,
 )
 
 

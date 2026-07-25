@@ -13,9 +13,9 @@ CreateMassProperty2 when CreateMassProperty is member-not-found.
 """
 from __future__ import annotations
 
-from ..registry import tool
-from ..bridge import Context, SWError, DOC_ASSEMBLY, DOC_PART, sw_get
 from .. import units
+from ..bridge import DOC_ASSEMBLY, DOC_PART, Context, SWError, sw_get
+from ..registry import tool
 
 
 @tool("mass_properties", "Get mass properties (mass / volume / surface area / center of mass)", params={}, category="query")

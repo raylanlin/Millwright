@@ -5,9 +5,9 @@ AddMate5 have been cross-checked against the official API (see review notes).
 """
 from __future__ import annotations
 
-from ..registry import tool
-from ..bridge import Context, SWError, DOC_ASSEMBLY
 from .. import units
+from ..bridge import DOC_ASSEMBLY, Context, SWError
+from ..registry import tool
 
 # swMateType_e (verified)
 _MATE = {

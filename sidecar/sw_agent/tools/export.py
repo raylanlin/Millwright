@@ -5,10 +5,11 @@ with the appropriate extension. STL is split out into its own tool because
 it needs a quality preference set first.
 """
 from __future__ import annotations
+
 import os
 
-from ..registry import tool
 from ..bridge import Context, SWError
+from ..registry import tool
 
 # swUserPreferenceIntegerValue_e: STL quality preference
 # VERIFY: verify the constant value (334 here) against the target SolidWorks version via macro recorder; coarse=0, fine=1
