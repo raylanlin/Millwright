@@ -4,6 +4,11 @@ on:
   push:
     branches: [master, main]
     tags: ['v*']
+    # 日常 commit（docs/scripts）不跑完整打包，省 CI 分钟
+    paths-ignore:
+      - '**.md'
+      - 'scripts/precommit-check.sh'
+      - '.github/**'
   workflow_dispatch:  # 允许手动触发
 
 permissions:
@@ -57,6 +62,7 @@ jobs:
       # vendor/python/ before electron-builder runs. Idempotent — safe to re-run.
       # This is a build-time network op; end users have no network requirement.
       - name: Prepare bundled Python runtime
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: ./scripts/prepare-python.ps1
 
@@ -72,16 +78,19 @@ jobs:
         run: npm run build
 
       - name: Package (NSIS installer)
+        if: startsWith(github.ref, 'refs/tags/')
         run: npm run dist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package (portable / 免安装版)
+        if: startsWith(github.ref, 'refs/tags/')
         run: npm run pack
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload installer artifact
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
         with:
           name: Millwright-Setup
@@ -89,6 +98,7 @@ jobs:
           retention-days: 30
 
       - name: Upload portable artifact
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
         with:
           name: Millwright-Portable
