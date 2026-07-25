@@ -6,6 +6,50 @@
 
 ## [Unreleased]
 
+## [0.2.38] - 2026-07-25
+
+### Fixed (P42 — 多参 API 全面自适应)
+
+把 P40 在 `cut_extrude` 上验证成功的**参数个数自适应搜索**抽成共享助手 `com_call()`，应用到全部带 `# VERIFY` 标记的多参 API。这些工具以后不需要逐个录宏对签名——运行时自己会找到本机 SolidWorks 接受的调用形式。
+
+#### 共享助手 `com_call()`
+
+SolidWorks 的 COM 签名跨版本飘移：可选参数会追加，所以同一份文档化方法在不同版本需要不同参数个数（2018+ 录制宏的 FeatureCut4 是 27 个，文档写 25）。固定 arity 猜一次就是 revolve / fillet_edges / shell / 阵列家族裸报错的根源。`com_call` 走 P40 在 cut_extrude 验过的路——按 arity 从大到小试，读 HRESULT 决定下一步：
+
+```
+-2147352562 DISP_E_BADPARAMCOUNT    → 参数太多，减一再试
+-2147352561 DISP_E_PARAMNOTOPTIONAL → 参数太少，更大的都失败过，放弃
+其他错误                            → 真实调用，错误如实上报
+```
+
+每个工具给出**最长的文档化参数表**和候选成员名（新→老），`com_call` 自动收敛。返回 None 但实际建了特征的版本，由 `verify` 回调按特征树差集兜住。
+
+#### 改用自适应的工具
+
+| 工具 | 候选成员 | 附带改进 |
+| --- | --- | --- |
+| `revolve` | FeatureRevolve2 → FeatureRevolve | **新增 `cut` 参数**（旋转切除 / 开槽）；描述明确"打孔用 cut_extrude" |
+| `fillet_edges` | FeatureFillet3 → 2 → 1 | 报错带 attempts 轨迹 |
+| `shell` | InsertFeatureShell → InsertShell（feat_mgr 和 model 两个 owner 都试） | 报错提示先选开口面 |
+| `linear_pattern` | FeatureLinearPattern5 → 4 → 3 → 1 | 报错提示需选方向边/轴 |
+| `circular_pattern` | FeatureCircularPattern5 → 4 → 3 → 1 | 报错提示需选轴 |
+| `mirror_feature` | InsertMirrorFeature2 → 1 | **支持任意基准面**（不再限 front/top/right） |
+
+`cut_extrude` 改用共享助手，行为不变（去掉了局部重复实现）。
+
+#### 待办 4 已完成
+
+`revolve` 加了 `cut` 选项 —— 之前模型用 revolve 打孔长出凸台，现在既能做旋转切除，工具描述也明确指向 `cut_extrude`。
+
+#### 代价与收益
+
+- 代价：首次调用某工具时可能多试几次（每次几十毫秒），失败路径最多试十几次
+- 收益：`revolve` / `shell` / `fillet_edges` / 阵列 / 镜像 不再需要逐个真机录宏验证；跨 SW 版本自动适配；失败时报错带 attempts 轨迹，能直接定位是几何问题还是签名问题
+
+#### 仍需真机核验（未纳入本次）
+
+`create_reference_point` / `export_stl` —— 这两个参数少、失败模式明显（要么导出文件在要么不在），不值得加搜索开销。测到报错发我即可。
+
 ### Changed (P41 — README 双语修订)
 
 README 双语文档修订（不打 bump，纯文档变更）。改动源：Claude 在「APPLY.md 审稿」中指出的 8 处问题 + 中文版 20 处自链接残留。

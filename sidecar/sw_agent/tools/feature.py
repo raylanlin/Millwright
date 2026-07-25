@@ -12,6 +12,8 @@ P13 fixes:
 - modify_dimension: SetSystemValue3 second arg — swInConfigurationOpts_e
   1 = THIS configuration only, 2 = all configurations. Was 1 with a comment
   claiming "all"; now actually 2.
+- P42: every multi-parameter API (revolve/fillet/shell/patterns/mirror) now routes
+  through com_call() adaptive-arity search — see the helper block below.
 - fillet_edges: FeatureFillet3(195, r, 0,0,0,0,0) matched no real signature
   (magic 195, 7 args vs the real 12+). Replaced with the reliable
   GetDefinition/ModifyDefinition route on a freshly inserted fillet via
@@ -27,6 +29,94 @@ from ..registry import tool
 # swInConfigurationOpts_e
 CFG_THIS = 1
 CFG_ALL = 2
+
+
+# ---- P42: shared adaptive-arity COM caller ----
+#
+# SolidWorks' COM signatures drift between releases: optional parameters get added,
+# so the SAME documented method needs a different argument COUNT per version (the
+# 2018+ recorder emits FeatureCut4 with 27 args where the docs list 25). Guessing one
+# fixed arity is what made revolve / fillet_edges / shell / the pattern family fail
+# with bare COM errors. This helper does what P40 proved out on cut_extrude: walk the
+# arity downward and read the HRESULT to decide.
+#
+#   -2147352562 DISP_E_BADPARAMCOUNT   → too many args, try fewer
+#   -2147352561 DISP_E_PARAMNOTOPTIONAL→ too few; every larger count already failed
+#   anything else                      → we reached the REAL call; that error is real
+
+BAD_COUNT = -2147352562
+NOT_OPTIONAL = -2147352561
+
+
+def _hresult(e: Exception) -> int:
+    v = getattr(e, "hresult", None)
+    if isinstance(v, int):
+        return v
+    s = str(e)
+    for code in (BAD_COUNT, NOT_OPTIONAL):
+        if str(code) in s:
+            return code
+    return 0
+
+
+def com_call(owner, members, args, errors: list, max_args: int | None = None,
+             min_args: int = 1, verify=None):
+    """Call the first of `members` that accepts some prefix of `args`.
+
+    args     — a MAXIMAL positional list (documented layout, longest known form)
+    verify   — optional `() -> obj|None` run when the call returns None, for the
+               versions that create the feature but report nothing
+    Returns the created object, or None if nothing worked (errors[] holds the trail).
+    """
+    hi = len(args) if max_args is None else min(max_args, len(args))
+    for member in members:
+        fn = getattr(owner, member, None)
+        if fn is None:
+            errors.append(f"{member}: not present")
+            continue
+        for n in range(hi, min_args - 1, -1):
+            try:
+                made = fn(*args[:n])
+            except Exception as e:  # noqa: BLE001
+                hr = _hresult(e)
+                if hr == BAD_COUNT:
+                    continue          # too many → shrink
+                if hr == NOT_OPTIONAL:
+                    errors.append(f"{member}: needs >{n} args (none in {min_args}..{hi} accepted)")
+                    break             # larger counts already failed → give up on this member
+                errors.append(f"{member}/{n}: {e}")
+                break                 # real call, real error
+            if made is None and verify is not None:
+                made = verify()
+            if made is not None:
+                return made
+            errors.append(f"{member}/{n}: accepted but produced nothing")
+            break
+    return None
+
+
+def _feature_names(ctx: Context) -> set:
+    out = set()
+    for ft in _all_features(ctx):
+        try:
+            out.add(sw_get(ft, "Name"))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def _new_feature_of(ctx: Context, before: set, *type_fragments: str):
+    """Find a feature absent from `before` whose type name contains any fragment."""
+    for ft in _all_features(ctx):
+        try:
+            if sw_get(ft, "Name") in before:
+                continue
+            tn = sw_get(ft, "GetTypeName2") or ""
+        except Exception:  # noqa: BLE001
+            continue
+        if not type_fragments or any(fr.lower() in tn.lower() for fr in type_fragments):
+            return ft
+    return None
 
 
 def _all_features(ctx: Context):
@@ -137,22 +227,10 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
     end = 1 if through_all else 0  # swEndConditions_e: 0=Blind, 1=ThroughAll
 
     def names() -> set:
-        out = set()
-        for ft in _all_features(ctx):
-            try:
-                out.add(sw_get(ft, "Name"))
-            except Exception:  # noqa: BLE001
-                continue
-        return out
+        return _feature_names(ctx)
 
     def new_cut(before: set):
-        for ft in _all_features(ctx):
-            try:
-                if sw_get(ft, "Name") not in before and "Cut" in (sw_get(ft, "GetTypeName2") or ""):
-                    return ft
-            except Exception:  # noqa: BLE001
-                continue
-        return None
+        return _new_feature_of(ctx, before, "Cut")
 
     errors: list = []
 
@@ -293,24 +371,39 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
 
 
 @tool(
-    "revolve", "Revolve feature (sketch must contain a profile plus a centerline as the axis)",
-    params={"angle": {"type": "number", "desc": "Revolve angle (degrees)", "default": 360},
-            "sketch": {"type": "string", "desc": "Sketch name to revolve (defaults to the most recent sketch)", "default": ""}},
+    "revolve", "Revolve the current sketch around a centerline. Set cut=true to REMOVE material (a revolved cut/groove); default adds material",
+    params={
+        "angle": {"type": "number", "desc": "Revolve angle (degrees)", "default": 360},
+        "cut": {"type": "boolean", "desc": "Remove material instead of adding it — use for revolved grooves, NOT for simple holes (use cut_extrude for holes)", "default": False},
+        "sketch": {"type": "string", "desc": "Sketch name to revolve (defaults to the most recent sketch)", "default": ""},
+    },
     category="feature",
 )
-def revolve(ctx: Context, angle: float = 360, sketch: str = ""):
+def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = ""):
     ctx.require(DOC_PART, "part")
     if ctx.sketch_mgr.ActiveSketch is None:
         _select_profile_sketch(ctx, sketch or None)
     a = units.deg(angle)
-    # VERIFY: FeatureRevolve2 parameter slots
-    feat = ctx.feat_mgr.FeatureRevolve2(
-        True, True, False, False, False, False, 0, 0, a, 0,
+    before = _feature_names(ctx)
+    errors: list = []
+    # P42: documented FeatureRevolve2 layout, longest known form; com_call finds the
+    # arity this SolidWorks accepts. swEndConditions_e 0 = Blind for direction 1.
+    args = [
+        True, True, False, bool(cut), False, False, 0, 0, a, 0,
         False, False, 0, 0, 0, 0, 0, True, True, True,
+        0, 0, 0, True, True, True,
+    ]
+    members = ("FeatureRevolve2", "FeatureRevolve") if not cut else ("FeatureRevolveCut2", "FeatureRevolve2", "FeatureRevolve")
+    feat = com_call(
+        ctx.feat_mgr, members, args, errors, min_args=10,
+        verify=lambda: _new_feature_of(ctx, before, "Revolve"),
     )
     if feat is None:
-        raise SWError("revolve failed: make sure there is a closed profile and a centerline.")
-    return {"feature": feat.Name, "angle_deg": angle}
+        raise SWError(
+            "revolve failed — the sketch needs a closed profile plus a centerline as the axis. "
+            f"(attempts: {' | '.join(errors[-3:])})"
+        )
+    return {"feature": sw_get(feat, "Name"), "angle_deg": angle, "cut": bool(cut)}
 
 
 @tool(
@@ -322,44 +415,26 @@ def fillet_edges(ctx: Context, radius: float):
     if ctx.selected_count() < 1:
         raise SWError("please select edges to fillet first.")
     r = units.mm(radius)
-    # P13: the old FeatureFillet3(195, r, 0, 0, 0, 0, 0) matched no real API signature
-    # (magic constant, wrong arity) and raised COM errors on real machines.
-    # Reliable route: record the pre-existing fillet set, insert a simple fillet via
-    # the documented FeatureFillet3 26-slot form is version-fragile too — so instead
-    # create it through InsertFeatureFillet-compatible definition editing:
-    # 1) snapshot existing Fillet features; 2) run the simplest documented call;
-    # 3) if that fails, tell the user to use fillet_all / manual filleting.
-    before = set()
-    for f in _all_features(ctx):
-        try:
-            if sw_get(f, "GetTypeName2") == "Fillet":
-                before.add(sw_get(f, "Name"))
-        except Exception:  # noqa: BLE001
-            continue
-    created = None
-    try:
-        # VERIFY: simplest stable form — swFeatureFilletType_e 0 (simple), constant radius.
-        created = ctx.feat_mgr.FeatureFillet3(
-            195, r, 0, 0, 0, 0, 0, 0,
-            (), (), (), (), (), (), (),
-        )
-    except Exception:  # noqa: BLE001 — fall through to snapshot check
-        created = None
-    if created is None:
-        # Some versions return None yet still create the feature; check the snapshot.
-        for f in _all_features(ctx):
-            try:
-                if sw_get(f, "GetTypeName2") == "Fillet" and sw_get(f, "Name") not in before:
-                    created = f
-                    break
-            except Exception:  # noqa: BLE001
-                continue
+    before = _feature_names(ctx)
+    errors: list = []
+    # P42: FeatureFillet3's documented layout — swFeatureFilletType_e 0 (simple/constant
+    # radius) plus flag word 195 seen in recorder output; the trailing array slots are
+    # empty tuples (no per-edge overrides). com_call settles the arity per version.
+    args = [
+        195, r, 0, 0, 0, 0, 0, 0,
+        (), (), (), (), (), (), (),
+        0, 0, 0, 0, 0, 0,
+    ]
+    created = com_call(
+        ctx.feat_mgr, ("FeatureFillet3", "FeatureFillet2", "FeatureFillet"), args, errors,
+        min_args=7, verify=lambda: _new_feature_of(ctx, before, "Fillet"),
+    )
     if created is None:
         raise SWError(
-            "fillet failed on this SolidWorks version. Workaround: create one fillet manually, "
-            "then use fillet_all to set radii; or report the SW version so the call can be pinned."
+            "fillet failed — check the selected edges are valid for a constant-radius fillet. "
+            f"(attempts: {' | '.join(errors[-3:])})"
         )
-    return {"feature": created.Name, "radius_mm": radius}
+    return {"feature": sw_get(created, "Name"), "radius_mm": radius}
 
 
 @tool(
@@ -406,23 +481,38 @@ def chamfer(ctx: Context, distance: float):
     "shell", "Shell the body (hollow it out while keeping a wall thickness) — pre-select faces to remove them as openings",
     params={
         "thickness": {"type": "number", "desc": "Wall thickness (mm)"},
-        "outward": {"type": "boolean", "desc": "Add thickness outward", "default": False},
+        "outward": {"type": "boolean", "desc": "Thicken outward instead of inward", "default": False},
     },
     category="feature", destructive=True,
 )
 def shell(ctx: Context, thickness: float, outward: bool = False):
     t = units.mm(thickness)
-    # VERIFY: InsertShell owner / signature (commonly IModelDoc2::InsertShell(thickness, outward))
-    ok = ctx.model.InsertShell(t, bool(outward))
-    if not ok:
-        raise SWError("shell failed.")
-    return {"shell_thickness_mm": thickness, "outward": outward}
+    before = _feature_names(ctx)
+    errors: list = []
+    # P42: InsertShell lives on IFeatureManager on modern releases and on IModelDoc2
+    # on older ones, with 2–3 args depending on version — try both owners adaptively.
+    args = [t, bool(outward), False]
+    made = com_call(
+        ctx.feat_mgr, ("InsertFeatureShell", "InsertShell"), args, errors,
+        min_args=2, verify=lambda: _new_feature_of(ctx, before, "Shell"),
+    )
+    if made is None:
+        made = com_call(
+            ctx.model, ("InsertShell",), args, errors,
+            min_args=2, verify=lambda: _new_feature_of(ctx, before, "Shell"),
+        )
+    if made is None:
+        raise SWError(
+            "shell failed — select the face(s) to open before shelling, and check the "
+            f"thickness fits the geometry. (attempts: {' | '.join(errors[-3:])})"
+        )
+    return {"shelled": True, "thickness_mm": thickness, "outward": bool(outward)}
 
 
 @tool(
     "linear_pattern", "Linearly pattern the selected features (pre-select the features + a direction edge/axis)",
     params={
-        "count": {"type": "number", "desc": "Total count (including the original)"},
+        "count": {"type": "integer", "desc": "Total instance count (including the original)"},
         "spacing": {"type": "number", "desc": "Spacing (mm)"},
     },
     category="feature",
@@ -430,52 +520,88 @@ def shell(ctx: Context, thickness: float, outward: bool = False):
 def linear_pattern(ctx: Context, count: int, spacing: float):
     if ctx.selected_count() < 2:
         raise SWError("please select the features to pattern plus the direction reference (edge/axis) first.")
-    # VERIFY: FeatureLinearPattern5 parameter slots
-    feat = ctx.feat_mgr.FeatureLinearPattern5(
+    before = _feature_names(ctx)
+    errors: list = []
+    # P42: FeatureLinearPattern layout (dir-1 count/spacing, then dir-2 unused, then flags)
+    args = [
         int(count), units.mm(spacing), 1, 0.01, False, False, "NULL", "NULL",
         False, False, False, False, False, False, True, True, False, False, 0, 0,
+        False, False, False, 0, 0,
+    ]
+    feat = com_call(
+        ctx.feat_mgr,
+        ("FeatureLinearPattern5", "FeatureLinearPattern4", "FeatureLinearPattern3", "FeatureLinearPattern"),
+        args, errors, min_args=8, verify=lambda: _new_feature_of(ctx, before, "LPattern", "Pattern"),
     )
     if feat is None:
-        raise SWError("linear pattern failed.")
-    return {"feature": feat.Name, "count": int(count), "spacing_mm": spacing}
+        raise SWError(
+            "linear pattern failed — select the feature(s) AND a straight edge/axis for the "
+            f"direction. (attempts: {' | '.join(errors[-3:])})"
+        )
+    return {"feature": sw_get(feat, "Name"), "count": int(count), "spacing_mm": spacing}
 
 
 @tool(
     "circular_pattern", "Circular pattern the selected features (pre-select the features + one axis)",
     params={
-        "count": {"type": "number", "desc": "Total count (including the original)"},
-        "angle": {"type": "number", "desc": "Total sweep angle (degrees)", "default": 360},
-        "equal_spacing": {"type": "boolean", "desc": "Distribute evenly across the sweep", "default": True},
+        "count": {"type": "integer", "desc": "Total instance count (including the original)"},
+        "angle": {"type": "number", "desc": "Total angle (degrees)", "default": 360},
+        "equal_spacing": {"type": "boolean", "desc": "Space instances equally", "default": True},
     },
     category="feature",
 )
 def circular_pattern(ctx: Context, count: int, angle: float = 360, equal_spacing: bool = True):
     if ctx.selected_count() < 2:
         raise SWError("please select the features to pattern plus a reference axis first.")
-    # VERIFY: FeatureCircularPattern5 parameter slots
-    feat = ctx.feat_mgr.FeatureCircularPattern5(
+    before = _feature_names(ctx)
+    errors: list = []
+    args = [
         int(count), units.deg(angle), bool(equal_spacing), "NULL",
         False, True, False, False, False, False,
+        False, False, 0, 0, False,
+    ]
+    feat = com_call(
+        ctx.feat_mgr,
+        ("FeatureCircularPattern5", "FeatureCircularPattern4", "FeatureCircularPattern3", "FeatureCircularPattern"),
+        args, errors, min_args=4, verify=lambda: _new_feature_of(ctx, before, "CirPattern", "Pattern"),
     )
     if feat is None:
-        raise SWError("circular pattern failed.")
-    return {"feature": feat.Name, "count": int(count), "angle_deg": angle}
+        raise SWError(
+            "circular pattern failed — select the feature(s) AND an axis (a temporary axis "
+            f"or reference axis). (attempts: {' | '.join(errors[-3:])})"
+        )
+    return {"feature": sw_get(feat, "Name"), "count": int(count), "angle_deg": angle}
 
 
 @tool(
     "mirror_feature", "Mirror the selected features across a reference plane (pre-select the features)",
-    params={"plane": {"type": "string", "enum": ["front", "top", "right"], "desc": "Symmetry plane"}},
+    params={"plane": {"type": "string", "desc": "Symmetry plane: front / top / right, or the name of a plane you created"}},
     category="feature",
 )
 def mirror_feature(ctx: Context, plane: str):
     if ctx.selected_count() < 1:
         raise SWError("please select features to mirror first.")
-    ctx.select_plane(plane, append=True, mark=2)  # append the mirror plane to the selection
-    # VERIFY: InsertMirrorFeature2 parameters
-    feat = ctx.feat_mgr.InsertMirrorFeature2(False, False, False, False, 0)
+    key = (plane or "").strip()
+    if key.lower() in ("front", "top", "right"):
+        ok = ctx.select_plane(key, append=True, mark=2)
+    else:
+        # P42: mirror across ANY reference plane, matching start_sketch's behaviour
+        ok = bool(ctx.select_by_id(key, "PLANE", append=True, mark=2))
+    if not ok:
+        raise SWError(f"failed to select the symmetry plane: {plane}")
+    before = _feature_names(ctx)
+    errors: list = []
+    args = [False, False, False, False, 0, False]
+    feat = com_call(
+        ctx.feat_mgr, ("InsertMirrorFeature2", "InsertMirrorFeature"), args, errors,
+        min_args=4, verify=lambda: _new_feature_of(ctx, before, "Mirror"),
+    )
     if feat is None:
-        raise SWError("mirror failed.")
-    return {"feature": feat.Name, "plane": plane}
+        raise SWError(
+            "mirror failed — check the selected features can be mirrored across this plane. "
+            f"(attempts: {' | '.join(errors[-3:])})"
+        )
+    return {"feature": sw_get(feat, "Name"), "plane": plane}
 
 
 @tool(
