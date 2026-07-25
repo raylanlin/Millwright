@@ -260,10 +260,12 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       // Once the sidecar is up, runtime errors (including user cancellation) propagate normally — never silently rerun via the VBS fallback.
       const sidecar = getSidecar({ onLog: (l) => console.log('[sidecar]', l) });
       let sidecarReady = false;
+      let sidecarError = '';                                    // P35: capture failure cause so VBS fallback can tell user
       try {
         await sidecar.start();
         sidecarReady = true;
       } catch (startErr) {
+        sidecarError = startErr instanceof Error ? startErr.message : String(startErr);
         console.warn('[agent] sidecar failed to start; falling back to VBS agent:', startErr);
       }
 
@@ -291,6 +293,9 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
         maxRounds: payload.config.maxRounds ?? 12,
         signal: controller.signal,
         onEvent: send,
+        // P35: tell user we're on VBS fallback so they know tools are limited + scripts aren't verified
+        degradedNotice:
+          `⚠️ Python 组件未启动，已降级为内置 VBS 引擎——工具集较少（无视觉分析 analyze_view、无压缩/解压缩组件），且脚本执行结果不做校验，可能“报告成功但实际未生效”。\n原因：${sidecarError}\n`,
         backup: async () => {
           const r = await backupActiveDocument(bridge);
           return r.backupPath ?? null;

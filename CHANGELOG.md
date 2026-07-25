@@ -6,6 +6,73 @@
 
 ## [Unreleased]
 
+## [0.2.33] - 2026-07-25
+
+### Fixed (P35 — 禁止静默降级：定位到全部症状的根因)
+
+**这轮测试的真相：根本没跑 Python sidecar**
+
+测试日志里的工具名是 `create_part` / `create_sketch` / `draw_rectangle` /
+`draw_circle` / `close_sketch` / `extrude_feature` / `modify_dimensions`，
+结果统一是"脚本执行完成"——**这是 VBS 脚本生成回退路径**，不是
+Python sidecar（sidecar 侧叫 `new_part` / `start_sketch` / `sketch_rectangle` /
+`extrude` / `modify_dimension`，返回结构化 JSON）。
+
+**由此解释全部症状**：
+
+| 症状 | 原因 |
+| --- | --- |
+| `analyze_view` 未知工具 | sidecar 专属虚拟工具，VBS 生成器注册表里没有 |
+| 反复"拉伸切除"切了个寂寞 | VBA 宏 `On Error Resume Next` 让每步返回"执行成功"，实际选择为空 |
+| 创建的是装配体不是零件 | VBS `createPart` 用模板偏好 9，这台 SW 默认零件模板配置有问题 → 落到装配体（P27 修的是 sidecar 侧） |
+| P27/P29/P32/P34 全部"没生效" | 那些都在 `sidecar/`，VBS 路径一行碰不到 |
+| 确认卡片重复两张 | VBS 路径 `agent-loop.ts` 也有 callId 碰撞（P33 只修了 sidecar 路径） |
+
+**核心设计缺陷**：`handlers.ts` 里 sidecar 启动失败只 `console.warn`
+然后静默降级。用户看到的是"一切正常但结果不对"。
+
+### 修复
+
+**1. `src/main/agent/agent-loop.ts` 覆盖**
+- 新增 `degradedNotice` 选项：进入回退路径时把**原因**作为第一条文字发给用户
+- 补唯一 callId（与 P33 同款），修 VBS 路径的确认卡重复/串扰
+
+**2. `src/main/ipc/handlers.ts` 手改 2 处**
+- (a) 捕获失败原因：`let sidecarError = '';` + catch 里 `sidecarError = startErr instanceof Error ? startErr.message : String(startErr);`
+- (b) 传给 VBS 回退循环：`degradedNotice: \`⚠️ Python 组件未启动... 原因：${sidecarError}\n\``
+
+### 装上后会看到
+
+之前静默的失败原因会**明写在聊天里**（含 Python 真实 stderr 尾部，P14 已加）。
+大概率是三种之一：
+1. `ModuleNotFoundError: No module named 'win32com'` → vendor/python 里 pywin32 没装进去
+2. `Python 组件启动失败（未找到 python？）` → installer 没带 vendor/python，或 extraResources 路径不对
+3. `Python 组件启动超时` / `已退出 code=1` → `_bootstrap.py` 缺失或 sw_agent 导入报错
+
+把那行原因发我，就能直接定位 installer 打包问题——这比继续修
+sidecar 里的工具更要紧，因为 sidecar 一天不启动，P17–P34 全部白改。
+
+### Files changed (3)
+- `src/main/agent/agent-loop.ts` (OVR) — `degradedNotice` 选项 + 唯一 callId
+- `src/main/ipc/handlers.ts` (手改 2 处) — sidecarError 捕获 + degradedNotice 传 VBS 回退循环
+- `package.json` + `CHANGELOG.md` (bump 0.2.32→0.2.33 + [0.2.33] 段)
+
+### Verification
+- `npm run typecheck` ✅
+- `npm run lint` ✅
+- `npm test` ✅ 167/167
+
+### 装机回归
+1. 重装 v0.2.33 后发一条简单任务
+2. 若 sidecar 启动成功 → 工具名应该是 `new_part` / `start_sketch` 等（不是 create_part / draw_rectangle）
+3. 若 sidecar 启动失败 → 聊天第一条文字就是 **⚠️ Python 组件未启动** 警告 + 真实原因
+4. 把那行原因发我（解决 installer 打包问题）
+
+### 顺带说明
+VBS 路径缺 `circular_pattern` / `analyze_view` / `suppress_*` 等工具是设计如此
+（回退引擎只覆盖基础操作）。补齐需要写 VBA 生成器，工作量大——建议
+先把 sidecar 启动问题解决，而不是给回退路径补功能。
+
 ## [0.2.32] - 2026-07-25
 
 ### Fixed (P34 — cut_extrude 版本自适应 + 视觉检测积极性)
@@ -990,6 +1057,7 @@ sw-bridge.ts, verified by `git status` after `cp`).
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14
 [0.2.13]: https://github.com/raylanlin/Millwright/compare/v0.2.12...v0.2.13
+[0.2.33]: https://github.com/raylanlin/Millwright/compare/v0.2.32...v0.2.33
 [0.2.32]: https://github.com/raylanlin/Millwright/compare/v0.2.30...v0.2.32
 [0.2.30]: https://github.com/raylanlin/Millwright/compare/v0.2.29...v0.2.30
 [0.2.29]: https://github.com/raylanlin/Millwright/compare/v0.2.28...v0.2.29

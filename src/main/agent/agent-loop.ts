@@ -2,6 +2,15 @@
 // Legacy VBS agent loop (fallback when the python sidecar cannot start).
 // P5: tool results are pushed as first-class role:'tool' messages (same
 // encoding as agent-loop-sidecar); adapter-agnostic via LLMAdapter.
+//
+// P35: two fixes for the degraded path —
+//   1. `degradedNotice`: the caller passes the REASON the sidecar could not
+//      start; it is emitted as the first text event so the user (and the model,
+//      via the system prompt note in handlers) knows the tool set is reduced
+//      (no analyze_view, no suppress/unsuppress, no verified results).
+//   2. Unique tool-call ids: two same-named calls used to collapse to
+//      callId = name, so confirm cards collided and clicking one resolved the
+//      other (same bug as P33 on the sidecar path).
 
 import type { LLMAdapter } from '../llm/adapter';
 import type { ChatMessage, ToolCall } from '../../shared/types';
@@ -30,6 +39,8 @@ export interface AgentOptions {
   confirmTool?: (call: ToolCall) => Promise<boolean>;
   /** Whitelist of tools that need confirmation (defaults to destructive operations) */
   confirmList?: Set<string>;
+  /** P35: why we are on the degraded VBS path — surfaced to the user before the first round */
+  degradedNotice?: string;
 }
 
 const DEFAULT_CONFIRM = new Set(['cut_extrude', 'create_fillet', 'modify_dimensions', 'delete_feature']);
@@ -78,6 +89,11 @@ export async function runAgentLoop(
   }
   opts.onEvent?.({ type: 'start', requestId: opts.requestId, backupPath });
 
+  // P35: never degrade silently — tell the user which engine is running and why
+  if (opts.degradedNotice) {
+    opts.onEvent?.({ type: 'text', text: opts.degradedNotice });
+  }
+
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
 
@@ -93,6 +109,12 @@ export async function runAgentLoop(
       opts.onEvent?.({ type: 'done', text: finalText });
       return finalText;
     }
+
+    // P35: guarantee a unique id per call before anything keys off it (confirm
+    // map, UI cards, tool messages) — two same-named calls otherwise collide.
+    resp.toolCalls.forEach((c, i) => {
+      if (!c.id) c.id = `${c.name}-r${round}-${i}-${Date.now().toString(36)}`;
+    });
 
     history.push({ role: 'assistant', content: resp.content ?? '', toolCalls: resp.toolCalls });
 
