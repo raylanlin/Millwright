@@ -6,6 +6,72 @@
 
 ## [Unreleased]
 
+### Changed (P41 — README 双语修订)
+
+README 双语文档修订（不打 bump，纯文档变更）。改动源：Claude 在「APPLY.md 审稿」中指出的 8 处问题 + 中文版 20 处自链接残留。
+
+**5 处修复**
+
+1. **开头示例里的工具名不存在** —— `✓ Hole Wizard × 4` / `Create Sketch` 都不是真工具。换成一条**真实跑通过**的链路（new_part → start_sketch → sketch_rectangle → extrude → sketch_circle → cut_extrude → analyze_view），名字与 sidecar 注册表一致。
+2. **Examples 段 `create_sketch(front)`** → `start_sketch(front)`（实际工具名）。
+3. **Quick Start 自相矛盾** —— 第 1 步下 installer、第 2 步却叫人 `pip install`，而 installer 本来就内置 Python（还是卖点之一）。现在 Install 分支只有两步（下载 → 启动），`pip install pywin32 pillow` 移进 From source 分支；"没 Python 会回退 VBS" 的说明也跟着挪过去。
+4. **仓库链接大小写** —— 3 处 `raylanlin/millwright` → `raylanlin/Millwright`（clone 命令、releases 链接）。
+5. **"$16–417 / month" 无出处** → 改为 "Per-seat subscription"，Millwright 一侧改为 "Free — open source, pay only your API usage"。
+
+**3 处定位问题**
+
+6. **VERIFY backlog 从 Features 区移到 Contributing** —— 原来 "ten more pending verification" 写在跨版本兼容段正中间，新用户第一反应是 "一半功能没验证过"。现在该段只留正面表述，并换成**具体的、已发生的**硬化案例（参数个数搜索 / GetFeatures 回退 / 切除方向探测，每条都来自真实报错）；待验证清单挪到 Contributing 的 "招真机测试" 条目里，顺势变成号召。
+7. **Roadmap v0.3 写具体缺什么** —— 原来 "Full tool coverage" 与 "~50 tools" 打架。现在列：流式工具调用、模型面画草图、hole wizard、钣金、工程图标注、剩余 #VERIFY。这几项正好对应现有待办。
+8. **Roadmap 当前行去掉内部 changelog 味** —— 原来罗列 6 个技术细节，改为一句能力表述："sketch → feature → cut → visual-verification loop 已在真机端到端跑通"。
+
+**顺带**
+- 视觉段的多模态模型举例加上 MiniMax M3（已实测通过），GPT-4o → GPT。
+- Zero-dependency install 补上 `pillow`（P31 已打进包）。
+- 确认卡示例里的破坏性操作换成真实存在的（cut / delete feature / suppress components）。
+
+**中文版额外修复（README.zh-CN.md）**
+
+除上述 1–8 全部同步外，中文版还清掉了一类**渲染残留**：每个二级标题下面都有一行形如 `[#核心特性](#核心特性)` 的自链接（共 20 处），在 GitHub 上渲染成一行多余的蓝色链接。这些应该是从某个目录生成工具带出来的，已全部删除（顶部导航区的锚点链接保留，那些是有用的）。
+
+另外中文版把 CHANGELOG 链接补成了绝对地址（与文件内其他文档链接风格一致，避免子目录场景失效）。
+
+### Changed (commit 门禁增强 — `--docs-only` 旗标)
+
+`scripts/precommit-check.sh` 新增 `--docs-only` 旗标，专门应对纯文档修订场景。发版模式（默认）行为不变。
+
+**触发方式**
+
+```bash
+# 发版（默认）
+bash scripts/precommit-check.sh "$R" 0.2.38
+
+# 纯文档修订
+bash scripts/precommit-check.sh "$R" --docs-only
+```
+
+**`--docs-only` 跳过什么**
+- `package.json` bump 到指定版本
+- `CHANGELOG.md` 含 `[V]` 段
+
+**`--docs-only` 保留什么（仍然跑）**
+- 工作树污染检查（credential / apikey / .env / .pyc / __pycache__ / backups / vendor/python）
+- Python sidecar `compileall`（仅当 sidecar/ 在 staged 里）
+- 边车 ping 握手
+- 文档修订仍要求 `CHANGELOG.md` 记录本次变更（`[Unreleased]` 段）
+
+**`--docs-only` 护栏（防止被滥用成后门）**
+
+任一命中即失败并提示「有代码改动,不能用 --docs-only」：
+- `src/`、非 `*.md` 的 `sidecar/`
+- `electron-builder.yml`、`package.json`、`.github/`
+- 配置文件：`.eslintrc.json` / `.prettierrc*` / `.ruff.toml` / `.npmrc`
+- 构建产物 / 锁文件
+- `scripts/` 下除本门禁脚本本身外的其它脚本
+
+唯一允许的非 `*.md` 例外：`scripts/precommit-check.sh` 本身（要随 `--docs-only` 提交一起改）。
+
+详细规则写进 TOOLS.md「规则 3：commit 前跑门禁脚本」段。
+
 ## [0.2.37] - 2026-07-25
 
 ### Fixed (P40 — 切除参数个数自适应搜索 + 常量加载)

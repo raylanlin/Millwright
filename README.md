@@ -46,26 +46,26 @@ Most AI CAD assistants generate VBA or Python scripts and leave you to copy, pas
 Millwright doesn't. It calls **~50 native SolidWorks tools directly** — sketch, feature, assembly, export, and query operations — one step at a time. Every call returns a structured result, the AI reads it, and decides what to do next. No macro editing. No guessing whether it worked.
 
 ```
-You:  Create a mounting bracket with four M6 holes.
+You:  Make a 80 × 50 × 10 plate with a 10 mm hole through the middle.
 
 Millwright:
-  ✓ Create Sketch
-  ✓ Rectangle (80 × 50)
-  ✓ Extrude Boss (10 mm)
-  ✓ Hole Wizard × 4
-  ✓ Add Fillets
-  ✓ Capture Viewport
-  ✓ Vision Verification
+  ✓ New Part
+  ✓ Start Sketch (top)
+  ✓ Sketch Rectangle (80 × 50)
+  ✓ Extrude (10 mm)
+  ✓ Start Sketch · Sketch Circle (⌀10)
+  ✓ Cut-Extrude (through all)
+  ✓ Analyze View — "hole is open on both faces"
   Done.
 ```
 
-**You choose the AI backend.** Claude, GPT-4o, DeepSeek, Kimi, MiniMax, Qwen, GLM, or a local Ollama model — anything speaking the Anthropic or OpenAI-compatible protocol. The code is open; you only pay for your own API usage.
+**You choose the AI backend.** Claude, GPT, DeepSeek, Kimi, MiniMax, Qwen, GLM, or a local Ollama model — anything speaking the Anthropic or OpenAI-compatible protocol. The code is open; you only pay for your own API usage.
 
 | | Typical CAD AI SaaS | **Millwright** |
 |---|---|---|
 | Automation | Prompt → one-shot macro you paste & run | **Agentic tool loop with self-correction** |
 | AI backend | Fixed by plan | **Any model you choose (BYO key)** |
-| Pricing | \$16–417 / month | **Free — open source** |
+| Pricing | Per-seat subscription | **Free — open source, pay only your API usage** |
 | Source | Closed | **Open (Apache-2.0)** |
 | Verification | None | **Screenshots the model & reasons over it** |
 | SolidWorks versions | Often pinned to one | **Adapts across versions at runtime** |
@@ -74,10 +74,10 @@ Millwright:
 
 - 🛠 **Real tool-driving, not code generation.** The AI never hands you a macro to copy-paste — it calls native SolidWorks operations directly and decides its next move from the structured result of the last one.
 - ⚙️ **Dual-engine runtime.** A Python sidecar talks to SolidWorks over early-bound COM for full capability. If the sidecar can't start, Millwright automatically falls back to a built-in VBScript engine — and says so in the chat, instead of silently losing functionality.
-- 🔀 **Cross-version adaptive.** SolidWorks' COM API shifts parameter counts and member names across releases. Millwright discovers available signatures at runtime, falls back to dynamic dispatch when a member is missing, and probes extrusion direction automatically — no version hardcoded.
+- 🔀 **Cross-version adaptive.** SolidWorks' COM API shifts parameter counts and member names across releases. Millwright discovers available signatures at runtime, falls back to dynamic dispatch when a member is missing, and probes cut/extrude direction automatically — no version hardcoded.
 - 👁 **Seeing is believing.** The AI can screenshot the model and look at it: multimodal models read the image directly, text-only models get a dedicated vision model in the loop, and you can keep asking follow-up questions about the same screenshot. It checks its own work visually before moving on, and looks before it acts when something goes wrong.
 - 🔒 **Safety boundaries.** Destructive operations show a confirmation card with the tool name and full parameters — nothing runs without a click. Documents are backed up automatically before destructive edits. Legacy scripts are blacklist-validated. CAD files never leave your machine; only text is sent to the AI.
-- 📦 **Zero-dependency install.** The installer bundles its own Python runtime and `pywin32` — no separate setup, works out of the box.
+- 📦 **Zero-dependency install.** The installer bundles its own Python runtime, `pywin32`, and `pillow` — no separate setup, works out of the box.
 - 🔌 **Protocol-agnostic.** Native Anthropic and OpenAI-compatible support, hand-written `fetch` + SSE, no vendor lock-in. DeepSeek, MiniMax, GLM, and friends all work the same way.
 
 ## Features
@@ -96,9 +96,9 @@ SolidWorks' COM API is not stable across releases: method signatures change, opt
 Tool Request → Signature Discovery → Available COM Members → Dynamic Dispatch → Execute
 ```
 
-Millwright discovers the best available API at execution time instead of assuming a fixed version, handling different parameter counts, missing COM members, multiple overload candidates, and differing extrusion directions automatically. One runtime, no version-specific builds.
+Millwright discovers the best available API at execution time instead of assuming a fixed version, handling different parameter counts, missing COM members, multiple overload candidates, and differing feature directions automatically. One runtime, no version-specific builds.
 
-This is actively hardened against real SolidWorks installs rather than tested in the abstract — for example, `cut_extrude` and `extrude` now search parameter-count and signature variants at runtime until one succeeds, converging automatically on whatever a given machine's SolidWorks build expects. Four multi-parameter APIs are already macro-recorder verified (`add_mate`, document/template constants, sketch primitives, `chamfer`); ten more — `revolve`, `fillet_edges`, `shell`, `linear_pattern`, `circular_pattern`, `mirror_feature`, `create_reference_point`, `export_stl`, and the underlying signatures for `extrude`/`cut_extrude` — are tracked in the [verification backlog](docs/VERIFY-ISSUES.md) and welcome real-hardware confirmation.
+This is hardened against real SolidWorks installs, not tested in the abstract. Concretely: `cut_extrude` searches parameter-count and signature variants at runtime until one succeeds, converging on whatever a given machine's build expects; feature-tree traversal falls back from the linked-list API to `IFeatureManager.GetFeatures` when COM won't resolve it; cut direction is probed forward, reverse, then symmetric. Every one of these came from a real failure on a real install.
 
 ## Safety, by default
 
@@ -108,7 +108,7 @@ AI should never be allowed to silently destroy CAD data.
 Delete Feature → Confirmation Card → User Approval → Automatic Backup → Execute
 ```
 
-- **Confirmation gate.** Destructive operations — delete feature/body/sketch, replace components, overwrite an export — show the tool name and full parameters and require an explicit click before running.
+- **Confirmation gate.** Destructive operations — cut, delete feature, suppress components, overwrite an export — show the tool name and full parameters and require an explicit click before running.
 - **Automatic backup.** The current document is backed up before any destructive operation, so you can always recover.
 - **Script validation.** Legacy VBScript execution is checked against a blacklist and dangerous-API detection before it ever reaches SolidWorks.
 - **Local-first data.** CAD files never leave your machine — only the minimal text context needed for reasoning is sent to the AI provider.
@@ -121,30 +121,29 @@ Most CAD automation stops the moment the API call returns. Millwright keeps goin
 Create Feature → Capture View → Vision Model → Compare With Request → Need Changes? → Continue Editing
 ```
 
-- **Multimodal main model** (Claude, GPT-4o, Gemini, Qwen-VL, …): screenshots go straight to the model, no extra step.
+- **Multimodal main model** (Claude, GPT, MiniMax M3, Qwen-VL, …): screenshots go straight to the model, no extra step.
 - **Text-only main model:** the screenshot is routed to an independent vision model, and its description feeds back into the planner — so even text-only LLMs can reason about CAD geometry.
 
 ## Quick Start
 
 ### Install
 
-1. Download the installer from [Releases](https://github.com/raylanlin/millwright/releases) and run it.
-2. Install the sidecar runtime (drives SolidWorks):
-   ```bash
-   pip install pywin32 pillow
-   ```
-   > Without Python, the app still runs and falls back to the legacy VBScript engine — but you lose structured results and visual understanding. Installing Python is strongly recommended.
+1. Download the installer from [Releases](https://github.com/raylanlin/Millwright/releases) and run it.
+2. Start SolidWorks, then launch Millwright — the Python runtime is bundled, nothing else to install.
 
 ### From source
 
 ```bash
-git clone https://github.com/raylanlin/millwright.git
-cd millwright
+git clone https://github.com/raylanlin/Millwright.git
+cd Millwright
 npm install
+pip install pywin32 pillow   # the sidecar runtime the installer normally bundles
 npm run dev
 ```
 
 > UI-only development without SolidWorks: set `SKIP_SW_CONNECT=true`.
+>
+> Without Python the app still runs, falling back to the legacy VBScript engine — but you lose structured results and visual understanding.
 
 ### Configure
 
@@ -166,13 +165,13 @@ npm run dev
 | SiliconFlow | OpenAI-compatible | `https://api.siliconflow.cn/v1` | — |
 | Ollama (local) | OpenAI-compatible | `http://localhost:11434/v1` | — |
 
-> Agentic tool calling requires a model that supports function calling. DeepSeek, Kimi K3, MiniMax M3, and GLM-4.6 are first-class targets.
+> Model IDs move fast — check your provider's docs for the current lineup. Agentic tool calling requires a model that supports function calling; DeepSeek V4, Kimi K3, MiniMax M3, and GLM-4.6 are first-class targets.
 
 ## Examples
 
 ```
 You: Sketch a 50×30 rectangle on the front plane and extrude it 20 mm.
-AI:  create_sketch(front) → sketch_rectangle(50,30) → extrude(20)  ✓  part created
+AI:  start_sketch(front) → sketch_rectangle(50,30) → extrude(20)  ✓  part created
 
 You: How heavy is this part, and what's its bounding box?
 AI:  mass_properties → bounding_box  ✓  0.42 kg · 50 × 30 × 20 mm
@@ -230,7 +229,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
 
 Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especially value:
 
-- 🧪 Test reports from real SolidWorks environments (and macro-recorder verification of the [pending APIs](docs/VERIFY-ISSUES.md))
+- 🧪 **Test reports from real SolidWorks environments.** Most of Millwright's hardening came from exactly this. A handful of multi-parameter APIs (`revolve`, `fillet_edges`, `shell`, the pattern and mirror family, `create_reference_point`, `export_stl`) are still waiting on macro-recorder confirmation from real installs — they're tracked in the [verification backlog](docs/VERIFY-ISSUES.md), and confirming one on your machine is the single most useful contribution you can make.
 - 🔨 New sidecar tools (`sidecar/sw_agent/tools/`)
 - 🎨 UI/UX improvements
 - 🌐 Adapters for other CAD (Inventor, CATIA, NX) and MCP server integration
@@ -238,13 +237,13 @@ Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especi
 
 ## Roadmap
 
-- [x] **v0.1** — MVP: Electron + LLM adapters + VBS/COM bridge + first tool set
+- [x] **v0.1** — MVP: Electron shell, LLM adapters, COM bridge, first tool set
 - [x] **v0.2** — Python sidecar, agentic tool loop, dual-engine fallback, vision feedback, confirmation cards, Apache-2.0 open source
-- [x] **v0.2.4 → v0.2.37** — Extensive real-hardware hardening ← *current*: early-bound COM dispatch, cross-version adaptive parameter discovery for `extrude`/`cut_extrude`, idempotent confirmation cards, degraded-mode reporting when the sidecar can't start, PNG screenshots for vision, configurable tool-call rounds
-- [ ] **v0.3** — Full tool coverage, remaining `#VERIFY` parameters confirmed on real installs, streaming tool calls
+- [x] **v0.2.4 → v0.2.37** — Extensive hardening against real SolidWorks installs ← *current*: the sketch → feature → cut → visual-verification loop now runs end to end on real hardware
+- [ ] **v0.3** — Streaming tool calls, sketching on model faces (not just reference planes), hole wizard, sheet metal, drawing annotations, remaining `#VERIFY` parameters confirmed
 - [ ] **v1.0** — MCP server, multi-CAD support
 
-> Millwright is young and moves fast — most releases so far have come from fixing real COM-binding and cross-version quirks reported from actual SolidWorks installs, tracked in [CHANGELOG.md](CHANGELOG.md) and the [verification backlog](docs/VERIFY-ISSUES.md).
+> Millwright is young and moves fast — most releases so far have come from fixing real COM-binding and cross-version quirks reported from actual SolidWorks installs, tracked in [CHANGELOG.md](CHANGELOG.md).
 
 ## Name
 
