@@ -20,6 +20,7 @@ Key conventions:
   "no connection / no document" error handling lives here, in one place.
 """
 from __future__ import annotations
+
 from typing import Any
 
 # swDocumentTypes_e
@@ -96,7 +97,7 @@ class Context:
                 # 'int' object is not callable. dynamic.Dispatch forces late-bound dispatch
                 # while preserving the IDispatch type info for method resolution.
                 try:
-                    import win32com.client.dynamic  # noqa: F401
+                    import win32com.client.dynamic
                     return win32com.client.dynamic.Dispatch(raw)
                 except Exception:  # noqa: BLE001
                     return raw

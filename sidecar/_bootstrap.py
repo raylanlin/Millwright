@@ -14,8 +14,8 @@
 # sys.path makes the `sw_agent` package importable regardless of interpreter
 # flavor. runpy then executes the package exactly as `-m sw_agent` would.
 import os
-import sys
 import runpy
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 runpy.run_module("sw_agent", run_name="__main__")

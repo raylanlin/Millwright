@@ -1,0 +1,9 @@
+[lint]
+# sidecar 代码大量使用 try/except 容错（COM 版本差异），这是设计意图
+ignore = [
+    "S110",   # try-except-pass — 版本差异下的容错
+    "S112",   # try-except-continue — 特征遍历中单项异常不拖垮整体
+    "SIM102", # 嵌套 if — 代码可读性更好
+    "B018",   # useless attribute access — server.py 预热函数的有意用法
+    "RUF015", # 单元素 slice — 可读性
+]
