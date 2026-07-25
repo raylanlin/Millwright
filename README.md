@@ -92,9 +92,9 @@ npm run dev
 | DeepSeek | OpenAI-compatible | `https://api.deepseek.com` | `deepseek-v4-pro` |
 | Kimi / Moonshot | OpenAI-compatible | `https://api.moonshot.cn/v1` | `kimi-k3` |
 | MiniMax | OpenAI-compatible | `https://api.minimaxi.com/v1` | `minimax-m3` |
-| Anthropic | Anthropic | `https://api.anthropic.com` | `claude-sonnet-5` / `claude-opus-5` |
-| OpenAI | OpenAI | `https://api.openai.com/v1` | `gpt-5.6` |
-| Alibaba Bailian (Qwen) | OpenAI-compatible | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-3.8max` |
+| Anthropic | Anthropic | `https://api.anthropic.com` | `claude-sonnet-4` |
+| OpenAI | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
+| Alibaba Bailian (Qwen) | OpenAI-compatible | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` |
 | SiliconFlow | OpenAI-compatible | `https://api.siliconflow.cn/v1` | — |
 | Ollama (local) | OpenAI-compatible | `http://localhost:11434/v1` | — |
 
