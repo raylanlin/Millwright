@@ -420,6 +420,68 @@ export function SettingsModal({
         />
         <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 16px 1px' }}>{tr('settings.maxRoundsHint')}</p>
 
+        {/* P51: Reasoning controls */}
+        <label style={labelStyle}>{tr('settings.reasoning')}</label>
+        <div style={{ display: 'flex', gap: 7, marginBottom: 6, flexWrap: 'wrap' }}>
+          {(['auto', 'off', 'low', 'medium', 'high'] as const).map((lv) => {
+            const on = (draft.reasoningLevel ?? 'auto') === lv;
+            return (
+              <button
+                key={lv}
+                onClick={() => update('reasoningLevel', lv)}
+                style={{
+                  padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+                  border: `1px solid ${on ? t.btnPrimary : t.cardBorder}`,
+                  background: on ? t.btnPrimary : 'transparent',
+                  color: on ? t.btnPrimaryText : t.textSecondary,
+                  fontSize: 12, fontWeight: on ? 600 : 500, fontFamily: 'inherit',
+                }}
+              >
+                {tr(`settings.reasoning.${lv}`)}
+              </button>
+            );
+          })}
+        </div>
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '0 0 10px 1px' }}>
+          {tr('settings.reasoningHint')}
+        </p>
+
+        {(draft.reasoningLevel ?? 'auto') !== 'auto' && (
+          <>
+            <label style={labelStyle}>{tr('settings.reasoningDialect')}</label>
+            <select
+              value={draft.reasoningDialect ?? 'auto'}
+              onChange={(e) => update('reasoningDialect', e.target.value as any)}
+              style={{ ...fieldStyle, marginBottom: 4 }}
+            >
+              <option value="auto">{tr('settings.dialect.auto')}</option>
+              <option value="effort">reasoning_effort (OpenAI / MiniMax / Kimi)</option>
+              <option value="deepseek">thinking.type (DeepSeek)</option>
+              <option value="zhipu">thinking.type (GLM / 智谱)</option>
+              <option value="qwen">enable_thinking (Qwen / 百炼)</option>
+              <option value="none">{tr('settings.dialect.none')}</option>
+            </select>
+            <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 16px 1px' }}>
+              {tr('settings.reasoningDialectHint')}
+            </p>
+          </>
+        )}
+
+        {/* P51: Max output tokens */}
+        <label style={labelStyle}>{tr('settings.maxTokens')}</label>
+        <input
+          type="number"
+          min={1024}
+          max={131072}
+          step={1024}
+          value={draft.maxTokens ?? 8192}
+          onChange={(e) => update('maxTokens', Math.max(1024, Math.min(131072, Number(e.target.value) || 8192)))}
+          style={{ ...fieldStyle, marginBottom: 4, width: 140 }}
+        />
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 18px 1px' }}>
+          {tr('settings.maxTokensHint')}
+        </p>
+
         {/* P28: Vision understanding */}
         <label style={labelStyle}>{tr('settings.vision')}</label>
         <label

@@ -1,4 +1,7 @@
-// src/main/llm/adapter.ts
+// src/main/llm/adapter.ts (P51 additions marked)
+//
+// P51: adds an OPTIONAL streaming tool-calling method. Adapters that implement it get
+// real token-by-token output; those that don't fall back to chatWithTools untouched.
 
 import type {
   LLMConfig,
@@ -7,56 +10,38 @@ import type {
   LLMStreamEvent,
 } from '../../shared/types';
 
-/**
- * LLM adapter interface — implemented by both the Anthropic and OpenAI-compatible protocols.
- *
- * Design conventions:
- * - `chat()` returns the full response in one shot; no internal streaming (even when the server supports it).
- * - `chatStream()` streams events back via an `AsyncIterable`.
- * - `chatWithTools()` (P5: now part of the base contract) sends the tool schema and
- *   returns content + structured toolCalls — the agent loop's single entry point.
- * - All network/parsing errors are surfaced by throwing an `LLMErrorInfo` (never a raw `Error`).
- * - Cancellation is implemented via `AbortSignal`.
- */
+/** P51: one frame of a streaming tool-calling turn. */
+export type ToolStreamChunk =
+  | { kind: 'text'; chunk: string }
+  | { kind: 'reasoning'; chunk: string }
+  | { kind: 'tool'; name: string }
+  | { kind: 'done'; response: LLMResponse };
+
 export interface LLMAdapter {
-  /**
-   * One-shot chat; waits for the complete response before returning.
-   * @throws LLMErrorInfo
-   */
   chat(messages: ChatMessage[], signal?: AbortSignal): Promise<LLMResponse>;
 
-  /**
-   * Streaming chat; returns an async iterator of events.
-   * Consumers are responsible for handling `delta` / `done` / `error` events.
-   */
   chatStream(
     messages: ChatMessage[],
     requestId: string,
     signal?: AbortSignal,
   ): AsyncIterable<LLMStreamEvent>;
 
-  /**
-   * P5: tool-calling chat. `tools` uses the OpenAI function-schema format
-   * ({type:'function',function:{name,description,parameters}}) as the internal
-   * lingua franca; the Anthropic adapter converts it on the wire.
-   */
   chatWithTools(
     messages: ChatMessage[],
     signal?: AbortSignal,
     tools?: any[],
   ): Promise<LLMResponse>;
 
-  /**
-   * Lightweight connectivity test — sends a minimal "ping" request to verify
-   * that the URL/key/model are usable.
-   * Returns `true` on success; throws an `LLMErrorInfo` on failure.
-   */
+  /** P51: streaming variant — optional, so protocols can adopt it independently. */
+  chatWithToolsStream?(
+    messages: ChatMessage[],
+    signal?: AbortSignal,
+    tools?: any[],
+  ): AsyncIterable<ToolStreamChunk>;
+
   test(signal?: AbortSignal): Promise<boolean>;
 }
 
-/**
- * Base class for adapters — provides shared utility methods.
- */
 export abstract class BaseLLMAdapter implements LLMAdapter {
   constructor(protected readonly config: LLMConfig) {}
 
@@ -107,8 +92,7 @@ export abstract class BaseLLMAdapter implements LLMAdapter {
 
   /**
    * Filter out all plain `role:"system"` messages, concatenate them, and leave
-   * the rest for the `messages` field. Tool-result messages (role:'tool', or the
-   * legacy system+toolCalls encoding) are NOT system text and stay in `rest`.
+   * the rest for the `messages` field.
    */
   protected splitSystem(messages: ChatMessage[]): {
     system: string;

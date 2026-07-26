@@ -28,6 +28,10 @@ export interface LLMConfig {
   maxRounds?: number;
   /** P43: 审批严格度 —— strict 每个工具 / normal 破坏性(默认) / permissive 仅不可逆 / auto 全自动 */
   approvalMode?: 'strict' | 'normal' | 'permissive' | 'auto';
+  /** P51: 推理深度 —— auto 用厂商默认 / off 关闭 / low·medium·high */
+  reasoningLevel?: 'auto' | 'off' | 'low' | 'medium' | 'high';
+  /** P51: 推理参数方言，auto 按 baseURL 自动识别 */
+  reasoningDialect?: 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek';
 }
 
 /** P3: configuration for a dedicated vision model (OpenAI-compatible multimodal) */
@@ -75,7 +79,7 @@ export interface ChatMessage {
 /** P17-P22: one step inside an agent turn (assistant message).
  *  `kind:'text'` carries the prose; `kind:'tool'` is one tool invocation. */
 export interface AgentStep {
-  kind: 'text' | 'tool' | 'confirm';
+  kind: 'text' | 'tool' | 'confirm' | 'reasoning' | 'pending';
   /** text step: the prose fragment (may be empty for tool-only turns) */
   text?: string;
   /** tool step: tool call id (matches ToolCall.id) */
@@ -90,6 +94,8 @@ export interface AgentStep {
   result?: string;
   /** P28: confirm step's parent agent requestId (for click → IPC 回执) */
   requestId?: string;
+  /** P51: 该推理块是否还在流式接收中 */
+  streaming?: boolean;
 }
 
 export interface LLMUsage {
@@ -106,6 +112,8 @@ export interface LLMResponse {
   codeLanguage?: 'vba' | 'python';
   /** Reason the response finished */
   finishReason?: 'stop' | 'length' | 'tool_use' | 'error' | 'cancelled';
+  /** P51: 模型的推理过程（仅展示，不进历史） */
+  reasoning?: string;
 }
 
 /** Incremental event emitted by streaming responses */

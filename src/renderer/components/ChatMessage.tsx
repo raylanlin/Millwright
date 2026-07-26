@@ -11,6 +11,8 @@ import type { ThemeTokens } from '../themes';
 import { useT } from '../i18n/LocaleContext';
 import { ToolCallGroup } from './ToolCallGroup';
 import { ConfirmCard } from './ConfirmCard';
+import { ThinkingBlock } from './ThinkingBlock';
+import { PendingTool } from './PendingTool';
 
 interface Props {
   msg: ChatMsg;
@@ -144,6 +146,14 @@ function renderSteps(steps: AgentStep[], t: ThemeTokens) {
   steps.forEach((s, i) => {
     if (s.kind === 'tool') {
       buf.push(s);
+    } else if (s.kind === 'pending') {
+      flush(i);
+      // P52: arguments are still streaming — show what is being called, not silence
+      els.push(<PendingTool key={i} name={s.name} t={t} />);
+    } else if (s.kind === 'reasoning') {
+      flush(i);
+      // P51: scratchpad, collapsed by default — visible enough to prove work is happening
+      if (s.text) els.push(<ThinkingBlock key={i} text={s.text} streaming={s.streaming} t={t} />);
     } else if (s.kind === 'confirm') {
       flush(i);
       els.push(<ConfirmCard key={i} step={s} t={t} />);

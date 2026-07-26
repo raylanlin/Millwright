@@ -3,18 +3,26 @@
 // Anthropic Messages API adapter.
 // Uses raw `fetch` + hand-written SSE parsing.
 //
-// P5: implements `chatWithTools` — the Anthropic protocol now drives the agent
-// loop natively via `tool_use` / `tool_result` content blocks. Tool schemas
-// arrive in the OpenAI function format (internal lingua franca, straight from
-// sidecar.list_tools) and are converted on the wire.
+// P5: implements `chatWithTools` — the Anthropic protocol drives the agent loop
+// natively via `tool_use` / `tool_result` content blocks. Tool schemas arrive in the
+// OpenAI function format (internal lingua franca, straight from sidecar.list_tools) and
+// are converted on the wire.
+//
+// P53: adds `chatWithToolsStream`. Anthropic's stream is block-structured rather than
+// a flat delta feed: content_block_start announces each block (text / thinking /
+// tool_use, the latter carrying id + name), content_block_delta carries text_delta,
+// thinking_delta or input_json_delta (tool arguments, a few characters at a time), and
+// content_block_stop closes it. So tool input is accumulated per block index and only
+// parsed at content_block_stop — parsing earlier yields malformed JSON.
 //
 // Docs: https://docs.claude.com/en/api/messages
 
-import { BaseLLMAdapter } from './adapter';
+import { BaseLLMAdapter, type ToolStreamChunk } from './adapter';
 import { resolveSystemPrompt } from './prompts';
 import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
 import { parseSSE } from './sse';
+import { splitThinking } from './thinking';
 import type {
   ChatMessage,
   LLMResponse,
@@ -42,7 +50,33 @@ interface AnthropicResponseBody {
   };
 }
 
+/** P53: one in-flight content block during a streamed turn. */
+interface StreamBlock {
+  type: 'text' | 'thinking' | 'tool_use' | 'other';
+  id?: string;
+  name?: string;
+  json: string;
+  announced?: boolean;
+}
+
 export class AnthropicAdapter extends BaseLLMAdapter {
+  private maxTokens(): number {
+    return this.config.maxTokens ?? 8192;
+  }
+
+  /**
+   * P53: extended thinking. Anthropic takes a budget, not a level, and requires
+   * budget_tokens < max_tokens. 'auto' sends nothing (model default).
+   */
+  private thinkingExtras(): Record<string, any> {
+    const lv = this.config.reasoningLevel ?? 'auto';
+    if (lv === 'auto') return {};
+    if (lv === 'off') return { thinking: { type: 'disabled' } };
+    const budgets: Record<string, number> = { low: 1024, medium: 4096, high: 16384 };
+    const budget = Math.min(budgets[lv] ?? 4096, Math.max(1024, this.maxTokens() - 1024));
+    return { thinking: { type: 'enabled', budget_tokens: budget } };
+  }
+
   private buildBody(messages: ChatMessage[], stream: boolean) {
     const { system, rest } = this.splitSystem(messages);
     const systemPrompt = resolveSystemPrompt(
@@ -51,11 +85,12 @@ export class AnthropicAdapter extends BaseLLMAdapter {
 
     return {
       model: this.config.model,
-      max_tokens: this.config.maxTokens ?? 4096,
+      max_tokens: this.maxTokens(),
       temperature: this.config.temperature ?? 0.3,
       system: systemPrompt,
       stream,
       messages: rest.map((m) => ({ role: m.role, content: m.content })),
+      ...this.thinkingExtras(),
     };
   }
 
@@ -76,15 +111,29 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     return headers;
   }
 
+  /**
+   * P53: POST, and if the gateway rejects the `thinking` field with a 400, retry ONCE
+   * without it. An Anthropic-compatible proxy that predates extended thinking should
+   * degrade to "no reasoning control", never to a dead request.
+   */
+  private async post(body: any, signal: AbortSignal): Promise<Response> {
+    const url = `${this.getBaseURL()}/v1/messages`;
+    const send = (b: any) => fetch(url, {
+      method: 'POST', headers: this.buildHeaders(), body: JSON.stringify(b), signal,
+    });
+    const res = await send(body);
+    if (res.status !== 400 || !('thinking' in body)) return res;
+    const text = await res.clone().text();
+    if (!/thinking/i.test(text)) return res;
+    const stripped = { ...body };
+    delete stripped.thinking;
+    return send(stripped);
+  }
+
   async chat(messages: ChatMessage[], signal?: AbortSignal): Promise<LLMResponse> {
     const { signal: s, cleanup } = this.withTimeout(signal);
     try {
-      const res = await fetch(`${this.getBaseURL()}/v1/messages`, {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify(this.buildBody(messages, false)),
-        signal: s,
-      });
+      const res = await this.post(this.buildBody(messages, false), s);
 
       const text = await res.text();
       if (!res.ok) {
@@ -107,7 +156,8 @@ export class AnthropicAdapter extends BaseLLMAdapter {
         .map((c) => c.text)
         .join('');
 
-      return this.finalize(content, data.usage, data.stop_reason);
+      // P53: drop any inline <think> block (OSS models behind Anthropic-compatible proxies)
+      return this.finalize(splitThinking(content).answer, data.usage, data.stop_reason);
     } catch (err) {
       throw toLLMError(err, 'Anthropic 请求失败');
     } finally {
@@ -128,12 +178,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     try {
       yield { type: 'start', requestId };
 
-      const res = await fetch(`${this.getBaseURL()}/v1/messages`, {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify(this.buildBody(messages, true)),
-        signal: s,
-      });
+      const res = await this.post(this.buildBody(messages, true), s);
 
       if (!res.ok) {
         const text = await res.text();
@@ -265,6 +310,26 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     return { system, wire };
   }
 
+  private buildToolBody(messages: ChatMessage[], tools: any[] | undefined, stream: boolean) {
+    const { system, wire } = this.buildToolMessages(messages);
+    const systemPrompt = resolveSystemPrompt(
+      [this.config.systemPrompt, system].filter(Boolean).join('\n\n'),
+    );
+    const body: any = {
+      model: this.config.model,
+      max_tokens: this.maxTokens(),
+      temperature: this.config.temperature ?? 0.3,
+      system: systemPrompt,
+      stream,
+      messages: wire,
+      ...this.thinkingExtras(),
+    };
+    if (tools && tools.length > 0) body.tools = this.toAnthropicTools(tools);
+    // Extended thinking requires the default temperature
+    if (body.thinking?.type === 'enabled') delete body.temperature;
+    return body;
+  }
+
   async chatWithTools(
     messages: ChatMessage[],
     signal?: AbortSignal,
@@ -272,26 +337,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   ): Promise<LLMResponse> {
     const { signal: s, cleanup } = this.withTimeout(signal);
     try {
-      const { system, wire } = this.buildToolMessages(messages);
-      const systemPrompt = resolveSystemPrompt(
-        [this.config.systemPrompt, system].filter(Boolean).join('\n\n'),
-      );
-      const body: any = {
-        model: this.config.model,
-        max_tokens: this.config.maxTokens ?? 4096,
-        temperature: this.config.temperature ?? 0.3,
-        system: systemPrompt,
-        stream: false,
-        messages: wire,
-      };
-      if (tools && tools.length > 0) body.tools = this.toAnthropicTools(tools);
-
-      const res = await fetch(`${this.getBaseURL()}/v1/messages`, {
-        method: 'POST',
-        headers: this.buildHeaders(),
-        body: JSON.stringify(body),
-        signal: s,
-      });
+      const res = await this.post(this.buildToolBody(messages, tools, false), s);
       const text = await res.text();
       if (!res.ok) {
         throw new LLMHttpError(res.status, text,
@@ -300,16 +346,20 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       const data = JSON.parse(text);
 
       let content = '';
+      let reasoning = '';
       const toolCalls: ToolCall[] = [];
       for (const block of data.content ?? []) {
         if (block.type === 'text') content += block.text;
+        else if (block.type === 'thinking') reasoning += block.thinking ?? '';
         else if (block.type === 'tool_use') {
           toolCalls.push({ id: block.id, name: block.name, parameters: block.input ?? {} });
         }
       }
+      const split = splitThinking(content);
 
       return {
-        content,
+        content: split.answer,
+        reasoning: [reasoning, split.reasoning].filter(Boolean).join('\n') || undefined,
         toolCalls: toolCalls.length ? toolCalls : undefined,
         finishReason: toolCalls.length ? 'tool_use' : 'stop',
         usage: data.usage
@@ -318,6 +368,129 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       };
     } catch (err) {
       throw toLLMError(err, '工具调用请求失败');
+    } finally {
+      cleanup();
+    }
+  }
+
+  /**
+   * P53: streaming tool-calling.
+   *
+   * Anthropic's stream is block-structured, not a flat delta feed:
+   *   content_block_start  → a new block; for tool_use it carries id + name
+   *   content_block_delta  → text_delta | thinking_delta | input_json_delta
+   *   content_block_stop   → block finished (only now is tool JSON complete)
+   * Tool arguments therefore accumulate per block index and are parsed at stop.
+   */
+  async *chatWithToolsStream(
+    messages: ChatMessage[],
+    signal?: AbortSignal,
+    tools?: any[],
+  ): AsyncIterable<ToolStreamChunk> {
+    const { signal: s, cleanup } = this.withTimeout(signal);
+    const blocks = new Map<number, StreamBlock>();
+    const toolCalls: ToolCall[] = [];
+    let content = '';
+    let reasoning = '';
+    let stopReason: string | null = null;
+    const usage: { input_tokens?: number; output_tokens?: number } = {};
+
+    try {
+      const res = await this.post(this.buildToolBody(messages, tools, true), s);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new LLMHttpError(res.status, text,
+          extractErrorMessage(text, `Anthropic API 错误 (HTTP ${res.status})`));
+      }
+      if (!res.body) throw new Error('Anthropic 流式响应缺少 body');
+
+      for await (const ev of parseSSE(res.body)) {
+        if (!ev.data || ev.data === '[DONE]') continue;
+        let payload: any;
+        try { payload = JSON.parse(ev.data); } catch { continue; }
+
+        switch (payload.type) {
+          case 'message_start':
+            if (payload.message?.usage) {
+              usage.input_tokens = payload.message.usage.input_tokens;
+              usage.output_tokens = payload.message.usage.output_tokens;
+            }
+            break;
+
+          case 'content_block_start': {
+            const idx = payload.index ?? 0;
+            const b = payload.content_block ?? {};
+            const kind: StreamBlock['type'] =
+              b.type === 'text' ? 'text'
+              : b.type === 'thinking' || b.type === 'redacted_thinking' ? 'thinking'
+              : b.type === 'tool_use' ? 'tool_use'
+              : 'other';
+            const block: StreamBlock = { type: kind, id: b.id, name: b.name, json: '' };
+            blocks.set(idx, block);
+            // Announce the tool as soon as its name is known — arguments still streaming
+            if (kind === 'tool_use' && b.name) {
+              block.announced = true;
+              yield { kind: 'tool', name: b.name };
+            }
+            break;
+          }
+
+          case 'content_block_delta': {
+            const idx = payload.index ?? 0;
+            const block = blocks.get(idx);
+            const d = payload.delta ?? {};
+            if (d.type === 'text_delta' && typeof d.text === 'string') {
+              content += d.text;
+              yield { kind: 'text', chunk: d.text };
+            } else if ((d.type === 'thinking_delta' || d.type === 'signature_delta')
+                       && typeof d.thinking === 'string') {
+              reasoning += d.thinking;
+              yield { kind: 'reasoning', chunk: d.thinking };
+            } else if (d.type === 'input_json_delta' && typeof d.partial_json === 'string') {
+              if (block) block.json += d.partial_json;
+            }
+            break;
+          }
+
+          case 'content_block_stop': {
+            const block = blocks.get(payload.index ?? 0);
+            if (block?.type === 'tool_use' && block.name) {
+              let params: Record<string, any> = {};
+              try { params = JSON.parse(block.json || '{}'); } catch { params = {}; }
+              toolCalls.push({ id: block.id, name: block.name, parameters: params });
+            }
+            break;
+          }
+
+          case 'message_delta':
+            if (payload.delta?.stop_reason) stopReason = payload.delta.stop_reason;
+            if (payload.usage?.output_tokens != null) usage.output_tokens = payload.usage.output_tokens;
+            break;
+
+          case 'error':
+            throw new Error(payload.error?.message ?? 'Anthropic 流式错误');
+
+          default:
+            break;
+        }
+      }
+
+      const split = splitThinking(content);
+      yield {
+        kind: 'done',
+        response: {
+          content: split.answer,
+          reasoning: [reasoning, split.reasoning].filter(Boolean).join('\n') || undefined,
+          toolCalls: toolCalls.length ? toolCalls : undefined,
+          finishReason: toolCalls.length ? 'tool_use'
+            : stopReason === 'max_tokens' ? 'length' : 'stop',
+          usage: usage.input_tokens != null
+            ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens ?? 0 }
+            : undefined,
+        },
+      };
+    } catch (err) {
+      throw toLLMError(err, 'Anthropic 流式工具调用失败');
     } finally {
       cleanup();
     }

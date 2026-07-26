@@ -70,6 +70,49 @@ export function useLLM({ config, initial }: UseLLMOptions) {
     updateAssistant((m) => ({ ...m, content: text }));
   }, [updateAssistant]);
 
+  // P51: reasoning arrives as its own stream; keep it in a dedicated step so it can be
+  // collapsed in the UI and never re-sent as history.
+  const appendReasoning = useCallback((chunk: string) => {
+    updateAssistant((m) => {
+      const steps = [...(m.steps ?? [])];
+      const last = steps[steps.length - 1];
+      if (last && last.kind === 'reasoning') {
+        steps[steps.length - 1] = { ...last, text: (last.text ?? '') + chunk, streaming: true };
+      } else {
+        steps.push({ kind: 'reasoning', text: chunk, streaming: true });
+      }
+      return { ...m, steps };
+    });
+  }, [updateAssistant]);
+
+  /** Mark any live reasoning block as finished (stops its spinner). */
+  const settleReasoning = useCallback(() => {
+    updateAssistant((m) => {
+      if (!m.steps?.some((s) => s.kind === 'reasoning' && s.streaming)) return m;
+      return { ...m, steps: m.steps.map((s) => (s.kind === 'reasoning' ? { ...s, streaming: false } : s)) };
+    });
+  }, [updateAssistant]);
+
+  // P52: the tool-call head frame (name known, arguments still streaming in) is the
+  // moment output stops. Streaming nothing here reads as a hang, so swap the live text
+  // indicator for a "calling <tool>" strip until tool_start replaces it with the card.
+  const pushPending = useCallback((name?: string) => {
+    updateAssistant((m) => {
+      const steps = [...(m.steps ?? [])];
+      if (steps.some((s) => s.kind === 'pending' && s.name === name)) return m;
+      steps.push({ kind: 'pending', name });
+      return { ...m, steps };
+    });
+  }, [updateAssistant]);
+
+  /** Drop pending strips — the real tool step is about to render. */
+  const clearPending = useCallback(() => {
+    updateAssistant((m) => {
+      if (!m.steps?.some((s) => s.kind === 'pending')) return m;
+      return { ...m, steps: m.steps.filter((s) => s.kind !== 'pending') };
+    });
+  }, [updateAssistant]);
+
   const pushToolStep = useCallback((tc: any) => {
     updateAssistant((m) => ({
       ...m,
@@ -144,6 +187,21 @@ export function useLLM({ config, initial }: UseLLMOptions) {
         case 'thinking':
           setThinkingRound(ev.round ?? null);
           break;
+        case 'reasoning_delta':
+          // first reasoning token means the model is answering — drop the generic spinner
+          setThinkingRound(null);
+          if (ev.chunk) appendReasoning(ev.chunk);
+          break;
+        case 'text_delta':
+          setThinkingRound(null);
+          settleReasoning();
+          if (ev.chunk) appendText(ev.chunk);
+          break;
+        case 'tool_pending':
+          setThinkingRound(null);
+          settleReasoning();
+          pushPending(ev.name);
+          break;
         case 'backup':
           if (ev.backupPath) pushNote(`💾 已自动备份当前文档：${ev.backupPath}`);
           break;
@@ -153,6 +211,8 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           break;
         case 'tool_start':
           setThinkingRound(null);
+          settleReasoning();
+          clearPending();
           pushToolStep(ev.toolCall);
           break;
         case 'tool_result':
@@ -177,6 +237,8 @@ export function useLLM({ config, initial }: UseLLMOptions) {
         }
         case 'done':
           setThinkingRound(null);
+          settleReasoning();
+          clearPending();
           setIsGenerating(false);
           // P48: a round that yielded neither prose nor tools left a blank bubble behind
           setMessages((prev) => {
@@ -189,6 +251,7 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           break;
         case 'error':
           setThinkingRound(null);
+          clearPending();
           setError({ code: 'AGENT_ERROR', message: ev.error } as LLMErrorInfo);
           pushNote(`⚠️ ${ev.error}`);
           setIsGenerating(false);
@@ -197,7 +260,7 @@ export function useLLM({ config, initial }: UseLLMOptions) {
       }
     });
     return off;
-  }, [appendText, pushToolStep, resolveToolStep, pushNote]);
+  }, [appendText, appendReasoning, settleReasoning, pushPending, clearPending, pushToolStep, resolveToolStep, pushNote]);
 
   // P28: resolve inline confirm cards (dispatched by ConfirmCard — avoids prop drilling)
   useEffect(() => {
@@ -262,13 +325,14 @@ export function useLLM({ config, initial }: UseLLMOptions) {
     // drop the placeholder assistant bubble if the run produced nothing at all.
     setThinkingRound(null);
     setIsGenerating(false);
+    clearPending();
     setMessages((prev) => {
       const last = prev[prev.length - 1];
       const empty = last && last.role === 'assistant' && !last.content && !last.code
         && !(last.steps && last.steps.length);
       return empty ? prev.slice(0, -1) : prev;
     });
-  }, []);
+  }, [clearPending]);
 
   const reset = useCallback((keepFirst = true) => {
     setMessages((prev) => (keepFirst && prev.length > 0 ? [prev[0]] : []));

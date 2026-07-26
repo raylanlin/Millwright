@@ -28,9 +28,15 @@ import type { ChatMessage, ToolCall, VisionConfig } from '../../shared/types';
 import type { SWSidecar } from '../com/sw-sidecar';
 import { truncateMessages } from '../llm/context-window';
 import { analyzeImage } from '../llm/vision';
+import { stripThinking } from '../llm/thinking';
+import type { LLMResponse } from '../../shared/types';
 
 export interface AgentEvent {
-  type: 'start' | 'text' | 'tool_start' | 'tool_result' | 'confirm_request' | 'image' | 'backup' | 'thinking' | 'done' | 'error';
+  type: 'start' | 'text' | 'text_delta' | 'reasoning_delta' | 'tool_pending' | 'tool_start'
+    | 'tool_result' | 'confirm_request' | 'image' | 'backup' | 'thinking' | 'done' | 'error';
+  /** P51: streamed fragment (text_delta / reasoning_delta) or pending tool name */
+  chunk?: string;
+  name?: string;
   /** P44: 1-based round index, sent with 'thinking' so the UI can show live progress */
   round?: number;
   requestId?: string;
@@ -148,7 +154,7 @@ export async function runSidecarAgent(
             config: opts.visionConfig,
             signal: opts.signal,
           });
-          msg.content = `${msg.content}\n\n【用户附图 ${i + 1} 的视觉分析】${clip(desc)}`;
+          msg.content = `${msg.content}\n\n【用户附图 ${i + 1} 的视觉分析】${clip(stripThinking(desc) || desc)}`;
         } catch (e) {
           msg.content = `${msg.content}\n\n（附图 ${i + 1} 分析失败：${errText(e)}）`;
         }
@@ -214,8 +220,16 @@ export async function runSidecarAgent(
 
     opts.onEvent?.({ type: 'thinking', round: round + 1 });
 
-    const resp = await adapter.chatWithTools(history, opts.signal, tools);
-    if (resp.content) {
+    // P51: stream when the adapter supports it — the model can think for a minute, and a
+
+    // frozen window with no output is indistinguishable from a hang. Reasoning goes to its
+
+    // own channel so it can be collapsed and kept out of the history.
+
+    const resp = await runTurn(adapter, history, tools, opts);
+
+    if (resp.content) resp.content = stripThinking(resp.content);
+    if (resp.content && !resp.streamed) {
       finalText = resp.content;
       opts.onEvent?.({ type: 'text', text: resp.content });
     }
@@ -364,7 +378,8 @@ async function handleAnalyzeView(
   // image (and, with recapture:false, keep asking about the same snapshot).
   if (opts.visionConfig) {
     try {
-      const desc = await analyzeImage({ question, imageDataUrl: dataUrl, config: opts.visionConfig, signal: opts.signal });
+      const raw = await analyzeImage({ question, imageDataUrl: dataUrl, config: opts.visionConfig, signal: opts.signal });
+      const desc = stripThinking(raw) || raw;  // P50: vision models emit <think> too
       opts.onEvent?.({ type: 'image' });
       const tag = reused ? '【视觉分析·同一截图】' : '【视觉分析】';
       return { resultText: `${tag}${clip(desc)}`, capture: dataUrl };
@@ -377,4 +392,39 @@ async function handleAnalyzeView(
   return {
     resultText: '主模型未开启视觉输入，且未配置备用视觉模型。请在「设置」中勾选“主模型支持视觉理解”（推荐，主模型可直接读图），或配置一个备用视觉模型。',
   };
+}
+
+/**
+ * P51: one model turn. Uses `chatWithToolsStream` when the adapter has it, forwarding
+ * text and reasoning fragments as they arrive; otherwise falls back to the one-shot
+ * call so protocols can adopt streaming independently.
+ */
+async function runTurn(
+  adapter: any,
+  history: ChatMessage[],
+  tools: any[],
+  opts: SidecarAgentOptions,
+): Promise<LLMResponse & { streamed?: boolean }> {
+  if (typeof adapter.chatWithToolsStream !== 'function') {
+    return adapter.chatWithTools(history, opts.signal, tools);
+  }
+  let final: LLMResponse | undefined;
+  for await (const ev of adapter.chatWithToolsStream(history, opts.signal, tools)) {
+    switch (ev.kind) {
+      case 'text':
+        opts.onEvent?.({ type: 'text_delta', chunk: ev.chunk });
+        break;
+      case 'reasoning':
+        opts.onEvent?.({ type: 'reasoning_delta', chunk: ev.chunk });
+        break;
+      case 'tool':
+        opts.onEvent?.({ type: 'tool_pending', name: ev.name });
+        break;
+      case 'done':
+        final = ev.response;
+        break;
+    }
+  }
+  if (!final) throw new Error('流式响应未返回结果');
+  return { ...final, streamed: true };
 }

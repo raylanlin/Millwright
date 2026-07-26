@@ -6,6 +6,74 @@
 
 ## [Unreleased]
 
+## [0.2.47] - 2026-07-26
+
+### Added (P51 + P52 + P53 — 真流式 + 推理可折叠块 + 工具调用提示)
+
+一轮装完三件事：真 token 级流式、推理内容独立可折叠、推理开关/方言 + 最大输出 token。
+
+#### ① 真流式（核心）
+
+适配器新增 `chatWithToolsStream` —— **边收 SSE 边解析工具调用**。工具调用分片按 `index` 累加，**流结束才解析**（早解析必然拿到坏 JSON）。
+
+新增流式帧类型 `text` / `reasoning` / `tool` / `done`。agent 循环优先走流式，适配器没实现就回落到一次性调用。
+
+- **OpenAI 兼容**（DeepSeek / MiniMax / GLM / Qwen / Kimi / SiliconFlow / Ollama）：按 `index` 累加 `delta.tool_calls` 分片
+- **Anthropic**（P53）：块结构流式——`content_block_start` 宣告块（tool_use 块带 id + name）、`content_block_delta` 携带 `text_delta` / `thinking_delta` / `input_json_delta`（工具参数）、`content_block_stop` 收尾。工具参数按块索引累加，**到 stop 才解析**。接上 Anthropic 原生 extended thinking（`thinking.budget_tokens`），推理内容走 `thinking_delta`
+
+#### ② 推理内容独立成块，可折叠
+
+两种投递方式都已处理：
+- **独立字段** `delta.reasoning_content`（DeepSeek / Qwen / MiniMax / GLM）
+- **正文内联** `<think>…</think>`（多数开源模型）—— 用增量分离器 `ThinkSplitter` 处理，连**标签被切在两帧之间**的情况也能拼回
+
+推理走独立通道 → 独立 step → `ThinkingBlock` 组件渲染：默认折叠的一行条，流式时转圈 + **实时字数**，点开可读、自动滚到最新。**推理内容不进历史** —— 只作展示。
+
+#### ③ 工具调用头帧后切「正在调用」提示（P52）
+
+流式只用于**思考块和正文**。检测到工具调用头帧（函数名已确定、参数还在逐字传输）时，立刻停掉正文流式指示，显示一条 **「正在调用 · 友好工具名 · raw 名」** 转圈条；参数收完、工具开始执行时被真正的工具卡替换。清理时机覆盖 `tool_start` / `done` / `error` / 点终止。
+
+#### ④ 推理等级 + 最大输出 token
+
+设置面板新增：
+- **推理深度**：自动 / 关闭 / 低 / 中 / 高
+- **最大输出 token**：默认 8192（可调 1024–131072）
+
+各厂商参数名不同，按 baseURL **自动识别方言**，识别不准可手动指定：
+
+| 方言 | 参数 | 适用 |
+| --- | --- | --- |
+| `effort` | `reasoning_effort: low/medium/high` | OpenAI · MiniMax · Kimi |
+| `deepseek` / `zhipu` | `thinking: {type: enabled/disabled}` | DeepSeek · GLM |
+| `qwen` | `enable_thinking` + `thinking_budget` | 阿里百炼 |
+| `none` | 不发任何字段 | 未知网关 |
+
+Anthropic 协议走原生格式：`thinking: {type: enabled, budget_tokens: N}`（低 1024 / 中 4096 / 高 16384，自动压到 `max_tokens - 1024` 以内）；开启时按 API 要求去掉 `temperature`。
+
+**关键稳妥设计**：万一方言猜错，请求返回 400 且报错文本提到我们加的字段名，**自动去掉这些字段重试一次**。猜错只会退化成"没有推理控制"，不会变成打不开的死请求。选「自动」时不发任何字段，走厂商默认。
+
+#### 文件落位（10 覆盖 + 3 手改）
+
+```
+src/main/llm/thinking.ts                    覆盖（P50 + splitThinking/ThinkSplitter/方言参数）
+src/main/llm/adapter.ts                     覆盖（加可选 chatWithToolsStream + ToolStreamChunk）
+src/main/llm/openai.ts                      覆盖（流式工具调用 + 推理分流 + 400 降级重试）
+src/main/llm/anthropic.ts                   覆盖（P53 块结构流式 + extended thinking + maxTokens 8192）
+src/main/agent/agent-loop-sidecar.ts        覆盖（优先流式，含 P46/P47/P50）
+src/renderer/hooks/useLLM.ts                覆盖（含 P47/P48 + 流式 delta + reasoning step）
+src/renderer/components/ChatMessage.tsx     覆盖（含 P48 + 渲染 ThinkingBlock）
+src/renderer/components/ThinkingBlock.tsx   新增
+src/renderer/components/PendingTool.tsx     新增（P52）
+src/renderer/components/SettingsModal.tsx   覆盖（含 P43 + 推理等级/方言/maxTokens）
+src/shared/types.ts                         手改①（LLMConfig + AgentStep + LLMResponse）
+src/renderer/i18n/strings.ts                手改②（13 zh + 13 en 词条）
+src/main/ipc/handlers.ts                    手改③（无需改动）
+```
+
+Anthropic 的 `max_tokens` 默认从 4096 提到 8192。
+
+bump 0.2.45 → 0.2.47
+
 ## [0.2.45] - 2026-07-26
 
 ### Added (P47 + P48 + P49 — 几何双路由 / 内联工具条 / 空气泡与双提示)
