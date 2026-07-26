@@ -19,7 +19,7 @@ import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
 import { parseSSE } from './sse';
 import { buildOpenAITools } from './tools-schema';
-import { ThinkSplitter, reasoningParams, isReasoningParamError, splitThinking } from './thinking';
+import { ThinkSplitter, reasoningParams, isReasoningParamError, splitThinking, dropsTemperature } from './thinking';
 import type {
   ChatMessage,
   LLMResponse,
@@ -61,8 +61,39 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     );
   }
 
+  // P54: 8192 truncated answers on reasoning models — the scratchpad is spent from the
+  // SAME budget, so a 15k-character think left nothing for the reply. MiniMax M3 allows
+  // up to 512k output; 32k is a safe, generous default for every provider we target.
   private maxTokens(): number {
-    return this.config.maxTokens ?? 8192;
+    return this.config.maxTokens ?? 32768;
+  }
+
+  /**
+   * P55: OpenAI's own reasoning models (GPT-5.x, o-series) reject `max_tokens` with a
+   * 400 and require `max_completion_tokens`; every other OpenAI-compatible gateway
+   * still expects `max_tokens`. Detect by host + model id rather than sending both,
+   * because strict gateways reject unknown fields.
+   */
+  private isOpenAIReasoner(): boolean {
+    const host = (this.config.baseURL ?? '').toLowerCase();
+    if (!host.includes('openai.com') && !host.includes('azure.com')) return false;
+    return /^(o\d|gpt-5)/i.test(this.config.model ?? '');
+  }
+
+  private tokenCap(): Record<string, any> {
+    return this.isOpenAIReasoner()
+      ? { max_completion_tokens: this.maxTokens() }
+      : { max_tokens: this.maxTokens() };
+  }
+
+  /** P54/P55: providers that ignore or reject temperature while reasoning — omit it.
+   *  DeepSeek silently discards it; OpenAI reasoning models 400 on anything but 1. */
+  private sampling(): Record<string, any> {
+    if (this.isOpenAIReasoner()) return {};
+    if (dropsTemperature(this.config.reasoningLevel, this.config.reasoningDialect, this.config.baseURL)) {
+      return {};
+    }
+    return { temperature: this.config.temperature ?? 0.3 };
   }
 
   private buildBody(messages: ChatMessage[], stream: boolean) {
@@ -79,8 +110,8 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     return {
       model: this.config.model,
       messages: finalMessages,
-      temperature: this.config.temperature ?? 0.3,
-      max_tokens: this.maxTokens(),
+      ...this.sampling(),
+      ...this.tokenCap(),
       stream,
       ...this.reasoningExtras(),
     };
@@ -218,8 +249,8 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     return {
       model: this.config.model,
       messages: openAIMessages,
-      temperature: this.config.temperature ?? 0.3,
-      max_tokens: this.maxTokens(),
+      ...this.sampling(),
+      ...this.tokenCap(),
       tools,
       tool_choice: 'auto',
       stream,

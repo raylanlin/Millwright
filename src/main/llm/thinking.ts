@@ -92,8 +92,8 @@ export class ThinkSplitter {
 
 // ===== Reasoning request parameters =====
 
-export type ReasoningLevel = 'auto' | 'off' | 'low' | 'medium' | 'high';
-export type ReasoningDialect = 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek';
+export type ReasoningLevel = 'auto' | 'off' | 'adaptive' | 'low' | 'medium' | 'high';
+export type ReasoningDialect = 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek' | 'minimax';
 
 /**
  * Providers spell "think harder" differently, and sending the wrong field is a hard
@@ -105,15 +105,29 @@ export function detectDialect(baseURL?: string): Exclude<ReasoningDialect, 'auto
   if (u.includes('dashscope')) return 'qwen';            // enable_thinking + thinking_budget
   if (u.includes('bigmodel') || u.includes('zhipu')) return 'zhipu';  // thinking.type
   if (u.includes('deepseek')) return 'deepseek';         // thinking.type
-  if (u.includes('minimax') || u.includes('openai.com') || u.includes('moonshot')) return 'effort';
+  // P54: MiniMax M3 takes thinking:{type: enabled|adaptive|disabled} — NOT reasoning_effort.
+  // Sending the wrong one was silently ignored (the 400 fallback stripped it), so the
+  // reasoning setting simply had no effect.
+  if (u.includes('minimax')) return 'minimax';
+  if (u.includes('openai.com') || u.includes('moonshot')) return 'effort';
   return 'none';                                          // unknown gateway: send nothing
 }
 
-const BUDGET: Record<string, number> = { low: 1024, medium: 4096, high: 16384 };
+const BUDGET: Record<string, number> = { adaptive: 4096, low: 1024, medium: 4096, high: 16384 };
 
 /**
  * Build the extra body fields for the requested reasoning level.
  * 'auto' sends nothing (provider default) — the safest choice for unknown gateways.
+ *
+ * Verified against each provider's own documentation (2026-07):
+ *   OpenAI / Kimi   reasoning_effort: low | medium | high
+ *   DeepSeek        thinking:{type} AND reasoning_effort — V4 maps low/medium → high
+ *                   and xhigh → max, so only high/max are meaningfully distinct.
+ *                   Thinking mode ignores temperature/top_p (no error, no effect).
+ *   GLM / Z.ai      thinking:{type: enabled|disabled}   ← NOT enable_thinking
+ *   Qwen/DashScope  enable_thinking (binary) + thinking_budget; OSS builds served by
+ *                   vLLM/SGLang need it inside chat_template_kwargs instead
+ *   MiniMax M3      thinking:{type: enabled|adaptive|disabled}
  */
 export function reasoningParams(
   level: ReasoningLevel | undefined,
@@ -127,25 +141,64 @@ export function reasoningParams(
   const on = lv !== 'off';
 
   switch (d) {
-    case 'effort':
-      // OpenAI-style: reasoning_effort. 'off' is expressed as minimal effort, since
-      // there is no documented way to disable reasoning on a reasoning-only model.
-      return { reasoning_effort: on ? lv : 'minimal' };
-    case 'qwen':
-      return on
-        ? { enable_thinking: true, thinking_budget: BUDGET[lv] ?? 4096 }
-        : { enable_thinking: false };
-    case 'zhipu':
+    case 'minimax':
+      // enabled = always think · adaptive = model decides · disabled = off
+      return { thinking: { type: !on ? 'disabled' : lv === 'adaptive' ? 'adaptive' : 'enabled' } };
+
     case 'deepseek':
+      // Toggle and depth are separate fields, and both are needed: the toggle alone
+      // leaves effort at its default (high), the effort alone can't turn thinking off.
+      if (!on) return { thinking: { type: 'disabled' } };
+      return {
+        thinking: { type: 'enabled' },
+        // V4 collapses low/medium into high; 'max' is the only step above it.
+        reasoning_effort: lv === 'high' ? 'max' : 'high',
+      };
+
+    case 'zhipu':
       return { thinking: { type: on ? 'enabled' : 'disabled' } };
+
+    case 'qwen': {
+      // Binary toggle, no graded effort. chat_template_kwargs is the form self-hosted
+      // vLLM/SGLang builds accept; sending both is harmless — each side ignores the
+      // field it doesn't know.
+      const budget = BUDGET[lv] ?? 4096;
+      return on
+        ? {
+            enable_thinking: true,
+            thinking_budget: budget,
+            chat_template_kwargs: { enable_thinking: true },
+          }
+        : { enable_thinking: false, chat_template_kwargs: { enable_thinking: false } };
+    }
+
+    case 'effort':
+      // OpenAI-style. 'off' becomes minimal effort — there is no documented way to
+      // disable reasoning on a reasoning-only model. 'adaptive' has no equivalent.
+      if (lv === 'adaptive') return {};
+      return { reasoning_effort: on ? lv : 'minimal' };
+
     default:
       return {};
   }
 }
 
+/** P54: providers that ignore sampling params while thinking — we drop them to avoid noise. */
+export function dropsTemperature(
+  level: ReasoningLevel | undefined,
+  dialect: ReasoningDialect | undefined,
+  baseURL?: string,
+): boolean {
+  const lv = level ?? 'auto';
+  if (lv === 'auto' || lv === 'off') return false;
+  const d = !dialect || dialect === 'auto' ? detectDialect(baseURL) : dialect;
+  return d === 'deepseek';
+}
+
 /** Field names we may have added — used to detect "unknown parameter" 400s. */
 export const REASONING_FIELDS = [
   'reasoning_effort', 'enable_thinking', 'thinking_budget', 'thinking', 'reasoning',
+  'chat_template_kwargs',
 ];
 
 /** True when this error text looks like the server rejecting our reasoning fields. */

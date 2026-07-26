@@ -133,7 +133,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           : payload.config;
         const adapter = createAdapter(enrichedConfig);
         const fullPrompt = resolveSystemPrompt(enrichedConfig.systemPrompt);
-        const truncated = truncateMessages(payload.messages, fullPrompt, payload.config.model);
+        const truncated = truncateMessages(payload.messages, fullPrompt, payload.config.model, payload.config.contextWindow);
         const response = await adapter.chat(truncated, controller.signal);
         return { ok: true, response, requestId: reqId };
       } catch (err) {
@@ -171,7 +171,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
             : payload.config;
           const adapter = createAdapter(enrichedConfig);
           const fullPrompt = resolveSystemPrompt(enrichedConfig.systemPrompt);
-          const truncated = truncateMessages(payload.messages, fullPrompt, payload.config.model);
+          const truncated = truncateMessages(payload.messages, fullPrompt, payload.config.model, payload.config.contextWindow);
           const stream = adapter.chatStream(truncated, reqId, controller.signal);
           for await (const ev of stream) {
             const win = getMainWindow();
@@ -274,6 +274,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           requestId,
           maxRounds: payload.config.maxRounds ?? 24,
           approvalMode: payload.config.approvalMode ?? 'normal',
+          contextWindow: payload.config.contextWindow,
           signal: controller.signal,
           onEvent: send,
           confirmTool: (call) => requestUserConfirm(e.sender, requestId, call),

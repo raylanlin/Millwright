@@ -6,6 +6,82 @@
 
 ## [Unreleased]
 
+## [0.2.49] - 2026-07-26
+
+### Fixed (P54 + P55 — 各厂商推理参数修正 + 上下文可配 + 预设 ID 更新)
+
+接 P53 之后。**打 v0.2.49**。P54/P55 分包作废，冲突文件取最新版。
+
+#### 截断的两个真因
+
+1. **MiniMax 推理方言错了** — MiniMax M3 用 `thinking: {type: enabled|adaptive|disabled}`，P51 的 `detectDialect` 把它归进 `effort` 发了 `reasoning_effort`，它不认。**400 降级重试兜着所以不报错，但推理设置完全没生效**，一直跑厂商默认。
+   - 修：新增 `minimax` 方言；推理等级新增 `adaptive` 档（M3 独有，模型自行判断是否需要深思）
+2. **8192 输出上限太小** — 你那次推理写了 15196 字（约 5–7k token），8192 预算被吃光，回答断在半路。
+   - 修：默认 8192 → **32768**（对所有厂商安全且宽裕），上限可调 512000
+3. **上下文窗口现在可配置** — 设置面板新增输入（4096–2,000,000，默认 128000）。**MiniMax M3 建议 512000**（标称 1M，但 >512K 走更贵长上下文档且效果下降）
+
+#### 各厂商参数对照（按官方文档核实，2026-07）
+
+| 厂商 | 参数 | 说明 |
+| --- | --- | --- |
+| **OpenAI / Kimi** | `reasoning_effort: low/medium/high` | 标准形式 |
+| **DeepSeek** | `thinking:{type}` **+** `reasoning_effort` | 两个都要发：只发 toggle 深度仍是默认 high，只发 effort 关不掉。V4 把 low/medium 都映射成 high，xhigh 映射成 max |
+| **GLM / 智谱** | `thinking:{type: enabled/disabled}` | **不是 `enable_thinking`**（Roo Code / pi 报过同一个 bug） |
+| **Qwen / 百炼** | `enable_thinking` + `thinking_budget` | 自建 vLLM/SGLang 部署要放进 `chat_template_kwargs` |
+| **MiniMax M3** | `thinking:{type: enabled/adaptive/disabled}` | 独有 adaptive 档 |
+| **Anthropic** | `thinking:{type, budget_tokens}` | 开启时按 API 要求去掉 temperature |
+
+三处修正：① MiniMax 之前错发 `reasoning_effort`；② DeepSeek 之前只发 `thinking`、深度控制无效；③ DeepSeek 思考模式下不再白发 temperature。
+
+#### OpenAI 自家 GPT-5 / o 系列此前必 400（必修）
+
+两条硬规则：
+
+- **必须用 `max_completion_tokens`**，发 `max_tokens` 直接 400
+- **不接受 `temperature`**（只允许默认值）
+
+按「host 是 openai.com / azure.com 且模型名匹配 `^(o\d|gpt-5)`」自动切换字段并省略 temperature。第三方 OpenAI 兼容网关（DeepSeek / MiniMax / GLM）不受影响，仍走 `max_tokens`。
+
+#### Anthropic Mythos / Fable 5 常开思考
+
+Claude Fable 5 / Mythos 5 是**常开自适应思考**，发 `thinking: {type: disabled}` 会被拒。按模型名识别，这类模型一律走厂商默认，不发 thinking 字段。
+
+#### 预设 ID 更新（截至 2026-07 核对）
+
+| 服务商 | 推荐模型 | contextWindow | maxTokens |
+| --- | --- | --- | --- |
+| OpenAI | `gpt-5.6-sol` | 1,000,000 | 32,768 |
+| Anthropic | `claude-fable-5`（旗舰）/ `claude-opus-4-8` | 1,000,000 / 200,000 | 32,768 |
+| DeepSeek | `deepseek-v4-pro`（强）/ `deepseek-v4-flash`（快） | 1,048,576 | 32,768 |
+| MiniMax | `minimax-m3` | 512,000 | 32,768 |
+| Kimi | `kimi-k2.5` | 262,144 | 32,768 |
+| GLM | `glm-4.6` | 200,000 | 32,768 |
+| Qwen | `qwen3.7-max` | 262,144 | 32,768 |
+| SiliconFlow | — | 128,000 | 32,768 |
+| Ollama | — | 32,768 | 8,192 |
+
+**DeepSeek 旧别名 `deepseek-chat` / `deepseek-reasoner` 已于 2026-07-24 停用**，预设已替换为 `deepseek-v4-pro` / `deepseek-v4-flash`。
+
+#### 关键稳妥设计
+
+万一方言猜错，请求返回 400 且报错文本提到我们加的字段名，**自动去掉这些字段重试一次**。猜错只会退化成"没有推理控制"，不会变成打不开的死请求。选「自动」时不发任何字段，走厂商默认。
+
+#### 文件落位（4 覆盖 + 5 手改）
+
+```
+src/main/llm/thinking.ts                  覆盖（含 P51 + 六家方言核对 + adaptive 档 + dropsTemperature）
+src/main/llm/openai.ts                    覆盖（含 P51/P54 + max_completion_tokens + 推理模型免 temperature）
+src/main/llm/anthropic.ts                 覆盖（含 P53/P54 + Mythos 常开思考识别 + 默认 32768）
+src/renderer/components/SettingsModal.tsx 覆盖（含 P51 + 上下文窗口 + adaptive 档 + 上限放宽）
+src/shared/types.ts                       手改①（LLMConfig）
+src/main/llm/context-window.ts            手改②（已支持 contextWindow，2 个 agent loop 传 opts.contextWindow，handlers 传 payload.config.contextWindow）
+src/shared/presets.ts                     手改③（10 家厂商新 ID + 上下文/输出 + 替换 DeepSeek 旧别名）
+src/renderer/i18n/strings.ts              手改④（contextWindow + adaptive 词条 + maxTokensHint 32768）
+README.md / README.zh-CN.md               手改⑤（服务商表同步）
+```
+
+bump 0.2.47 → 0.2.49
+
 ## [0.2.47] - 2026-07-26
 
 ### Added (P51 + P52 + P53 — 真流式 + 推理可折叠块 + 工具调用提示)

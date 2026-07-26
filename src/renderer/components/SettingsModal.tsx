@@ -423,7 +423,7 @@ export function SettingsModal({
         {/* P51: Reasoning controls */}
         <label style={labelStyle}>{tr('settings.reasoning')}</label>
         <div style={{ display: 'flex', gap: 7, marginBottom: 6, flexWrap: 'wrap' }}>
-          {(['auto', 'off', 'low', 'medium', 'high'] as const).map((lv) => {
+          {(['auto', 'off', 'adaptive', 'low', 'medium', 'high'] as const).map((lv) => {
             const on = (draft.reasoningLevel ?? 'auto') === lv;
             return (
               <button
@@ -458,6 +458,7 @@ export function SettingsModal({
               <option value="effort">reasoning_effort (OpenAI / MiniMax / Kimi)</option>
               <option value="deepseek">thinking.type (DeepSeek)</option>
               <option value="zhipu">thinking.type (GLM / 智谱)</option>
+              <option value="minimax">thinking.type (MiniMax M3)</option>
               <option value="qwen">enable_thinking (Qwen / 百炼)</option>
               <option value="none">{tr('settings.dialect.none')}</option>
             </select>
@@ -467,15 +468,30 @@ export function SettingsModal({
           </>
         )}
 
+        {/* P54: Context window + max output tokens — a matched pair, so show them together */}
+        <label style={labelStyle}>{tr('settings.contextWindow')}</label>
+        <input
+          type="number"
+          min={4096}
+          max={2000000}
+          step={4096}
+          value={draft.contextWindow ?? 128000}
+          onChange={(e) => update('contextWindow', Math.max(4096, Math.min(2000000, Number(e.target.value) || 128000)))}
+          style={{ ...fieldStyle, marginBottom: 4, width: 160 }}
+        />
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 14px 1px' }}>
+          {tr('settings.contextWindowHint')}
+        </p>
+
         {/* P51: Max output tokens */}
         <label style={labelStyle}>{tr('settings.maxTokens')}</label>
         <input
           type="number"
           min={1024}
-          max={131072}
+          max={512000}
           step={1024}
-          value={draft.maxTokens ?? 8192}
-          onChange={(e) => update('maxTokens', Math.max(1024, Math.min(131072, Number(e.target.value) || 8192)))}
+          value={draft.maxTokens ?? 32768}
+          onChange={(e) => update('maxTokens', Math.max(1024, Math.min(512000, Number(e.target.value) || 32768)))}
           style={{ ...fieldStyle, marginBottom: 4, width: 140 }}
         />
         <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 18px 1px' }}>

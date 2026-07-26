@@ -28,10 +28,10 @@ export interface LLMConfig {
   maxRounds?: number;
   /** P43: 审批严格度 —— strict 每个工具 / normal 破坏性(默认) / permissive 仅不可逆 / auto 全自动 */
   approvalMode?: 'strict' | 'normal' | 'permissive' | 'auto';
-  /** P51: 推理深度 —— auto 用厂商默认 / off 关闭 / low·medium·high */
-  reasoningLevel?: 'auto' | 'off' | 'low' | 'medium' | 'high';
-  /** P51: 推理参数方言，auto 按 baseURL 自动识别 */
-  reasoningDialect?: 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek';
+  /** P51/P54: 推理深度 —— auto 厂商默认 / off 关闭 / adaptive 模型自行判断 / low·medium·high */
+  reasoningLevel?: 'auto' | 'off' | 'adaptive' | 'low' | 'medium' | 'high';
+  /** P54: 推理参数方言，auto 按 baseURL 自动识别 */
+  reasoningDialect?: 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek' | 'minimax';
 }
 
 /** P3: configuration for a dedicated vision model (OpenAI-compatible multimodal) */

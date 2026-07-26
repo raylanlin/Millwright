@@ -64,6 +64,8 @@ export interface SidecarAgentOptions {
   visionConfig?: VisionConfig;
   /** Convert a local image path returned by the sidecar into a data URL (handlers implement this via Electron's nativeImage) */
   imageToDataUrl: (imagePath: string, format: string) => string;
+  /** P54: explicit user-configured context-window override (in tokens) */
+  contextWindow?: number;
 }
 
 const TOOL_RESULT_MAX = 4000;
@@ -200,7 +202,7 @@ export async function runSidecarAgent(
 
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
-    history = truncateMessages(history);
+    history = truncateMessages(history, '', opts.requestId ? String(opts.requestId) : '', opts.contextWindow);
     // Thin guard (block-aware truncation should already prevent this)
     while (history.length > 0 && (history[0].role === 'tool' || (history[0].role === 'system' && history[0].toolCalls?.length))) {
       history.shift();
@@ -305,7 +307,7 @@ export async function runSidecarAgent(
 
   // Out of rounds — force a final no-tools summary turn so the user learns what actually changed
   try {
-    history = truncateMessages(history);
+    history = truncateMessages(history, '', '', opts.contextWindow);
     history.push({
       role: 'system',
       content: '(已达到最大工具调用轮数。请不要再调用工具：总结你已完成的操作、当前模型的状态、以及未完成的部分。)',

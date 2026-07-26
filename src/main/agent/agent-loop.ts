@@ -41,6 +41,8 @@ export interface AgentOptions {
   confirmList?: Set<string>;
   /** P35: why we are on the degraded VBS path — surfaced to the user before the first round */
   degradedNotice?: string;
+  /** P54: explicit user-configured context-window override (in tokens) */
+  contextWindow?: number;
 }
 
 const DEFAULT_CONFIRM = new Set(['cut_extrude', 'create_fillet', 'modify_dimensions', 'delete_feature']);
@@ -97,7 +99,7 @@ export async function runAgentLoop(
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
 
-    history = truncateMessages(history);
+    history = truncateMessages(history, '', '', opts.contextWindow);
 
     const resp = await adapter.chatWithTools(history, opts.signal);
 

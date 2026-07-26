@@ -154,17 +154,17 @@ npm run dev
 
 | 服务商         | 协议        | Base URL                                            | 推荐模型                                |
 | ----------- | --------- | --------------------------------------------------- | ----------------------------------- |
-| DeepSeek    | OpenAI 兼容 | `https://api.deepseek.com`                          | `deepseek-v4-pro`                   |
-| Kimi / 月之暗面 | OpenAI 兼容 | `https://api.moonshot.cn/v1`                        | `kimi-k3`                           |
-| MiniMax     | OpenAI 兼容 | `https://api.minimaxi.com/v1`                       | `minimax-m3`                        |
-| Anthropic   | Anthropic | `https://api.anthropic.com`                         | `claude-sonnet-5` / `claude-opus-5` |
-| OpenAI      | OpenAI    | `https://api.openai.com/v1`                         | `gpt-5.6`                           |
-| 阿里百炼 (Qwen) | OpenAI 兼容 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-3.8max`                       |
+| OpenAI      | OpenAI    | `https://api.openai.com/v1`                         | `gpt-5.6-sol`                       |
+| Anthropic   | Anthropic | `https://api.anthropic.com`                         | `claude-fable-5`（旗舰）/ `claude-opus-4-8`（更稳） |
+| DeepSeek    | OpenAI 兼容 | `https://api.deepseek.com`                          | `deepseek-v4-pro`（强） / `deepseek-v4-flash`（快） |
+| Kimi / 月之暗面 | OpenAI 兼容 | `https://api.moonshot.cn/v1`                        | `kimi-k2.5`                         |
+| MiniMax     | OpenAI 兼容 | `https://api.minimaxi.com/v1`                       | `minimax-m3`（512K 上下文）         |
 | 智谱 (GLM)    | OpenAI 兼容 | `https://open.bigmodel.cn/api/paas/v4`               | `glm-4.6`                           |
-| 硅基流动        | OpenAI 兼容 | `https://api.siliconflow.cn/v1`                     | —                                   |
-| Ollama（本地）  | OpenAI 兼容 | `http://localhost:11434/v1`                         | —                                   |
+| 阿里百炼 (Qwen) | OpenAI 兼容 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3.7-max`                       |
+| 硅基流动        | OpenAI 兼容 | `https://api.siliconflow.cn/v1`                     | —（用户自填）                       |
+| Ollama（本地）  | OpenAI 兼容 | `http://localhost:11434/v1`                         | —（用户自填）                       |
 
-> 各家型号更新很快，请以服务商官方文档为准。Agent 工具调用需要模型支持 function calling；DeepSeek V4、Kimi K3、MiniMax M3、GLM-4.6 是一等公民。
+> 各家型号更新很快，请以服务商官方文档为准。Agent 工具调用需要模型支持 function calling；DeepSeek V4、Kimi K2、MiniMax M3、GLM-4.6 是一等公民。OpenAI `gpt-5.x` / o 系列和 Anthropic `claude-fable-5` 需要特定字段名，Millwright 已自动识别。
 
 ## 使用示例
 

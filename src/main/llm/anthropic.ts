@@ -60,8 +60,9 @@ interface StreamBlock {
 }
 
 export class AnthropicAdapter extends BaseLLMAdapter {
+  // P54: see openai.ts — reasoning is billed against the same cap, so 8192 truncated.
   private maxTokens(): number {
-    return this.config.maxTokens ?? 8192;
+    return this.config.maxTokens ?? 32768;
   }
 
   /**
@@ -70,7 +71,10 @@ export class AnthropicAdapter extends BaseLLMAdapter {
    */
   private thinkingExtras(): Record<string, any> {
     const lv = this.config.reasoningLevel ?? 'auto';
-    if (lv === 'auto') return {};
+    if (lv === 'auto' || lv === 'adaptive') return {};  // P54: no Anthropic equivalent of 'adaptive'
+    // P55: the Mythos-class models (Fable 5 / Mythos 5) run always-on adaptive thinking
+    // and reject an attempt to disable it — leave them on the provider default.
+    if (/fable|mythos/i.test(this.config.model ?? '')) return {};
     if (lv === 'off') return { thinking: { type: 'disabled' } };
     const budgets: Record<string, number> = { low: 1024, medium: 4096, high: 16384 };
     const budget = Math.min(budgets[lv] ?? 4096, Math.max(1024, this.maxTokens() - 1024));
