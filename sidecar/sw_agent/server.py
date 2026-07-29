@@ -30,9 +30,12 @@ from .bridge import Context
 # Trigger tool registration (the import order also defines category display order)
 from .tools import (  # noqa: F401
     assembly,
+    batch,
     document,
+    drawing,
     export,
     feature,
+    machine,
     query,
     reference,
     sketch,

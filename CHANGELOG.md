@@ -6,6 +6,69 @@
 
 ## [Unreleased]
 
+## [0.2.52] - 2026-07-29
+
+### Added (P58–P61 — 工具词汇 + 宏逃生舱 + 工程图 + 机械件生成器)
+
+P56/P57 折入。P56/P57 两个分包作废。
+
+#### P58-A: 工具描述贴 SW API 名
+
+45 个工具的描述全部加上对应 SolidWorks API 名称（如 `extrude → FeatureExtrusion3`），让模型的宏训练知识直接迁移到工具上，不冲突。
+
+#### P58-B: `run_macro` 逃生舱 + macro-lint
+
+- 新增 `src/main/scripts/macro-lint.ts`，对 VBScript 做四类静态检查
+- 毫米值传给米制 API / `On Error Resume Next` → **错误，拒绝执行**（这两条可拦下整份 DeepSeek 宏）
+- 臆造面名/返回值未接收/参数个数写死 → 警告
+- lint 在确认卡之前跑，不让用户批准注定静默失败的宏
+- `run_macro` 除 AUTO 外所有档位强制确认
+
+#### P59: 工程图工具组
+
+`sidecar/sw_agent/tools/drawing.py`，7 个工具：
+- `create_drawing_of` — 三步视图+等轴测，未保存文档自动先存
+- `add_drawing_view` / `add_section_view` / `list_drawing_views`
+- `insert_model_dimensions` — 模型自带尺寸导入视图
+- `insert_bom` — 装配图明细表
+- `add_drawing_note` — 标题栏文字/公差/技术要求
+
+#### P60/P61: 机械件生成器
+
+`sidecar/sw_agent/tools/machine.py`，3 个工具：
+- `create_spur_gear(module, teeth, thickness, bore)` — 真渐开线齿形（ISO 53），单齿镜像+圆周阵列，可啮合
+- `gear_pair_geometry(module, teeth_1, teeth_2)` — 纯算术，算中心距，必须先调这个再放轴孔
+- `create_stepped_shaft(steps)` — 半轮廓一次旋转成形，肩部对齐
+
+#### 提示词更新
+
+Y-UP 坐标系（Y=高度、X=左右、Z=前后）写入提示词开头，解决 MiniMax 把 SW 当 Z-up 笛卡尔系导致的零件躺倒问题。新增 `build_part` 用法、标准件用生成器、工程图收尾、`run_macro` 使用边界四节。
+
+#### 新增文件
+
+- `sidecar/sw_agent/tools/drawing.py`
+- `sidecar/sw_agent/tools/machine.py`
+- `sidecar/sw_agent/tools/batch.py`
+- `src/main/scripts/macro-lint.ts`
+
+#### 覆盖文件
+
+- `sidecar/sw_agent/server.py` — 注册新增工具模块
+- `sidecar/sw_agent/tools/feature.py` — 14 处 API 名词描述
+- `sidecar/sw_agent/tools/sketch.py` — 9 处
+- `sidecar/sw_agent/tools/document.py` — 8 处
+- `sidecar/sw_agent/tools/query.py` — 5 处
+- `sidecar/sw_agent/tools/assembly.py` — 4 处
+- `sidecar/sw_agent/tools/reference.py` — 2 处
+- `sidecar/sw_agent/tools/export.py` — 1 处
+- `sidecar/sw_agent/tools/view.py` — 2 处
+- `src/main/agent/agent-loop-sidecar.ts` — `run_macro` 虚拟工具 + 强制确认
+- `src/main/llm/prompts.ts` — Y-UP + build_part + 生成器 + 工程图 + 宏边界
+
+### Changed
+
+- `src/main/ipc/handlers.ts` — `runSidecarAgent` options 加 `runMacro` 把 VBS 引擎传入
+
 ## [0.2.49] - 2026-07-26
 
 ### Fixed (P54 + P55 — 各厂商推理参数修正 + 上下文可配 + 预设 ID 更新)
@@ -1718,6 +1781,9 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.52...HEAD
+[0.2.52]: https://github.com/raylanlin/Millwright/compare/v0.2.49...v0.2.52
+[0.2.49]: https://github.com/raylanlin/Millwright/compare/v0.2.47...v0.2.49
 [Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.15...HEAD
 [0.2.15]: https://github.com/raylanlin/Millwright/compare/v0.2.14...v0.2.15
 [0.2.14]: https://github.com/raylanlin/Millwright/compare/v0.2.13...v0.2.14

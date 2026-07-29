@@ -18,7 +18,7 @@ from ..bridge import DOC_ASSEMBLY, DOC_PART, Context, SWError, sw_get
 from ..registry import tool
 
 
-@tool("mass_properties", "Get mass properties (mass / volume / surface area / center of mass)", params={}, category="query")
+@tool("mass_properties", "Get mass properties: mass / volume / surface area / center of mass (= 质量属性; Extension.CreateMassProperty)", params={}, category="query")
 def mass_properties(ctx: Context):
     ext = ctx.model.Extension
     mp = None
@@ -43,7 +43,7 @@ def mass_properties(ctx: Context):
     }
 
 
-@tool("bounding_box", "Get the part bounding-box dimensions (length x width x height, mm)", params={}, category="query")
+@tool("bounding_box", "Get the part bounding-box dimensions in mm (GetPartBox)", params={}, category="query")
 def bounding_box(ctx: Context):
     part = ctx.require(DOC_PART, "part")
     box = part.GetPartBox(True)  # (x1,y1,z1,x2,y2,z2) in meters — takes an arg, real method
@@ -55,7 +55,7 @@ def bounding_box(ctx: Context):
     return {"length_mm": round(dx, 3), "width_mm": round(dy, 3), "height_mm": round(dz, 3)}
 
 
-@tool("list_features", "List the feature tree (name/type/suppressed) — helps you understand the model structure and plan next steps",
+@tool("list_features", "List the feature tree: name/type/suppressed (FeatureManager.GetFeatures). Read this before renaming, patterning or mirroring — it gives you the EXACT feature names, which a macro would have to guess",
       params={"limit": {"type": "number", "desc": "Maximum number of items to return", "default": 100}},
       category="query")
 def list_features(ctx: Context, limit: int = 100):
@@ -86,7 +86,7 @@ def list_features(ctx: Context, limit: int = 100):
     return {"count": len(out), "features": out}
 
 
-@tool("list_components", "List assembly components (name/file/suppressed)",
+@tool("list_components", "List assembly components: name/file/suppressed (GetComponents). Gives the exact Name2 strings — never guess a component name",
       params={"limit": {"type": "number", "desc": "Maximum number of items to return", "default": 200}},
       category="query")
 def list_components(ctx: Context, limit: int = 200):
@@ -108,7 +108,7 @@ def list_components(ctx: Context, limit: int = 200):
     return {"count": len(out), "components": out}
 
 
-@tool("check_interference", "Run interference check on the assembly; return interference pairs and volumes", params={}, category="query")
+@tool("check_interference", "Run interference detection on the assembly (= 干涉检查; InterferenceDetectionManager); returns pairs and volumes", params={}, category="query")
 def check_interference(ctx: Context):
     asm = ctx.require(DOC_ASSEMBLY, "assembly")
     mgr = asm.InterferenceDetectionManager

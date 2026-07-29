@@ -30,6 +30,8 @@ import { truncateMessages } from '../llm/context-window';
 import { analyzeImage } from '../llm/vision';
 import { stripThinking } from '../llm/thinking';
 import type { LLMResponse } from '../../shared/types';
+import { lintMacro, formatLintIssues } from '../scripts/macro-lint';
+import { validateScript } from '../scripts/sanitizer';
 
 export interface AgentEvent {
   type: 'start' | 'text' | 'text_delta' | 'reasoning_delta' | 'tool_pending' | 'tool_start'
@@ -66,6 +68,8 @@ export interface SidecarAgentOptions {
   imageToDataUrl: (imagePath: string, format: string) => string;
   /** P54: explicit user-configured context-window override (in tokens) */
   contextWindow?: number;
+  /** P58: VBA/VBScript runner for the run_macro escape hatch. Omit to withhold the tool. */
+  runMacro?: (code: string) => Promise<{ success: boolean; output?: string; error?: string }>;
 }
 
 const TOOL_RESULT_MAX = 4000;
@@ -91,6 +95,29 @@ const VIRTUAL_TOOLS = [
           },
         },
         required: ['question'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_macro',
+      description:
+        'ESCAPE HATCH — run a raw SolidWorks VBScript macro. Use ONLY for what the dedicated '
+        + 'tools do not cover (drawings and detailing, complex swept/lofted surfaces, '
+        + 'equation-driven curves, bulk edits across many features). For ordinary modelling the '
+        + 'tools are strictly better: they convert mm for you, search the API arity this machine '
+        + 'accepts, pick faces and edges by meaning, and report the REAL error instead of '
+        + 'silently doing nothing. A static check runs first and REFUSES code that passes '
+        + 'millimetres to metre-based APIs or opens with On Error Resume Next. '
+        + 'Write the body only — swApp and Part are already bound, no Sub main() wrapper.',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: 'VBScript macro body. Lengths in METRES (40mm = 0.04). No On Error Resume Next.' },
+          purpose: { type: 'string', description: 'One line on what this macro does — shown on the approval card' },
+        },
+        required: ['code'],
       },
     },
   },
@@ -166,7 +193,12 @@ export async function runSidecarAgent(
 
   await sidecar.start();
   const sidecarTools = await sidecar.listTools(false);
-  const tools = [...VIRTUAL_TOOLS, ...sidecarTools];
+  const tools = [
+    // P58: only advertise run_macro when a runner exists — a tool the model can call but
+    // that cannot execute is worse than no tool at all.
+    ...VIRTUAL_TOOLS.filter((t) => t.function.name !== 'run_macro' || !!opts.runMacro),
+    ...sidecarTools,
+  ];
   const destructive = new Set(
     sidecarTools.filter((t) => t.x_meta?.destructive).map((t) => t.function.name),
   );
@@ -182,6 +214,9 @@ export async function runSidecarAgent(
     if (!opts.confirmTool) return false;
     if (mode === 'auto') return false;
     if (mode === 'strict') return true;
+    // P58: a raw macro bypasses every runtime guard the tools provide, so it asks for
+    // approval in every mode except AUTO — regardless of strictness.
+    if (name === 'run_macro') return true;
     if (mode === 'permissive') return IRREVERSIBLE.has(name);
     return destructive.has(name) || IRREVERSIBLE.has(name);
   };
@@ -265,6 +300,23 @@ export async function runSidecarAgent(
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
 
+      // P58: macro escape hatch — lint, confirm, back up, then run through the VBS engine
+
+      if (call.name === 'run_macro') {
+
+        const resultText = await handleRunMacro(call, opts, ensureBackup);
+
+        call.result = resultText;
+
+        opts.onEvent?.({ type: 'tool_result', toolCall: call });
+
+        history.push(toolMsg(call, resultText));
+
+        continue;
+
+      }
+
+
       // Vision tool on its own path
       if (call.name === 'analyze_view') {
         const { resultText, imageMessage, capture } = await handleAnalyzeView(call, sidecar, opts, lastCapture);
@@ -329,6 +381,46 @@ interface AnalyzeViewResult {
   imageMessage?: ChatMessage;
   /** P19: the data URL just captured, so the loop can cache it for follow-up questions */
   capture?: string;
+}
+
+/** P58: run_macro — the guarded path for raw VBScript.
+ *
+ *  Order matters: lint BEFORE the confirmation card, so the user is never asked to
+ *  approve a macro that would have silently done nothing (mm-for-metres, or
+ *  On Error Resume Next). Then back up, then run, then report the real error. */
+async function handleRunMacro(
+  call: ToolCall,
+  opts: SidecarAgentOptions,
+  ensureBackup: () => Promise<void>,
+): Promise<string> {
+  const code = String(call.parameters?.code ?? '').trim();
+  if (!code) return '❌ run_macro failed: no code given.';
+  if (!opts.runMacro) return '❌ run_macro failed: the macro engine is unavailable in this build.';
+
+  const lint = lintMacro(code);
+  const notes = formatLintIssues(lint.issues);
+  if (!lint.ok) {
+    return '⛔ 宏未通过静态检查，没有执行（这些问题在 VBA 里不会报错，只会静默产生错误几何）：\n'
+      + notes
+      + '\n\n修好后重试，或者改用现成工具 —— 它们会替你换算单位、搜索本机可用的 API 参数个数、按语义选面选边。';
+  }
+
+  const check = validateScript(code, 'vba');
+  if (!check.safe) {
+    return `⛔ run_macro blocked by the safety check: ${check.issues.join('; ')}`;
+  }
+
+  await ensureBackup();
+  try {
+    const r = await opts.runMacro(code);
+    const tail = notes ? `\n\n静态检查提醒：\n${notes}` : '';
+    if (!r.success) {
+      return `❌ run_macro failed: ${clip(r.error ?? 'unknown error')}${tail}`;
+    }
+    return `✅ run_macro: ${clip(r.output || 'macro ran with no output')}${tail}`;
+  } catch (e) {
+    return `❌ run_macro failed: ${errText(e)}`;
+  }
 }
 
 /** analyze_view: answer a question about the SW view.

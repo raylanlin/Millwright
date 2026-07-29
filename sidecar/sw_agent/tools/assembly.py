@@ -17,7 +17,7 @@ _MATE = {
 
 
 @tool(
-    "insert_component", "Insert a component into the current assembly (origin by default)",
+    "insert_component", "Insert a component into the current assembly, at the origin by default (= 插入零部件; AddComponent5)",
     params={
         "path": {"type": "string", "desc": "Absolute path to the part or sub-assembly"},
         "x": {"type": "number", "desc": "X (mm)", "default": 0},
@@ -37,7 +37,7 @@ def insert_component(ctx: Context, path: str, x: float = 0, y: float = 0, z: flo
 
 
 @tool(
-    "add_mate", "Add a mate (you must first select two entities in SolidWorks: face/edge/vertex/axis)",
+    "add_mate", "Add a mate (= 配合; AddMate5). Select two entities first: face/edge/vertex/axis",
     params={
         "type": {"type": "string", "enum": list(_MATE.keys()), "desc": "Mate type"},
         "distance": {"type": "number", "desc": "Distance value for distance mate (mm)", "default": 0},
@@ -73,7 +73,7 @@ def _get_component(ctx: Context, name: str):
     raise SWError(f"component not found: {name}")
 
 
-@tool("suppress_component", "Suppress the specified component",
+@tool("suppress_component", "Suppress the specified component (SetSuppression2, swComponentSuppressed)",
       params={"name": {"type": "string", "desc": "Component name (Name2)"}},
       category="assembly", destructive=True)
 def suppress_component(ctx: Context, name: str):
@@ -82,7 +82,7 @@ def suppress_component(ctx: Context, name: str):
     return {"suppressed": name}
 
 
-@tool("unsuppress_component", "Unsuppress the specified component",
+@tool("unsuppress_component", "Unsuppress the specified component (SetSuppression2, swComponentResolved)",
       params={"name": {"type": "string", "desc": "Component name (Name2)"}},
       category="assembly")
 def unsuppress_component(ctx: Context, name: str):

@@ -40,23 +40,23 @@ def _new(ctx: Context, doc_type: int, label: str):
     return {"created": label, "title": sw_get(model, "GetTitle")}
 
 
-@tool("new_part", "Create a new part document", params={}, category="document")
+@tool("new_part", "Create a new part document (= 新建零件; NewDocument with the default part template)", params={}, category="document")
 def new_part(ctx: Context):
     return _new(ctx, DOC_PART, "part")
 
 
-@tool("new_assembly", "Create a new assembly document", params={}, category="document")
+@tool("new_assembly", "Create a new assembly document (= 新建装配体; NewDocument with the default assembly template)", params={}, category="document")
 def new_assembly(ctx: Context):
     return _new(ctx, DOC_ASSEMBLY, "assembly")
 
 
-@tool("new_drawing", "Create a new drawing document", params={}, category="document")
+@tool("new_drawing", "Create a new drawing document (= 新建工程图; NewDocument with the default drawing template)", params={}, category="document")
 def new_drawing(ctx: Context):
     return _new(ctx, DOC_DRAWING, "drawing")
 
 
 @tool(
-    "open_document", "Open a document by path",
+    "open_document", "Open a document by path (= 打开; OpenDoc6)",
     params={"path": {"type": "string", "desc": "Absolute file path"}},
     category="document",
 )
@@ -73,7 +73,7 @@ def open_document(ctx: Context, path: str):
     return {"opened": sw_get(model, "GetTitle"), "type": doc_type_name(model)}
 
 
-@tool("save_document", "Save the current document", params={}, category="document")
+@tool("save_document", "Save the current document (= 保存; Save3)", params={}, category="document")
 def save_document(ctx: Context):
     model = ctx.model
     # Save3's err/warn are [out] — unpack defensively
@@ -101,7 +101,7 @@ def save_as(ctx: Context, path: str):
 
 
 @tool(
-    "set_material", "Set the material for the current part",
+    "set_material", "Set the material for the current part (= 材质; SetMaterialPropertyName2)",
     params={
         "material": {"type": "string", "desc": "Material name, e.g. \"Alloy Steel\" or \"6061 Alloy\""},
         "database": {"type": "string", "desc": "Material database name; default solidworks materials", "default": ""},
@@ -115,7 +115,7 @@ def set_material(ctx: Context, material: str, database: str = ""):
     return {"material": material, "database": db}
 
 
-@tool("rebuild_model", "Force a full model rebuild (equivalent to Ctrl+Q)", params={}, category="document")
+@tool("rebuild_model", "Force a full model rebuild, i.e. Ctrl+Q (= 重建; ForceRebuild3)", params={}, category="document")
 def rebuild_model(ctx: Context):
     ctx.model.ForceRebuild3(False)
     return {"rebuilt": True}
@@ -162,7 +162,7 @@ def activate_configuration(ctx: Context, name: str):
 
 
 @tool(
-    "add_equation", "Add an equation / global variable",
+    "add_equation", "Add an equation / global variable (= 方程式; EquationMgr.Add3)",
     params={"equation": {"type": "string",
                         "desc": "Full equation, e.g. \"D1@Sketch1\" = 20 or \"width\" = 50"}},
     category="document",

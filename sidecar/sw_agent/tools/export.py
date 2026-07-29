@@ -17,7 +17,7 @@ _PREF_STL_QUALITY = 334
 
 
 @tool(
-    "export_stl", "Export STL (with optional quality)",
+    "export_stl", "Export STL with a quality preference (SetUserPreferenceIntegerValue + SaveAs)",
     params={
         "path": {"type": "string", "desc": "Absolute path to the target .stl file"},
         "quality": {"type": "string", "enum": ["coarse", "fine"], "desc": "Quality level", "default": "fine"},

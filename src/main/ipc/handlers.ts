@@ -285,6 +285,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
             const r = await backupActiveDocument(bridge);
             return r.backupPath ?? null;
           },
+          runMacro: async (code: string) => {
+            const r = await scriptEngine.run(code, 'vba');
+            return { success: r.success, output: r.output, error: r.error };
+          },
         });
         return { ok: true, text, requestId };
       }

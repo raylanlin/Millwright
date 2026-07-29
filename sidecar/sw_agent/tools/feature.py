@@ -171,7 +171,7 @@ def _find_feature(ctx: Context, name: str):
 
 
 @tool(
-    "extrude", "Extrude the current sketch into a solid",
+    "extrude", "Extrude the current sketch into a solid (= 凸台-拉伸; wraps FeatureExtrusion3 — same operation your macro knowledge calls FeatureExtrusion2, with unit conversion and arity handled)",
     params={
         "depth": {"type": "number", "desc": "Extrusion depth (mm)"},
         "both_dir": {"type": "boolean", "desc": "Equal-distance both-direction extrusion", "default": False},
@@ -203,7 +203,7 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = Fal
 
 
 @tool(
-    "cut_extrude", "Cut material using the current sketch (a through hole is direction-agnostic: pass through_all=true)",
+    "cut_extrude", "Cut material using the current sketch (= 切除-拉伸; wraps FeatureCut4/CreateDefinition(swFmCut)). A through hole is direction-agnostic: pass through_all=true",
     params={
         "depth": {"type": "number", "desc": "Cut depth (mm); omit or 0 when through_all is true", "default": 0},
         "through_all": {"type": "boolean", "desc": "Cut through the whole body — use this for through holes", "default": False},
@@ -377,7 +377,7 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
 
 
 @tool(
-    "revolve", "Revolve the current sketch around a centerline. Set cut=true to REMOVE material (a revolved cut/groove); default adds material",
+    "revolve", "Revolve the current sketch around a centerline (= 旋转; wraps FeatureRevolve2). Set cut=true to REMOVE material (a revolved cut/groove); default adds material",
     params={
         "angle": {"type": "number", "desc": "Revolve angle (degrees)", "default": 360},
         "cut": {"type": "boolean", "desc": "Remove material instead of adding it — use for revolved grooves, NOT for simple holes (use cut_extrude for holes)", "default": False},
@@ -413,7 +413,7 @@ def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = "
 
 
 @tool(
-    "fillet_edges", "Round edges of the solid. Say WHICH edges — no manual picking needed",
+    "fillet_edges", "Round edges of the solid (= 圆角; wraps FeatureFillet3). Say WHICH edges — no manual picking needed, unlike a macro where you must resolve edge objects yourself",
     params={
         "radius": {"type": "number", "desc": "Fillet radius (mm)"},
         "edges": {
@@ -464,7 +464,7 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical"):
 
 
 @tool(
-    "fillet_all", "Rescale every existing fillet feature to a uniform radius (reliable: uses GetDefinition/ModifyDefinition)",
+    "fillet_all", "Rescale every existing fillet feature to a uniform radius (uses GetDefinition/ModifyDefinition on each Fillet feature)",
     params={"radius": {"type": "number", "desc": "Uniform radius (mm)"}},
     category="feature",
 )
@@ -485,7 +485,7 @@ def fillet_all(ctx: Context, radius: float):
 
 
 @tool(
-    "chamfer", "Chamfer the selected edges (equal-distance); select edges first",
+    "chamfer", "Chamfer the selected edges, equal-distance (= 倒角; wraps InsertFeatureChamfer). Select edges first",
     params={"distance": {"type": "number", "desc": "Chamfer distance (mm)"}},
     category="feature",
 )
@@ -504,7 +504,7 @@ def chamfer(ctx: Context, distance: float):
 
 
 @tool(
-    "shell", "Shell the body (hollow it out while keeping a wall thickness) — pre-select faces to remove them as openings",
+    "shell", "Shell the body — hollow it out keeping a wall thickness (= 抽壳; wraps InsertFeatureShell). Pre-select faces to remove them as openings",
     params={
         "thickness": {"type": "number", "desc": "Wall thickness (mm)"},
         "outward": {"type": "boolean", "desc": "Thicken outward instead of inward", "default": False},
@@ -536,7 +536,7 @@ def shell(ctx: Context, thickness: float, outward: bool = False):
 
 
 @tool(
-    "linear_pattern", "Repeat a feature in a straight line — give the feature name and a direction",
+    "linear_pattern", "Repeat a feature in a straight line (= 线性阵列; wraps FeatureLinearPattern5). Give the feature name and a direction — the direction edge is picked for you",
     params={
         "count": {"type": "integer", "desc": "Total instance count (including the original)"},
         "spacing": {"type": "number", "desc": "Spacing (mm)"},
@@ -574,7 +574,7 @@ def linear_pattern(ctx: Context, count: int, spacing: float, feature: str = "", 
 
 
 @tool(
-    "circular_pattern", "Repeat a feature around an axis — give the feature name; the part's cylindrical face is used as the axis",
+    "circular_pattern", "Repeat a feature around an axis (= 圆周阵列; wraps FeatureCircularPattern5). Give the feature name; the part's cylindrical face is used as the axis automatically",
     params={
         "count": {"type": "integer", "desc": "Total instance count (including the original)"},
         "angle": {"type": "number", "desc": "Total angle (degrees)", "default": 360},
@@ -613,7 +613,7 @@ def circular_pattern(ctx: Context, count: int, angle: float = 360, feature: str 
 
 
 @tool(
-    "mirror_feature", "Mirror features across a plane — give the feature names",
+    "mirror_feature", "Mirror features across a plane (= 镜像; wraps InsertMirrorFeature2). Give the feature names — selection marks are handled for you",
     params={
         "plane": {"type": "string", "desc": "Symmetry plane: front / top / right, or the name of a plane you created"},
         "features": {"type": "string", "desc": "Comma-separated feature names to mirror, e.g. 凸台-拉伸3,切除-拉伸2 (list_features shows names). Omit to use the current selection", "default": ""},
@@ -649,7 +649,7 @@ def mirror_feature(ctx: Context, plane: str, features: str = ""):
 
 
 @tool(
-    "modify_dimension", "Modify a feature's dimension parameter (applies to ALL configurations)",
+    "modify_dimension", "Modify a feature's dimension parameter (= 修改尺寸; Parameter() + SetSystemValue3, applied to ALL configurations)",
     params={
         "feature": {"type": "string", "desc": "Feature name, e.g. Boss-Extrude1"},
         "dimension": {"type": "string", "desc": "Dimension name, e.g. D1"},
@@ -678,7 +678,7 @@ def _select_feature(ctx: Context, name: str):
     return feat
 
 
-@tool("suppress_feature", "Suppress the specified feature",
+@tool("suppress_feature", "Suppress the specified feature (= 压缩; EditSuppress2)",
       params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature")
 def suppress_feature(ctx: Context, name: str):
@@ -687,7 +687,7 @@ def suppress_feature(ctx: Context, name: str):
     return {"suppressed": name}
 
 
-@tool("unsuppress_feature", "Unsuppress the specified feature",
+@tool("unsuppress_feature", "Unsuppress the specified feature (= 解除压缩; EditUnsuppress2)",
       params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature")
 def unsuppress_feature(ctx: Context, name: str):
@@ -696,7 +696,7 @@ def unsuppress_feature(ctx: Context, name: str):
     return {"unsuppressed": name}
 
 
-@tool("delete_feature", "Delete the specified feature",
+@tool("delete_feature", "Delete the specified feature (= 删除; EditDelete)",
       params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature", destructive=True)
 def delete_feature(ctx: Context, name: str):

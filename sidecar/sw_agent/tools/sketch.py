@@ -83,7 +83,7 @@ def start_sketch(ctx: Context, plane: str = "", face: str = ""):
     return {"sketch_on": plane}
 
 
-@tool("exit_sketch", "Exit the current sketch", params={}, category="sketch")
+@tool("exit_sketch", "Exit the current sketch (= 退出草图; InsertSketch(True))", params={}, category="sketch")
 def exit_sketch(ctx: Context):
     if ctx.sketch_mgr.ActiveSketch is not None:
         ctx.sketch_mgr.InsertSketch(True)
@@ -91,7 +91,7 @@ def exit_sketch(ctx: Context):
 
 
 @tool(
-    "sketch_rectangle", "Draw a rectangle (lower-left corner + width/height)",
+    "sketch_rectangle", "Draw a rectangle from its lower-left corner + width/height (= 边角矩形; wraps CreateCornerRectangle, mm in)",
     params={
         "x": {"type": "number", "desc": "Lower-left X (mm)", "default": 0},
         "y": {"type": "number", "desc": "Lower-left Y (mm)", "default": 0},
@@ -109,7 +109,7 @@ def sketch_rectangle(ctx: Context, width: float, height: float, x: float = 0, y:
 
 
 @tool(
-    "sketch_circle", "Draw a circle (center + radius)",
+    "sketch_circle", "Draw a circle from center + radius (= 圆; wraps CreateCircle, mm in)",
     params={
         "x": {"type": "number", "desc": "Center X (mm)", "default": 0},
         "y": {"type": "number", "desc": "Center Y (mm)", "default": 0},
@@ -160,7 +160,7 @@ def sketch_polyline(ctx: Context, points: str):
 
 
 @tool(
-    "sketch_line", "Draw a line segment",
+    "sketch_line", "Draw a line segment (= 直线; wraps CreateLine, mm in)",
     params={
         "x1": {"type": "number", "desc": "Start X (mm)"}, "y1": {"type": "number", "desc": "Start Y (mm)"},
         "x2": {"type": "number", "desc": "End X (mm)"}, "y2": {"type": "number", "desc": "End Y (mm)"},
@@ -174,7 +174,7 @@ def sketch_line(ctx: Context, x1: float, y1: float, x2: float, y2: float):
 
 
 @tool(
-    "sketch_centerline", "Draw a centerline (used for revolve/mirror)",
+    "sketch_centerline", "Draw a centerline, the axis for revolve/mirror (= 中心线; wraps CreateCenterLine)",
     params={
         "x1": {"type": "number", "desc": "Start X (mm)"}, "y1": {"type": "number", "desc": "Start Y (mm)"},
         "x2": {"type": "number", "desc": "End X (mm)"}, "y2": {"type": "number", "desc": "End Y (mm)"},
@@ -188,7 +188,7 @@ def sketch_centerline(ctx: Context, x1: float, y1: float, x2: float, y2: float):
 
 
 @tool(
-    "sketch_arc_center", "Draw a center-arc (center + start + end + direction)",
+    "sketch_arc_center", "Draw a center-arc from center + start + end + direction (= 圆心圆弧; wraps CreateArc)",
     params={
         "cx": {"type": "number", "desc": "Center X (mm)"}, "cy": {"type": "number", "desc": "Center Y (mm)"},
         "sx": {"type": "number", "desc": "Start X (mm)"}, "sy": {"type": "number", "desc": "Start Y (mm)"},
@@ -208,7 +208,7 @@ def sketch_arc_center(ctx, cx, cy, sx, sy, ex, ey, direction=1):
 
 
 @tool(
-    "sketch_polygon", "Draw a regular polygon",
+    "sketch_polygon", "Draw a regular polygon (= 多边形; wraps CreatePolygon)",
     params={
         "cx": {"type": "number", "desc": "Center X (mm)", "default": 0},
         "cy": {"type": "number", "desc": "Center Y (mm)", "default": 0},
@@ -243,7 +243,7 @@ def sketch_fillet(ctx: Context, radius: float):
 
 
 @tool(
-    "add_sketch_relation", "Add a geometric relation to the selected sketch entities",
+    "add_sketch_relation", "Add a geometric relation to the selected sketch entities (= 几何关系; SketchAddConstraints)",
     params={"relation": {"type": "string",
                         "enum": ["horizontal", "vertical", "coincident", "parallel",
                                  "perpendicular", "tangent", "equal", "concentric", "symmetric"],
@@ -266,7 +266,7 @@ def add_sketch_relation(ctx: Context, relation: str):
 
 
 @tool(
-    "add_dimension", "Add a driving dimension at the given location for the selected entities (applies to ALL configurations)",
+    "add_dimension", "Add a driving dimension for the selected entities (= 智能尺寸; AddDimension2 + SetSystemValue3, ALL configurations)",
     params={
         "x": {"type": "number", "desc": "Dimension placement X (mm)"},
         "y": {"type": "number", "desc": "Dimension placement Y (mm)"},

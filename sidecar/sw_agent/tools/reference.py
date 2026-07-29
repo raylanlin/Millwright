@@ -7,7 +7,7 @@ from ..registry import tool
 
 
 @tool(
-    "create_plane", "Create an offset reference plane (offset from a standard plane by a distance)",
+    "create_plane", "Create an offset reference plane (= 基准面; InsertRefPlane with a distance constraint). Prefer start_sketch(face=…) when you just need to sketch on the model",
     params={
         "base": {"type": "string", "enum": ["front", "top", "right"], "desc": "Base reference plane"},
         "offset": {"type": "number", "desc": "Offset distance (mm)"},
@@ -27,7 +27,7 @@ def create_plane(ctx: Context, base: str, offset: float):
 
 
 @tool(
-    "create_axis", "Create a reference axis from the current selection (two planes / cylindrical face / two points, etc.; select references in SolidWorks first)",
+    "create_axis", "Create a reference axis from the current selection (= 基准轴; InsertAxis2) — two planes / a cylindrical face / two points",
     params={},
     category="reference",
 )

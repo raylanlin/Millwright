@@ -23,7 +23,7 @@ _VIEW_ALIAS = {"iso": "isometric", "front": "front", "isometric": "isometric", "
 
 @tool(
     "set_view_orientation",
-    "Switch the view to a standard orientation (front/back/left/right/top/bottom/isometric) for inspection or screenshot.",
+    "Switch the view to a standard orientation for inspection or screenshot (= 标准视图; ShowNamedView2 + ViewZoomtofit2).",
     params={"orientation": {"type": "string", "desc": "Orientation",
                            "enum": ["front", "back", "left", "right", "top", "bottom",
                                     "isometric", "trimetric", "dimetric"]}},
@@ -60,7 +60,7 @@ def rotate_view(ctx: Context, yaw_deg: float = 30, pitch_deg: float = 0):
 
 @tool(
     "zoom_to_fit",
-    "Zoom so that the entire model fills the view.",
+    "Zoom so the entire model fills the view (= 整屏显示; ViewZoomtofit2).",
     params={},
     category="view",
 )
