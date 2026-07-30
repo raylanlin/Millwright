@@ -311,16 +311,58 @@ class Context:
         return False
 
     def _edge_kind(self, edge):
-        """Classify an edge: ('line', unit-direction) | ('circle', radius) | (None, None)."""
+        """Classify an edge: ('line', unit-direction) | ('circle', radius) | (None, None).
+
+        Three routes, because ICurve is not reachable on every install. GetCurve() is the
+        clean way, but on this machine it resolves to nothing and EVERY edge came back
+        unclassifiable — "read 12 edges but could not classify any" — which then pushed the
+        model into hand-writing macros just to round four corners.
+
+        The fallbacks read the edge's two VERTICES instead. That is enough to recognise a
+        straight edge and its direction, which is all vertical/horizontal need, and it goes
+        through plain IDispatch. (An edge with no distinct end vertices closes on itself,
+        i.e. a circle — so even that case is inferable.)
+        """
+        def unit(dx, dy, dz):
+            n = (dx * dx + dy * dy + dz * dz) ** 0.5
+            return None if n < 1e-9 else (dx / n, dy / n, dz / n)
+
+        # Route A — the curve object, when the typelib exposes it
         try:
             curve = edge.GetCurve()
             if curve.IsLine():
                 p = curve.LineParams          # x,y,z, dx,dy,dz
-                d = (p[3], p[4], p[5])
-                n = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) ** 0.5 or 1.0
-                return "line", (d[0] / n, d[1] / n, d[2] / n)
+                d = unit(p[3], p[4], p[5])
+                if d:
+                    return "line", d
             if curve.IsCircle():
                 return "circle", curve.CircleParams[6]
+        except Exception:  # noqa: BLE001 — fall through to the vertex routes
+            pass
+
+        # Route B — end vertices; a straight edge's direction is simply p2 - p1
+        try:
+            v1 = edge.GetStartVertex()
+            v2 = edge.GetEndVertex()
+            if v1 is None or v2 is None:
+                box = edge.GetCurveBox() if hasattr(edge, "GetCurveBox") else None
+                if box:
+                    return "circle", max(box[3] - box[0], box[4] - box[1], box[5] - box[2]) / 2.0
+                return "circle", None
+            p1, p2 = v1.GetPoint(), v2.GetPoint()
+            d = unit(p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2])
+            if d:
+                return "line", d
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Route C — the vertex-params form some releases expose instead
+        try:
+            sp = edge.GetStartVertexParams()
+            ep = edge.GetEndVertexParams()
+            d = unit(ep[0] - sp[0], ep[1] - sp[1], ep[2] - sp[2])
+            if d:
+                return "line", d
         except Exception:  # noqa: BLE001
             pass
         return None, None
@@ -352,7 +394,8 @@ class Context:
                 first = False
         if n == 0 and unread == len(edges):
             raise SWError(
-                f"read {len(edges)} edges but could not classify any (GetCurve unavailable?) "
+                f"read {len(edges)} edges but none could be classified — neither ICurve nor the "
+                f"edge vertices were reachable on this SolidWorks. "
                 f"({'; '.join(trace)})"
             )
         return n

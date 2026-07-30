@@ -361,6 +361,22 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
         made = attempt(True, not bool(flip))
     if made is None:
         made = attempt(False, False)
+    if made is None and ctx.sketch_mgr.ActiveSketch is not None:
+        # P67: last resort — EXIT the sketch and select it by name, then retry.
+        # A sketch opened on a model FACE (start_sketch(face="top")) behaves differently
+        # from one on a datum plane: the cut API accepted every argument list yet created
+        # no feature ("accepted but produced no Cut feature") while that sketch was still
+        # open. Closing it and selecting it explicitly is the form SolidWorks acts on.
+        errors.append("retrying with the sketch closed and selected by name")
+        try:
+            ctx.sketch_mgr.InsertSketch(True)
+        except Exception as ex:  # noqa: BLE001
+            errors.append(f"exit sketch: {ex}")
+        made = attempt(True, bool(flip))
+        if made is None:
+            made = attempt(True, not bool(flip))
+        if made is None:
+            made = attempt(False, False)
 
     if made is None:
         # P39: report EVERYTHING tried — the old 2-error tail pointed at the wrong API

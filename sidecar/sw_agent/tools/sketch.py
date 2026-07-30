@@ -104,6 +104,32 @@ def _delete_new_segments(ctx: Context, before: set) -> int:
     return removed
 
 
+def _sketch_extent(ctx: Context):
+    """Width/height of the active sketch's geometry in mm, or (None, None) if unreadable."""
+    try:
+        active = ctx.sketch_mgr.ActiveSketch
+        segs = list(active.GetSketchSegments() or []) if active is not None else []
+        xs, ys = [], []
+        for s in segs:
+            for attr in ("GetCurveBox", "GetBox"):
+                fn = getattr(s, attr, None)
+                if fn is None:
+                    continue
+                try:
+                    b = fn()
+                except Exception:  # noqa: BLE001
+                    continue
+                if b and len(b) >= 6:
+                    xs.extend((units.m_to_mm(b[0]), units.m_to_mm(b[3])))
+                    ys.extend((units.m_to_mm(b[1]), units.m_to_mm(b[4])))
+                    break
+        if not xs:
+            return None, None
+        return max(xs) - min(xs), max(ys) - min(ys)
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
 def _arc_centre(p1, p2, radius: float):
     """Centre of the arc of |radius| from p1 to p2, plus its sweep direction.
 
@@ -323,7 +349,27 @@ def sketch_polyline(ctx: Context, points: str):
             f"segment(s) so the sketch is clean. Check the coordinates and retry."
         ) from None
 
-    return {"segments": made, "closed": True, "points": len(pts)}
+    # P67: verify the drawn geometry matches the numbers we were given. An earlier arc
+    # profile came out as a ~7940mm blob instead of an 80x50 plate — the extrude then
+    # "succeeded", so nothing failed until the part was measured. Generated geometry must
+    # be checked, not assumed: compare the sketch's extents against the input points.
+    want_w = max(p[0] for p in pts) - min(p[0] for p in pts)
+    want_h = max(p[1] for p in pts) - min(p[1] for p in pts)
+    arc_r = max((abs(r) for _, r in parsed if r), default=0.0)
+    tol = max(2.0 * arc_r, 1.0) + 0.5      # an arc may bulge up to its radius past a point
+    got_w, got_h = _sketch_extent(ctx)
+    if got_w is not None and (got_w > want_w + tol or got_h > want_h + tol):
+        cleaned = _delete_new_segments(ctx, before)
+        raise SWError(
+            f"the drawn profile measures {got_w:.1f}x{got_h:.1f}mm but the points describe "
+            f"{want_w:.1f}x{want_h:.1f}mm — SolidWorks did not build the arcs as specified. "
+            f"Removed {cleaned} segment(s). Use straight segments here and round the corners "
+            f"afterwards with fillet_edges (radius {arc_r or 10:g}, edges=\"vertical\"), which "
+            f"is also the more editable result."
+        )
+
+    return {"segments": made, "closed": True, "points": len(pts),
+            "extent_mm": [round(got_w or want_w, 2), round(got_h or want_h, 2)]}
 
 
 @tool(

@@ -67,6 +67,7 @@ SolidWorks 不是数学课本上的 Z-up 笛卡尔系。它是 **Y-UP**：
 - **闭合轮廓一律用 \`sketch_polyline\`**（如 \`"30,15 30,50 55,15"\`）。多次 \`sketch_line\` 的端点不会自动焊接，profile 不闭合，拉伸必失败。
 - **圆弧要用真圆弧，不要用短直线近似**。\`sketch_polyline\` 的点可以带弧：\`r<半径>:\` 前缀表示从上一点沿圆弧走到这一点，例如 \`"0,0 60,0 r10:60,20 0,20"\`（三条直边 + 一段 R10 圆弧）。正半径向行进方向右侧凸，负半径向左凸，始终取劣弧。用折线拟合圆弧得到的既不是真圆柱面、也无法编辑。
 - **腰形槽/键槽用 \`sketch_slot\`**（两端是真半圆弧），不要用矩形加两个圆去拼。
+- **带圆角的矩形板不要用带弧的 polyline 画**：先 \`sketch_rectangle\` + \`extrude\`，再 \`fillet_edges(radius=R, edges="vertical")\` 倒四角。这样特征树里圆角是可改参数的独立特征，改半径只要改一个数；把圆角画进草图轮廓里之后就只能重画。\`r<半径>:\` 弧语法留给真正的异形轮廓（凸轮、连杆、腰形开口）。
 - **倒圆角直接说清哪些边**：\`fillet_edges(radius=10, edges="vertical")\`（vertical=四角竖边 / horizontal / circular / all）。不需要预先选边。
 - **阵列给特征名**：\`linear_pattern(feature="切除-拉伸1", direction="x", count=2, spacing=90)\`；圆周阵列同理给 \`feature\`。特征名用 \`list_features\` 查。
 - **镜像给特征名**：\`mirror_feature(plane="front", features="凸台-拉伸3")\`。

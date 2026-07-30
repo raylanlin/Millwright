@@ -6,6 +6,41 @@
 
 ## [Unreleased]
 
+## [0.2.57] - 2026-07-30
+
+### Fixed (P67 — 边分类兜底 + 面草图切除 + 轮廓尺寸自检)
+
+第 4 题（80×50×10 板四角 R10 + φ20 通孔）暴露的三个真 bug：
+
+**① `fillet_edges` 边分类全军覆没**
+
+`read 12 edges but could not classify any (GetCurve unavailable?)` —— `ICurve` 在这台机器上取不到，12 条边全归不了类，倒圆角直接不可用。
+
+修法（与 P46 修 `GetBodies2` 同源）：走顶点路线。读每条边的 `GetStartVertex/GetEndVertex` → `GetPoint`，以及 `GetStartVertexParams/GetEndVertexParams`，用 p2−p1 的方向做 vertical/horizontal 判断。纯 IDispatch，**你的测试已经证明这条路走得通** —— 模型写的宏正是用 `GetStartVertexParams` 筛出了 4 条竖直边。工具没走这条路是我漏的。
+
+**② 模型面上的草图切不动**
+
+`FeatureCut4/27: accepted but produced no Cut feature` —— 参数被接受但没生成特征。原因是草图开在**模型面**上（`start_sketch(face="top")`）且切除时还开着。
+
+最后一层重试：**退出草图 → 按名字选中 → 再试三个方向**。这是 SolidWorks 真正会响应的形式。
+
+（第 4 题第一次尝试确实只差这个孔 —— 板和圆都画对了。）
+
+**③ 带弧轮廓画出了 7940mm 的怪东西**
+
+`bounding_box` 显示 7940×7940 而输入是 80×50。**拉伸"成功"了**，一直到量尺寸才发现不对。
+
+修：画完立刻比对草图实际外廓与输入点的范围，超出容差就删掉重来并报出两组数字。报错里直接给可靠替代方案。
+
+**顺带改提示词**：圆角矩形板应该 `sketch_rectangle` + `extrude` + `fillet_edges`，而不是把圆角画进草图。不只是绕开 bug —— 圆角作为独立特征，改半径只改一个数；画进轮廓里只能重画。`r<半径>:` 弧语法留给真正的异形轮廓（凸轮、连杆）。
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — 边分类三条路线（ICurve → 顶点 → 顶点参数）
+- `sidecar/sw_agent/tools/feature.py` — 切除新增「退出草图+按名选中」重试层
+- `sidecar/sw_agent/tools/sketch.py` — 轮廓尺寸自检 + 失败清理
+- `src/main/llm/prompts.ts` — 圆角矩形走 fillet_edges（含 P56/57/58/64/65）
+
 ## [0.2.56] - 2026-07-30
 
 ### Added (P66 — 一键复制 + 会话导出)
