@@ -17,12 +17,121 @@ except ImportError:  # Python 3.9 -- pairwise landed in 3.10
         seq = list(it)
         return zip(seq, seq[1:])
 
+import math
+
 from .. import units
 from ..bridge import Context, SWError, sw_get
 from ..registry import tool
 
 # swInConfigurationOpts_e
 CFG_ALL = 2
+
+
+class _direct_geometry:
+    """P65: draw generated geometry straight into the sketch database.
+
+    Multiple CreateLine/CreateArc calls otherwise wake up SolidWorks' automatic relation
+    inference, which snaps near-coincident endpoints together, adds horizontal/vertical
+    constraints and can invent driving dimensions. On a computed profile that is not
+    help — it rewrites the geometry. (On the gear it deleted teeth and left the contour
+    open, so the extrude failed.) AddToDB skips inference entirely and is much faster;
+    DisplayWhenAdded off avoids a redraw per entity. Both are restored on the way out.
+    """
+
+    def __init__(self, sk):
+        self.sk = sk
+        self.prev_add = True
+        self.prev_disp = True
+
+    def __enter__(self):
+        try:
+            self.prev_add = bool(self.sk.AddToDB)
+            self.prev_disp = bool(self.sk.DisplayWhenAdded)
+        except Exception:  # noqa: BLE001 — write-only on some releases
+            pass
+        try:
+            self.sk.AddToDB = True
+            self.sk.DisplayWhenAdded = False
+        except Exception:  # noqa: BLE001
+            pass
+        return self.sk
+
+    def __exit__(self, *exc):
+        try:
+            self.sk.AddToDB = self.prev_add
+            self.sk.DisplayWhenAdded = self.prev_disp
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+
+def _segment_ids(ctx: Context) -> set:
+    """Identity of every segment currently in the active sketch, for rollback."""
+    try:
+        active = ctx.sketch_mgr.ActiveSketch
+        segs = active.GetSketchSegments() if active is not None else None
+        return {id(s) for s in (segs or [])}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _delete_new_segments(ctx: Context, before: set) -> int:
+    """P65: remove whatever this call added. A profile that failed halfway used to leave
+    stray lines in the sketch — the model would then try to extrude a broken contour, or
+    the user would find debris in a part they thought was clean."""
+    removed = 0
+    try:
+        active = ctx.sketch_mgr.ActiveSketch
+        segs = list(active.GetSketchSegments() or []) if active is not None else []
+        ctx.clear_selection()
+        for s in segs:
+            if id(s) in before:
+                continue
+            try:
+                if s.Select4(True, None):
+                    removed += 1
+            except Exception:  # noqa: BLE001
+                try:
+                    if s.Select(True):
+                        removed += 1
+                except Exception:  # noqa: BLE001
+                    continue
+        if removed:
+            ctx.model.EditDelete()
+        ctx.clear_selection()
+    except Exception:  # noqa: BLE001 — cleanup is best-effort; the error below matters more
+        pass
+    return removed
+
+
+def _arc_centre(p1, p2, radius: float):
+    """Centre of the arc of |radius| from p1 to p2, plus its sweep direction.
+
+    Sign convention (the one CAD users expect): a POSITIVE radius bulges to the right of
+    travel, a negative radius to the left. Always the minor arc — with |R| fixed the two
+    candidate centres are the two sides, and picking the minor arc is what "fillet this
+    corner with R5" means. The alternative (exposing a raw 1/-1 direction flag, as
+    sketch_arc_center did) is a coin flip the model loses half the time, producing the
+    major arc and an unusable profile.
+    """
+    (x1, y1), (x2, y2) = p1, p2
+    dx, dy = x2 - x1, y2 - y1
+    d = math.hypot(dx, dy)
+    r = abs(radius)
+    if d < 1e-9:
+        raise SWError("an arc needs two distinct endpoints.")
+    if r < d / 2 - 1e-9:
+        raise SWError(
+            f"radius {r} is too small to span {d:.3f}mm between those points — "
+            f"it must be at least {d / 2:.3f}."
+        )
+    h = math.sqrt(max(r * r - (d / 2) ** 2, 0.0))
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    # unit normal to the left of travel
+    nx, ny = -dy / d, dx / d
+    if radius >= 0:
+        return (mx + h * nx, my + h * ny), 1     # centre left  → CCW → bulges right
+    return (mx - h * nx, my - h * ny), -1        # centre right → CW  → bulges left
 
 
 def _require_sketch(ctx: Context):
@@ -83,7 +192,7 @@ def start_sketch(ctx: Context, plane: str = "", face: str = ""):
     return {"sketch_on": plane}
 
 
-@tool("exit_sketch", "Exit the current sketch (= 退出草图; InsertSketch(True))", params={}, category="sketch")
+@tool("exit_sketch", "Exit the current sketch", params={}, category="sketch")
 def exit_sketch(ctx: Context):
     if ctx.sketch_mgr.ActiveSketch is not None:
         ctx.sketch_mgr.InsertSketch(True)
@@ -91,7 +200,7 @@ def exit_sketch(ctx: Context):
 
 
 @tool(
-    "sketch_rectangle", "Draw a rectangle from its lower-left corner + width/height (= 边角矩形; wraps CreateCornerRectangle, mm in)",
+    "sketch_rectangle", "Draw a rectangle (lower-left corner + width/height)",
     params={
         "x": {"type": "number", "desc": "Lower-left X (mm)", "default": 0},
         "y": {"type": "number", "desc": "Lower-left Y (mm)", "default": 0},
@@ -109,7 +218,7 @@ def sketch_rectangle(ctx: Context, width: float, height: float, x: float = 0, y:
 
 
 @tool(
-    "sketch_circle", "Draw a circle from center + radius (= 圆; wraps CreateCircle, mm in)",
+    "sketch_circle", "Draw a circle (center + radius)",
     params={
         "x": {"type": "number", "desc": "Center X (mm)", "default": 0},
         "y": {"type": "number", "desc": "Center Y (mm)", "default": 0},
@@ -138,29 +247,87 @@ def sketch_circle(ctx: Context, radius: float, x: float = 0, y: float = 0):
 def sketch_polyline(ctx: Context, points: str):
     """P45: three separate sketch_line calls did NOT weld their endpoints, so every
     triangular rib failed with "no closed sketch" no matter how the numbers were
-    written. Drawing the whole loop in one call (and closing it explicitly) fixes it."""
-    if ctx.sketch_mgr.ActiveSketch is None:
-        raise SWError("start a sketch first (start_sketch).")
-    pts = []
-    for chunk in (points or "").replace(";", " ").split():
-        parts = chunk.split(",")
-        if len(parts) < 2:
-            raise SWError(f'bad point "{chunk}" — use "x,y x,y x,y" in mm.')
-        pts.append((units.mm(float(parts[0])), units.mm(float(parts[1]))))
-    if len(pts) < 3:
-        raise SWError("a closed contour needs at least 3 points.")
-    loop = pts + [pts[0]]
+    written. One call draws the whole loop with shared endpoints.
+
+    P65: segments may now be ARCS, so a profile with rounded ends (slots, con-rod eyes,
+    cam outlines) is drawn as real arc geometry instead of being faked with short chords.
+    Prefix a point with `r<radius>:` to reach it along an arc:
+
+        "0,0 60,0 r10:60,20 0,20"      → three straight sides, one R10 arc
+        "0,0 r-8:40,0"                 → single arc bulging the other way
+
+    Positive radius bulges right of travel, negative left; always the minor arc.
+    """
+    _require_sketch(ctx)
+    # re-join into tokens of the form [r<radius>:]x,y
+    tokens = [t for t in (points or "").replace("\n", " ").split() if t]
+    if len(tokens) < 2:
+        raise SWError('give at least two points, e.g. "0,0 40,0 40,20 0,20".')
+
+    parsed = []  # (point, radius_or_None)
+    for tok in tokens:
+        radius = None
+        body = tok
+        if ":" in tok:
+            head, body = tok.split(":", 1)
+            head = head.strip().lower()
+            if not head.startswith("r"):
+                raise SWError(f'bad segment prefix "{head}" — use r<radius>: for an arc, e.g. r10:40,20.')
+            try:
+                radius = float(head[1:])
+            except ValueError:
+                raise SWError(f'bad arc radius in "{tok}".') from None
+            if radius == 0:
+                raise SWError("arc radius cannot be 0.")
+        part = body.split(",")
+        if len(part) != 2:
+            raise SWError(f'bad point "{tok}" — use x,y (arcs: r10:x,y).')
+        try:
+            parsed.append(((float(part[0]), float(part[1])), radius))
+        except ValueError:
+            raise SWError(f'bad point "{tok}" — coordinates must be numbers.') from None
+    if parsed[0][1] is not None:
+        raise SWError("the FIRST point starts the loop, so it cannot carry an arc radius.")
+
+    pts = [p for p, _ in parsed]
+    closed = math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) < 1e-9
+    loop = parsed if closed else parsed + [(pts[0], None)]
+
+    before = _segment_ids(ctx)
     made = 0
-    for (x1, y1), (x2, y2) in pairwise(loop):
-        if ctx.sketch_mgr.CreateLine(x1, y1, 0.0, x2, y2, 0.0) is not None:
-            made += 1
-    if made < len(pts):
-        raise SWError(f"only {made} of {len(pts)} segments were created.")
-    return {"closed_contour": len(pts), "segments": made}
+    try:
+        with _direct_geometry(ctx.sketch_mgr) as sk:
+            for (p1, _), (p2, radius) in pairwise(loop):
+                if radius is None:
+                    seg = sk.CreateLine(units.mm(p1[0]), units.mm(p1[1]), 0.0,
+                                        units.mm(p2[0]), units.mm(p2[1]), 0.0)
+                else:
+                    centre, ccw = _arc_centre(p1, p2, radius)
+                    seg = sk.CreateArc(
+                        units.mm(centre[0]), units.mm(centre[1]), 0.0,
+                        units.mm(p1[0]), units.mm(p1[1]), 0.0,
+                        units.mm(p2[0]), units.mm(p2[1]), 0.0,
+                        ccw,
+                    )
+                if seg is None:
+                    raise SWError(
+                        f"segment {made + 1} of {len(loop) - 1} failed "
+                        f"({'arc' if radius is not None else 'line'} to {p2[0]},{p2[1]})."
+                    )
+                made += 1
+    except SWError:
+        # P65: never leave half a profile behind for someone else to trip over
+        cleaned = _delete_new_segments(ctx, before)
+        raise SWError(
+            f"polyline failed after {made} segment(s); removed {cleaned} partial "
+            f"segment(s) so the sketch is clean. Check the coordinates and retry."
+        ) from None
+
+    return {"segments": made, "closed": True, "points": len(pts)}
 
 
 @tool(
-    "sketch_line", "Draw a line segment (= 直线; wraps CreateLine, mm in)",
+    "sketch_line", "Draw a line segment",
     params={
         "x1": {"type": "number", "desc": "Start X (mm)"}, "y1": {"type": "number", "desc": "Start Y (mm)"},
         "x2": {"type": "number", "desc": "End X (mm)"}, "y2": {"type": "number", "desc": "End Y (mm)"},
@@ -174,7 +341,7 @@ def sketch_line(ctx: Context, x1: float, y1: float, x2: float, y2: float):
 
 
 @tool(
-    "sketch_centerline", "Draw a centerline, the axis for revolve/mirror (= 中心线; wraps CreateCenterLine)",
+    "sketch_centerline", "Draw a centerline (used for revolve/mirror)",
     params={
         "x1": {"type": "number", "desc": "Start X (mm)"}, "y1": {"type": "number", "desc": "Start Y (mm)"},
         "x2": {"type": "number", "desc": "End X (mm)"}, "y2": {"type": "number", "desc": "End Y (mm)"},
@@ -188,7 +355,7 @@ def sketch_centerline(ctx: Context, x1: float, y1: float, x2: float, y2: float):
 
 
 @tool(
-    "sketch_arc_center", "Draw a center-arc from center + start + end + direction (= 圆心圆弧; wraps CreateArc)",
+    "sketch_arc_center", "Draw a center-arc (center + start + end + direction)",
     params={
         "cx": {"type": "number", "desc": "Center X (mm)"}, "cy": {"type": "number", "desc": "Center Y (mm)"},
         "sx": {"type": "number", "desc": "Start X (mm)"}, "sy": {"type": "number", "desc": "Start Y (mm)"},
@@ -197,8 +364,17 @@ def sketch_centerline(ctx: Context, x1: float, y1: float, x2: float, y2: float):
     },
     category="sketch",
 )
-def sketch_arc_center(ctx, cx, cy, sx, sy, ex, ey, direction=1):
+def sketch_arc_center(ctx, cx, cy, sx, sy, ex, ey, direction=0):
+    """P65: direction=0 (the default) picks the MINOR arc automatically. The old default
+    of 1 meant the model had to guess the sweep sense and got the major arc half the
+    time — a 300° arc where a 60° one was meant, which then fails to bound a profile."""
     _require_sketch(ctx)
+    d = int(direction or 0)
+    if d == 0:
+        a_start = math.atan2(sy - cy, sx - cx)
+        a_end = math.atan2(ey - cy, ex - cx)
+        sweep = (a_end - a_start) % (2 * math.pi)
+        d = 1 if sweep <= math.pi else -1
     ctx.sketch_mgr.CreateArc(
         units.mm(cx), units.mm(cy), 0,
         units.mm(sx), units.mm(sy), 0,
@@ -208,7 +384,7 @@ def sketch_arc_center(ctx, cx, cy, sx, sy, ex, ey, direction=1):
 
 
 @tool(
-    "sketch_polygon", "Draw a regular polygon (= 多边形; wraps CreatePolygon)",
+    "sketch_polygon", "Draw a regular polygon",
     params={
         "cx": {"type": "number", "desc": "Center X (mm)", "default": 0},
         "cy": {"type": "number", "desc": "Center Y (mm)", "default": 0},
@@ -243,7 +419,7 @@ def sketch_fillet(ctx: Context, radius: float):
 
 
 @tool(
-    "add_sketch_relation", "Add a geometric relation to the selected sketch entities (= 几何关系; SketchAddConstraints)",
+    "add_sketch_relation", "Add a geometric relation to the selected sketch entities",
     params={"relation": {"type": "string",
                         "enum": ["horizontal", "vertical", "coincident", "parallel",
                                  "perpendicular", "tangent", "equal", "concentric", "symmetric"],
@@ -266,7 +442,7 @@ def add_sketch_relation(ctx: Context, relation: str):
 
 
 @tool(
-    "add_dimension", "Add a driving dimension for the selected entities (= 智能尺寸; AddDimension2 + SetSystemValue3, ALL configurations)",
+    "add_dimension", "Add a driving dimension at the given location for the selected entities (applies to ALL configurations)",
     params={
         "x": {"type": "number", "desc": "Dimension placement X (mm)"},
         "y": {"type": "number", "desc": "Dimension placement Y (mm)"},

@@ -31,9 +31,67 @@ from ..registry import tool
 # P62: no circular pattern any more — the whole outline is one sketch, one extrude,
 # so the pattern/axis-selection helpers are no longer needed here.
 
+# P64: spline control points per flank. A spline interpolates, so ~10 points give a
+# curve within a micron of the true involute — the old polyline needed far more
+# segments for the same fidelity and still was not a curve.
 _INVOLUTE_STEPS = 10
-_TIP_ARC_STEPS = 3
-_ROOT_ARC_STEPS = 3
+
+
+def _variant_doubles(values):
+    """VARIANT array of doubles — CreateSpline takes the point data as one flat array."""
+    import pythoncom
+    from win32com.client import VARIANT
+    return VARIANT(pythoncom.VT_ARRAY | pythoncom.VT_R8, [float(v) for v in values])
+
+
+def _spline(sk, pts):
+    """Draw a spline through pts (mm, sketch-local). Tries CreateSpline2 then CreateSpline."""
+    flat = []
+    for x, y in pts:
+        flat.extend((units.mm(x), units.mm(y), 0.0))
+    data = _variant_doubles(flat)
+    for member, args in (("CreateSpline2", (data, True)), ("CreateSpline", (data,))):
+        fn = getattr(sk, member, None)
+        if fn is None:
+            continue
+        try:
+            seg = fn(*args)
+        except Exception:  # noqa: BLE001 — try the other signature
+            continue
+        if seg is not None:
+            return seg
+    return None
+
+
+def _flank(sk, pts) -> int:
+    """One tooth flank. A spline is the right representation — an involute is a smooth
+    curve and a spline stays editable. If CreateSpline is unavailable or rejects the
+    signature on this release, fall back to a polyline: less pleasant, but still correct
+    now that AddToDB stops SolidWorks from snapping the points around (which is what
+    broke the outline before — teeth vanished and the contour would not close)."""
+    if _spline(sk, pts) is not None:
+        return 1
+    n = 0
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        seg = sk.CreateLine(units.mm(x1), units.mm(y1), 0.0, units.mm(x2), units.mm(y2), 0.0)
+        if seg is None:
+            raise SWError("failed to draw a tooth flank (neither CreateSpline nor CreateLine worked).")
+        n += 1
+    return n
+
+
+def _arc(sk, start, end, centre=(0.0, 0.0), ccw=1):
+    """Arc about `centre` from `start` to `end` (mm). Real arc geometry, not a chord —
+    so the tip and root lands stay circular and remain editable as arcs."""
+    seg = sk.CreateArc(
+        units.mm(centre[0]), units.mm(centre[1]), 0.0,
+        units.mm(start[0]), units.mm(start[1]), 0.0,
+        units.mm(end[0]), units.mm(end[1]), 0.0,
+        int(ccw),
+    )
+    if seg is None:
+        raise SWError("CreateArc failed while closing a tooth (tip or root land).")
+    return seg
 
 
 def _rot(p, a):
@@ -41,26 +99,31 @@ def _rot(p, a):
     return (p[0] * c - p[1] * s, p[0] * s + p[1] * c)
 
 
-def _gear_profile(m: float, z: int, alpha_deg: float):
-    """Full closed outline of a spur gear — every tooth, in one point list (mm).
+def _tooth_flanks(m: float, z: int, alpha_deg: float):
+    """One tooth's two flanks as point lists (mm), plus the gear's radii.
 
-    P62: the earlier version built ONE tooth and circular-patterned it, which needed a
-    blank extrude, a tooth extrude and a cylindrical face to use as the pattern axis —
-    three ways to fail, and it failed at the first. Emitting the whole outline needs a
-    single sketch and a single extrude, so none of that machinery is involved.
+    P64: returns the flanks as SEPARATE point lists rather than one flat polyline,
+    because the outline is now drawn as splines and arcs instead of hundreds of line
+    segments. Two reasons that matters:
 
-    The tooth-profile offset is the part that must be exactly right, and it is easy to
-    get backwards. The involute unwinds FORWARD: its polar angle inv(t) = t − atan(t)
-    grows with radius. So to make a tooth that narrows outward (as a real tooth does),
-    the involute must be rotated BACK by the half-tooth angle plus the involute function
-    at the pressure angle:
+      * An involute IS a smooth curve. A 460-segment polyline is not editable — you
+        cannot grab a flank and change it, and the sketch shows a cloud of points.
+      * Feeding SolidWorks that many short lines wakes up automatic relation inference,
+        which snaps near-collinear points together and adds horizontal/vertical
+        constraints. It silently rewrote the outline (teeth went missing, the contour
+        did not close, and a stray 0.78 dimension appeared).
+
+    Tooth-profile offset — the part that must be exactly right, and easy to invert. The
+    involute unwinds FORWARD: its polar angle inv(t) = t − atan(t) grows with radius. So
+    to make a tooth that narrows outward, rotate the involute BACK by the half-tooth
+    angle plus the involute function at the pressure angle:
 
         δ = −( π/(2z) + inv(α) ),   inv(α) = tan α − α
 
-    Verified numerically for m=2, z=20, α=20°: tooth width 10.7° at the root, 9.00° at
-    the pitch circle (exactly half the 18° pitch, which is the standard tooth), 3.6° at
-    the tip — monotonically narrowing. With the sign flipped the tip comes out 14.4°
-    wide, adjacent teeth touch, and the whole gear renders as a plain ring.
+    Verified for m=2, z=20, α=20°: tooth width 10.7° at the root, 9.00° at the pitch
+    circle (exactly half the 18° pitch — the standard tooth), 3.6° at the tip. With the
+    sign flipped the tip comes out 14.4° wide, adjacent teeth touch, and the gear
+    renders as a plain ring.
     """
     alpha = math.radians(alpha_deg)
     r_pitch = m * z / 2.0
@@ -77,7 +140,7 @@ def _gear_profile(m: float, z: int, alpha_deg: float):
     t_max = math.sqrt((r_tip / r_base) ** 2 - 1.0)
 
     # One flank, root → tip. Below the base circle the involute does not exist, so the
-    # flank starts with a radial segment from the root circle up to the base circle.
+    # flank starts with a short radial run from the root circle up to the base circle.
     flank = []
     for i in range(_INVOLUTE_STEPS + 1):
         t = t_max * i / _INVOLUTE_STEPS
@@ -86,30 +149,10 @@ def _gear_profile(m: float, z: int, alpha_deg: float):
         flank.append(_rot((x, y), delta))
     base_ang = math.atan2(flank[0][1], flank[0][0])
     left = [(r_root * math.cos(base_ang), r_root * math.sin(base_ang))] + flank
-    # The other flank is this one mirrored about the tooth centreline (the X axis),
-    # traversed tip → root so the outline stays continuous.
+    # The opposite flank is this one mirrored about the tooth centreline (the X axis),
+    # walked tip → root so the outline stays continuous.
     right = [(x, -y) for x, y in reversed(left)]
-
-    tip_a0 = math.atan2(left[-1][1], left[-1][0])
-    tip_a1 = math.atan2(right[0][1], right[0][0])
-    root_a_end = math.atan2(right[-1][1], right[-1][0])
-
-    pts: list = []
-    for k in range(z):
-        a = 2.0 * math.pi * k / z
-        pts.extend(_rot(p, a) for p in left)
-        # tip arc across the top of the tooth
-        for i in range(1, _TIP_ARC_STEPS):
-            ang = a + tip_a0 + (tip_a1 - tip_a0) * i / _TIP_ARC_STEPS
-            pts.append((r_tip * math.cos(ang), r_tip * math.sin(ang)))
-        pts.extend(_rot(p, a) for p in right)
-        # root arc across the gap to the next tooth
-        gap_start = a + root_a_end
-        gap_end = 2.0 * math.pi * (k + 1) / z + base_ang
-        for i in range(1, _ROOT_ARC_STEPS):
-            ang = gap_start + (gap_end - gap_start) * i / _ROOT_ARC_STEPS
-            pts.append((r_root * math.cos(ang), r_root * math.sin(ang)))
-    return pts, r_pitch, r_tip, r_root
+    return left, right, r_pitch, r_base, r_tip, r_root
 
 
 @tool(
@@ -139,7 +182,7 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
         _new_part(ctx)
     ctx.require(DOC_PART, "part")
 
-    pts, r_pitch, r_tip, r_root = _gear_profile(m, z, pressure_angle)
+    left, right, r_pitch, _r_base, r_tip, r_root = _tooth_flanks(m, z, pressure_angle)
 
     sk = ctx.sketch_mgr
     ctx.clear_selection()
@@ -149,16 +192,54 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
         raise SWError("failed to select the top plane.")
     sk.InsertSketch(True)
 
-    # One closed polyline for the entire gear outline. Consecutive CreateLine calls share
-    # endpoints exactly, so SolidWorks welds them into a single closed contour.
-    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-        sk.CreateLine(units.mm(x1), units.mm(y1), 0.0, units.mm(x2), units.mm(y2), 0.0)
-    sk.CreateLine(units.mm(pts[-1][0]), units.mm(pts[-1][1]), 0.0,
-                  units.mm(pts[0][0]), units.mm(pts[0][1]), 0.0)
+    # P64: AddToDB writes geometry straight into the sketch database — no automatic
+    # relations, no endpoint snapping, no inferencing, and far faster. Without it
+    # SolidWorks "helpfully" rewrites a generated profile: it merged near-collinear
+    # points, dropped teeth, left the contour open and invented a driving dimension.
+    # DisplayWhenAdded off avoids a redraw per entity.
+    prev_add_to_db = True
+    prev_display = True
+    try:
+        prev_add_to_db = bool(sk.AddToDB)
+        prev_display = bool(sk.DisplayWhenAdded)
+    except Exception:  # noqa: BLE001 — older releases expose these as write-only
+        pass
 
-    # P62: read the sketch's real name NOW and record it. The previous version read
-    # ctx.scratch["last_sketch"] without ever writing it, so it picked up a stale name
-    # from an earlier call and extruded the wrong sketch ("failed to select sketch: 草图2").
+    made = 0
+    try:
+        sk.AddToDB = True
+        sk.DisplayWhenAdded = False
+        for k in range(z):
+            a = 2.0 * math.pi * k / z
+            l_pts = [_rot(p, a) for p in left]
+            r_pts = [_rot(p, a) for p in right]
+            # Last tooth closes onto the FIRST tooth's own start point, not a recomputed
+            # rot(…, 2π) of it — cos(2π)/sin(2π) leave a residue, and with AddToDB there
+            # is no endpoint snapping to absorb it.
+            nxt = left if k == z - 1 else [_rot(p, 2.0 * math.pi * (k + 1) / z) for p in left]
+
+            # Flanks as splines — the involute is a smooth curve, and a spline stays
+            # editable (drag it, dimension it) in a way 23 line segments never are.
+            made += _flank(sk, l_pts)
+            # Tip arc: centred on the origin, counter-clockwise from the left flank's
+            # tip point to the right flank's. Endpoints are the spline's OWN endpoints,
+            # not recomputed from polar coordinates, so the contour closes exactly.
+            _arc(sk, l_pts[-1], r_pts[0])
+            made += 1
+            made += _flank(sk, r_pts)
+            # Root arc across the gap to the next tooth
+            _arc(sk, r_pts[-1], nxt[0])
+            made += 1
+    finally:
+        try:
+            sk.AddToDB = prev_add_to_db
+            sk.DisplayWhenAdded = prev_display
+        except Exception:  # noqa: BLE001
+            pass
+
+    # P64: read the sketch's real name NOW and record it. An earlier version read
+    # ctx.scratch["last_sketch"] without ever writing it, picked up a stale name from a
+    # previous call, and extruded the wrong sketch ("failed to select sketch: 草图2").
     gear_sketch = ""
     try:
         active = sk.ActiveSketch
@@ -170,9 +251,26 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
     sk.InsertSketch(True)
 
     from .feature import extrude
-    body = extrude(ctx, depth=thickness, sketch=gear_sketch)
+    try:
+        body = extrude(ctx, depth=thickness, sketch=gear_sketch)
+    except SWError as e:
+        # P65: the generator created this sketch, so it owns the cleanup. Leaving a
+        # 20-tooth outline behind means the next attempt extrudes the wrong sketch and
+        # the user finds debris in a part they believe is clean.
+        if gear_sketch:
+            try:
+                from .feature import delete_feature
+                delete_feature(ctx, gear_sketch)
+            except Exception:  # noqa: BLE001 — the real error below is what matters
+                pass
+        raise SWError(
+            f"the gear outline was drawn ({made} entities in {gear_sketch or 'the sketch'}) but the "
+            f"extrude failed: {e}. The profile is generated to exact coordinates, so an open contour "
+            "here means this SolidWorks rejected one of the segments — send this message on rather "
+            "than falling back to rectangular tooth slots (that geometry is not a gear)."
+        ) from e
     if not isinstance(body, dict) or not body.get("feature"):
-        raise SWError("the gear outline was drawn but the extrude failed — check the sketch is closed.")
+        raise SWError(f"the outline was drawn ({made} entities) but no solid was produced.")
 
     if bore and bore > 0:
         if bore >= 2 * r_root:
@@ -207,7 +305,10 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
             "bore_mm": bore or None,
         },
         "feature": body.get("feature"),
-        "note": "involute profile per ISO 53; meshes with any gear of the same module and pressure angle",
+        "sketch": gear_sketch,
+        "entities": made,
+        "note": "involute profile per ISO 53 — flanks are splines, tip and root lands are true arcs, "
+                "so the sketch stays editable. Meshes with any gear of the same module and pressure angle",
     }
 
 
