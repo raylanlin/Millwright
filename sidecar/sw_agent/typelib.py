@@ -78,7 +78,18 @@ def _registered_typelibs():
     return found
 
 
-def ensure_typelib(log=None) -> dict:
+_LAST_STATE: dict = {"ok": False, "tried": ["not attempted yet"]}
+
+
+def typelib_state() -> dict:
+    """The outcome of the last ensure_typelib() call, including per-route failure
+    reasons. Startup runs on a background thread, so without stashing this the reason a
+    route failed was only ever visible in the log — and by the time a tool misbehaved it
+    had scrolled away."""
+    return dict(_LAST_STATE)
+
+
+def _ensure_typelib_inner(log=None) -> dict:
     """Make sure the gen_py cache and `constants` are populated. Idempotent.
 
     Returns a dict describing what happened — it goes into the handshake reply so a
@@ -164,3 +175,13 @@ def feature_id(kind: str):
     except Exception:  # noqa: BLE001
         pass
     return FEATURE_ID.get(kind)
+
+
+def ensure_typelib(log=None) -> dict:
+    """Wrapper that records the outcome for typelib_state()."""
+    global _LAST_STATE
+    try:
+        _LAST_STATE = _ensure_typelib_inner(log=log)
+    except Exception as e:  # noqa: BLE001 — never let cache generation break startup
+        _LAST_STATE = {"ok": False, "tried": [f"unexpected: {e}"]}
+    return dict(_LAST_STATE)

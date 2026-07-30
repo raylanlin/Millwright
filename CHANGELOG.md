@@ -6,6 +6,32 @@
 
 ## [Unreleased]
 
+## [0.2.61] - 2026-07-30
+
+### Changed (P71 — 诊断报出 typelib 失败原因)
+
+`sw_diagnostics` 只报 `constants_loaded: false`,查不下去 —— 三条生成路(注册表 EnsureModule / makepy / EnsureDispatch)哪条失败、为什么失败,全看不到。启动是在后台线程跑的,原因只进了日志,等某个工具出问题时早就滚没了。
+
+#### 改动
+
+- `typelib.py`:记住最后一次生成结果,新增 `typelib_state()`
+- `diagnose.py`:输出 `tried` 列表(每条路各自的失败原因)
+
+#### 顺带修一句误导文案
+
+原来 `constants_loaded: false` 时会说 "CreateDefinition is unreachable" —— **这句已经不准了**。P69 加了硬编码枚举表,`feature_id("cut")` 返回 6,所以 definition 路径依然可用。现在分三种情况说清:
+
+- 类型库加载成功
+- 类型库没生成,但枚举表补上了同样的值 → **definition 路径仍可用**
+- 两者都没有 → 才需要退化成猜参数个数
+
+新增 `enum_ids_available` 字段,这个才是判断「干净路径能不能走」的依据。
+
+### Changed
+
+- `sidecar/sw_agent/tools/diagnose.py` — 覆盖(输出 `tried` + `enum_ids_available`)
+- `sidecar/sw_agent/typelib.py` — 覆盖(`typelib_state()` + 记住最近一次结果)
+
 ## [0.2.60] - 2026-07-30
 
 ### Changed (P70 — Tools 页重做:实时工具清单 + 逐个开关)

@@ -26,22 +26,36 @@ from ..registry import tool
 def sw_diagnostics(ctx: Context):
     out: dict = {}
 
-    # 1. Early-binding cache — the root cause of the cut/fillet failures
+    # 1. Early-binding cache. Reporting only true/false was not enough — when it came
+    #    back false there was no way to tell WHICH of the three generation routes failed
+    #    or why, so the trace is included now.
+    from ..typelib import feature_id, typelib_state
     try:
         import win32com.client as wc
         dicts = getattr(wc.constants, "__dicts__", None)
         loaded = bool(dicts) and any(dicts)
-        out["typelib"] = {
-            "constants_loaded": loaded,
-            "note": "ok" if loaded
-                    else "MISSING — swFmCut cannot resolve, so CreateDefinition is "
-                         "unreachable and cut/fillet fall back to argument-count search",
-        }
     except Exception as e:  # noqa: BLE001
-        out["typelib"] = {"constants_loaded": False, "error": str(e)}
+        loaded, dicts = False, None
+        out["typelib_error"] = str(e)
 
-    from ..typelib import feature_id
-    out["feature_ids"] = {k: feature_id(k) for k in ("extrusion", "cut", "fillet", "revolve", "shell")}
+    state = typelib_state()
+    ids = {k: feature_id(k) for k in ("extrusion", "cut", "fillet", "revolve", "shell")}
+    # The hard-coded enum table is what actually decides whether the clean creation route
+    # is usable; the type library is only one way of obtaining those numbers.
+    definition_ok = ids.get("cut") is not None
+    out["typelib"] = {
+        "constants_loaded": loaded,
+        "enum_ids_available": definition_ok,
+        "tried": state.get("tried", []),
+        "note": (
+            "ok — constants loaded from the type library" if loaded
+            else "type library did not generate, but the built-in enum table supplies the "
+                 "same values, so CreateDefinition is still usable" if definition_ok
+            else "NEITHER the type library nor the enum table is available — cut/fillet "
+                 "must fall back to argument-count search"
+        ),
+    }
+    out["feature_ids"] = ids
 
     # 2. Geometry access
     try:
