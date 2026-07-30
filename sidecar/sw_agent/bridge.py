@@ -78,6 +78,30 @@ class Context:
         except Exception:  # noqa: BLE001 — already initialized is fine
             pass
         errors: list[str] = []
+
+        # P73: win32com.client.Dispatch internally calls GetActiveObject FIRST, then
+        # falls back to CoCreateInstance if the object isn't in the ROT. For SolidWorks
+        # (a singleton COM server), CoCreateInstance returns the running instance.
+        # https://timgolden.me.uk/python/win32_how_do_i/attach-to-a-com-instance.html
+        # https://stackoverflow.com/questions/74670195
+        #
+        # We try Dispatch FIRST because it covers both ROT and class-factory paths in
+        # one call. The manual GetActiveObject loop below is kept as a fallback for
+        # version-specific ProgIDs and gencache early binding.
+        try:
+            raw = win32com.client.Dispatch("SldWorks.Application")
+        except Exception as e_dispatch:  # noqa: BLE001
+            errors.append(f"SldWorks.Application (Dispatch): {e_dispatch}")
+        else:
+            try:
+                from win32com.client import gencache
+                return gencache.EnsureDispatch(raw)
+            except Exception:  # noqa: BLE001 — makepy unavailable
+                return raw
+
+        # Fallback: try version-specific ProgIDs via GetActiveObject (ROT only).
+        # Some SolidWorks installs register the versioned ProgID in the ROT but not
+        # the bare one; this catches that case.
         for progid in _PROGIDS:
             try:
                 raw = win32com.client.GetActiveObject(progid)
@@ -90,15 +114,6 @@ class Context:
                 return gencache.EnsureDispatch(raw)
             except Exception:  # noqa: BLE001 — makepy unavailable → degrade to dynamic dispatch
                 return raw
-        # P73: GetActiveObject requires SolidWorks to be registered in the ROT, which
-        # some installs / configurations don't do (even when SolidWorks IS running).
-        # Dispatch goes through the COM class factory instead — it will connect to the
-        # running instance (SolidWorks is a singleton) and does not start a new one.
-        # We gate it behind an explicit fallback so the ROT path stays the primary.
-        try:
-            return win32com.client.Dispatch("SldWorks.Application")
-        except Exception as e_dispatch:  # noqa: BLE001
-            errors.append(f"SldWorks.Application (Dispatch): {e_dispatch}")
 
         # P24: report the BARE-ProgID error (the meaningful one) — the old code
         # reported the LAST versioned ProgID's error ("invalid class string" for an

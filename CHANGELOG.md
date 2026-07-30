@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+## [0.2.65] - 2026-07-30
+
+### Fixed (P73 补 2: Dispatch 提到 GetActiveObject 前面)
+
+v0.2.64 的 Dispatch 回落虽然能连上,但放在 GetActiveObject 遍历全部
+ProgID **之后**才调用。这台装机 ROT 里没有注册 SW,所以先等 11 个
+GetActiveObject 逐个超时(~5s),才到 Dispatch(~5s)。用户看到的是:
+1. ~5s「无法连接」(边车冷启动 + GetActiveObject 排队失败)
+2. ~5s VBS 0x1AD 假权限错误(回落到 bridge.refresh)
+3. 再过 ~5s Dispatch 连上 → 正常
+
+Dispatch 内部先试 GetActiveObject 再试 CoCreateInstance —— 它是
+GetActiveObject 的超集。提到前面直接省掉 10s。GetActiveObject 循环
+降级为回落(捕捉那些只注册版本 ProgID 不注册 bare ProgID 的装法)。
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — Dispatch 提到 GetActiveObject 前
+
 ## [0.2.64] - 2026-07-30
 
 ### Fixed (P73 补: GetActiveObject → Dispatch 回落)
