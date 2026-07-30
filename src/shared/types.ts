@@ -30,6 +30,8 @@ export interface LLMConfig {
   approvalMode?: 'strict' | 'normal' | 'permissive' | 'auto';
   /** P51/P54: 推理深度 —— auto 厂商默认 / off 关闭 / adaptive 模型自行判断 / low·medium·high */
   reasoningLevel?: 'auto' | 'off' | 'adaptive' | 'low' | 'medium' | 'high';
+  /** P70: 用户在「工具」页关闭的工具名。模型看不到这些工具,造出来也会被拒 */
+  disabledTools?: string[];
   /** P54: 推理参数方言，auto 按 baseURL 自动识别 */
   reasoningDialect?: 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek' | 'minimax';
 }

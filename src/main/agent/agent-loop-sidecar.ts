@@ -68,6 +68,9 @@ export interface SidecarAgentOptions {
   imageToDataUrl: (imagePath: string, format: string) => string;
   /** P54: explicit user-configured context-window override (in tokens) */
   contextWindow?: number;
+  /** P70: tool names the user switched off in the Tools tab — filtered out before the
+   *  request is built, so the model never sees them and cannot ask for them. */
+  disabledTools?: string[];
   /** P58: VBA/VBScript runner for the run_macro escape hatch. Omit to withhold the tool. */
   runMacro?: (code: string) => Promise<{ success: boolean; output?: string; error?: string }>;
 }
@@ -193,12 +196,17 @@ export async function runSidecarAgent(
 
   await sidecar.start();
   const sidecarTools = await sidecar.listTools(false);
+  // P70: withhold what the user switched off. Filtering here rather than in the UI means
+  // a disabled tool is genuinely unavailable — the model is never told it exists, which
+  // enforces the risk decision AND shortens the list it has to choose from (a shorter
+  // list measurably improves tool choice).
+  const off = new Set(opts.disabledTools ?? []);
   const tools = [
     // P58: only advertise run_macro when a runner exists — a tool the model can call but
     // that cannot execute is worse than no tool at all.
     ...VIRTUAL_TOOLS.filter((t) => t.function.name !== 'run_macro' || !!opts.runMacro),
     ...sidecarTools,
-  ];
+  ].filter((t: any) => !off.has(t?.function?.name));
   const destructive = new Set(
     sidecarTools.filter((t) => t.x_meta?.destructive).map((t) => t.function.name),
   );
@@ -299,6 +307,16 @@ export async function runSidecarAgent(
 
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
+
+      if (off.has(call.name)) {
+        // Not advertised, so this is the model recalling a name from elsewhere. Say so
+        // plainly instead of executing it.
+        const resultText = `⛔ ${call.name} 已被用户在「工具」页关闭，本次会话不可用。请改用其他工具完成，或告知用户需要开启它。`;
+        call.result = resultText;
+        opts.onEvent?.({ type: 'tool_result', toolCall: call });
+        history.push(toolMsg(call, resultText));
+        continue;
+      }
 
       // P58: macro escape hatch — lint, confirm, back up, then run through the VBS engine
 

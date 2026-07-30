@@ -22,6 +22,9 @@ export const IpcChannels = {
   SCRIPT_RUN: 'script:run',
   SCRIPT_RESULT: 'script:result',
 
+  // Tools (P70: live sidecar catalog for the Tools tab)
+  TOOLS_LIST: 'tools:list',
+
   // Config
   CONFIG_SAVE: 'config:save',
   CONFIG_LOAD: 'config:load',

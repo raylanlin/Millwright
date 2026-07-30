@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+## [0.2.60] - 2026-07-30
+
+### Changed (P70 — Tools 页重做:实时工具清单 + 逐个开关)
+
+#### ① 它显示的是错的那一套
+
+Tools 页读的是 `sw-tools.ts` 里 26 条**写死在代码里的静态清单** —— 那是 VBS 回退引擎的目录。真正在跑的 ~50 个 sidecar 工具来自运行时的 `sidecar.list_tools()`,Tools 页**从来没连上它**。页面既不完整,连名字都对不上(`draw_rectangle` vs 实际 `sketch_rectangle`)。
+
+现在改成读实时清单:按 category 分组、显示友好名 + raw 名 + 真实描述 + 参数列表(必填参数带 `*`)。Python 组件没起来时明确提示"当前是 VBS 引擎、工具较少",而不是拿一份假清单糊过去。
+
+#### ② 点一下只能"预览 VBA",不能开关
+
+预览 VBA 在纯 VBS 时代有意义,现在主路径是 sidecar,这个功能已经没有对象了 —— 去掉。
+
+**开关是这个页面真正该有的东西**:
+- **风险**:`run_macro`、`delete_feature` 可彻底禁掉(带「高风险」红标)
+- **准确率**:工具列表越短,模型选工具越准
+
+关掉的工具**在构造请求前就被滤掉** —— 模型根本看不到它存在。万一凭记忆硬造已关闭的工具名,会收到明确回复(告知已被关闭、请改用别的或让用户开启),而不是被执行。
+
+分类标题旁有「全开/全关」。
+
+### Added
+
+- `src/renderer/components/ToolsPanel.tsx` — 实时清单 + 开关(取代 ToolsList.tsx)
+
+### Removed
+
+- `src/renderer/components/ToolsList.tsx` — 已被 ToolsPanel 取代
+
+### Changed
+
+- `src/main/agent/agent-loop-sidecar.ts` — 按 `disabledTools` 过滤 + 拒绝已关闭工具调用
+- `src/shared/ipc-channels.ts` — 加 `TOOLS_LIST` 通道
+- `src/main/ipc/handlers.ts` — 提供实时工具清单 + `runSidecarAgent` options 加 `disabledTools`
+- `src/preload/index.ts` — 暴露 `window.api.tools.list()`
+- `src/shared/types.ts` — `LLMConfig` 加 `disabledTools?: string[]`
+- `src/renderer/App.tsx` — 换 `ToolsPanel` 渲染
+
 ## [0.2.59] - 2026-07-30
 
 ### Fixed (P69 — 早绑缓存生成不了 / 所有切除与圆角失败的共同根因)

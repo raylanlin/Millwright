@@ -275,6 +275,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           maxRounds: payload.config.maxRounds ?? 24,
           approvalMode: payload.config.approvalMode ?? 'normal',
           contextWindow: payload.config.contextWindow,
+          disabledTools: payload.config.disabledTools ?? [],
           signal: controller.signal,
           onEvent: send,
           confirmTool: (call) => requestUserConfirm(e.sender, requestId, call),
@@ -326,6 +327,29 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   });
 
   // ===== Scripts =====
+
+  // P70: live tool catalog from the running sidecar.
+  ipcMain.handle(IpcChannels.TOOLS_LIST, async () => {
+    const sidecar = getSidecar({ onLog: (l) => console.log('[sidecar]', l) });
+    try {
+      await sidecar.start();
+      const raw = await sidecar.listTools(false);
+      const tools = raw.map((t: any) => {
+        const f = t.function ?? {};
+        const props = f.parameters?.properties ?? {};
+        return {
+          name: f.name,
+          description: f.description ?? '',
+          category: t.x_meta?.category ?? 'other',
+          params: Object.keys(props),
+          required: f.parameters?.required ?? [],
+        };
+      });
+      return { ok: true, tools };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
 
   ipcMain.handle(IpcChannels.SCRIPT_VALIDATE, (_e, payload: { code: string; lang: 'vba' | 'python' }) => {
     return validateScript(payload.code, payload.lang);

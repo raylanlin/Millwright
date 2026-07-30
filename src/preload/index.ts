@@ -50,6 +50,21 @@ const api = {
       };
     },
   },
+  tools: {
+    list: (): Promise<
+      | {
+          ok: true;
+          tools: Array<{
+            name: string;
+            description: string;
+            category: string;
+            params: string[];
+            required: string[];
+          }>;
+        }
+      | { ok: false; error: string }
+    > => ipcRenderer.invoke(IpcChannels.TOOLS_LIST),
+  },
   llm: {
     chat: (
       config: LLMConfig,

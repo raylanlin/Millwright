@@ -18,7 +18,7 @@ import { ChatInput, type ChatInputHandle } from './components/ChatInput';
 import { SettingsModal } from './components/SettingsModal';
 import { ExportSessionMenu } from './components/ExportSessionMenu';
 import { Automations } from './components/Automations';
-import { ToolsList } from './components/ToolsList';
+import { ToolsPanel } from './components/ToolsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 
 export default function App() {
@@ -336,7 +336,17 @@ export default function App() {
 
         {activeTab === 'automations' && <Automations t={t} onPick={handlePickAutomation} />}
 
-        {activeTab === 'tools' && <ToolsList t={t} />}
+        {activeTab === 'tools' && (
+          <ToolsPanel
+            t={t}
+            disabled={config.disabledTools ?? []}
+            onChange={(next) => {
+              const cfg = { ...config, disabledTools: next };
+              setConfig(cfg);
+              window.api.config.save(cfg);
+            }}
+          />
+        )}
       </main>
 
       {showSettings && (
