@@ -185,6 +185,13 @@ export interface SWStatus {
   connected: boolean;
   /** P4: COM attach failed but SLDWORKS.exe IS running (usually a UAC elevation mismatch) */
   processRunning?: boolean;
+  /** P73: the real COM error from the attach attempt (0x… + description). The old code
+   *  discarded it and inferred a privilege mismatch, sending users to check UAC while the
+   *  actual error went unread. */
+  comError?: string;
+  /** P73: which probe produced this status — the sidecar holds the connection the tools
+   *  actually run through, so its verdict outranks the separate cscript probe. */
+  source?: 'sidecar' | 'vbs';
   version?: string;
   activeDocumentType?: SWDocumentType;
   activeDocumentPath?: string;

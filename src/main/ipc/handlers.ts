@@ -98,8 +98,20 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   });
 
   ipcMain.handle(IpcChannels.SW_STATUS, async () => {
-    // FEATURE: return the real current document (for UI polling); bypasses the stale cache
-    return await bridge.refresh();
+    // P73: the sidecar holds the connection the tools actually run through. If it can read
+    // ActiveDoc we ARE connected, whatever the separate cscript probe concludes — and it was
+    // that probe's wrong verdict (plus a guessed UAC diagnosis) that blocked a working app.
+    try {
+      const sidecar = getSidecar({ onLog: (l) => console.log('[sidecar]', l) });
+      await sidecar.start();
+      const r = await sidecar.call('sw_status', {});
+      if (r.ok && r.data?.connected) {
+        return { ...r.data, source: 'sidecar' as const };
+      }
+    } catch {
+      // fall through to the legacy probe
+    }
+    return { ...(await bridge.refresh()), source: 'vbs' as const };
   });
 
   ipcMain.handle(IpcChannels.SW_CONTEXT, async () => {

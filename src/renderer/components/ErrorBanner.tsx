@@ -33,6 +33,12 @@ export function ErrorBanner({
       <Banner t={t} type="warning">
         <span style={{ flex: 1 }}>
           {swStatus.processRunning ? tr('err.swElevation') : tr('err.swDown')}
+          {/* P73: the raw COM error, when we have one. Previously the banner asserted a
+              privilege mismatch as fact; it is only ever an educated guess, and showing
+              the actual code is what makes the real cause findable. */}
+          {swStatus.comError && (
+            <span style={{ opacity: 0.75, fontWeight: 400 }}> ({swStatus.comError})</span>
+          )}
         </span>
         <BannerButton t={t} onClick={onReconnectSW}>{tr('err.reconnect')}</BannerButton>
       </Banner>

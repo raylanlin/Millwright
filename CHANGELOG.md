@@ -6,6 +6,42 @@
 
 ## [Unreleased]
 
+## [0.2.63] - 2026-07-30
+
+### Fixed (P73 — 状态栏该听边车的,而不是听那个次要探测)
+
+上次 `sw_diagnostics` **成功返回了真实数据**(报出 feature_ids、报出"没有打开文档")—— 说明 **Python 边车连得上 SolidWorks**。真正失败的只有 `sw-bridge.ts` 里那个独立的 cscript/VBS 探测。
+
+所以 P72 修 makepy 修错了方向:连接从来没断,断的是**次要探测**,而 UI 状态栏偏偏用它的结论把用户挡在门外,还给了一个错误的诊断(去检查 UAC 权限)。
+
+**根本问题是架构上的:同一件事有两套独立探测,而界面信的是信息更少的那一个。** 边车持有的是工具真正跑在上面的那条连接 —— 它能读到 ActiveDoc,应用就是连上的,不管另一个探测怎么说。
+
+#### 修法
+
+##### ① 边车成为状态的权威来源
+
+新增 `sw_status` 工具(Python 侧):报告连接状态与当前文档。**它永不抛异常** —— "没连上"和"没开文档"都是正常状态,应该作为数据返回而不是抛出。
+
+`handlers.ts` 的状态处理器改为:**先问边车,边车不可用才回落到 VBS 探测**。返回里带 `source: 'sidecar' | 'vbs'`,便于以后排查。
+
+##### ② 探测报出真实 COM 错误,不再猜
+
+原来的逻辑是「进程在跑 + attach 失败 → 一定是 UAC 权限不一致」。这只是个推断,而它把你送去查权限,真正的 COM 错误码却从没被读出来。
+
+现在 VBS 把第一次 `GetObject` 的 `Err.Number`/`Err.Description` 带出来(`PROC|0x… 描述`),状态里存为 `comError`,横幅括号里显示。**猜出来的诊断比原始错误码更糟。**
+
+### Added
+
+- `sidecar/sw_agent/tools/status.py` — `sw_status` 工具(永不抛异常)
+
+### Changed
+
+- `sidecar/sw_agent/server.py` — 注册 status(含 P72)
+- `src/main/com/sw-bridge.ts` — 带出真实 COM 错误
+- `src/shared/types.ts` — `SWStatus` 加 `comError` / `source`
+- `src/renderer/components/ErrorBanner.tsx` — 横幅显示真实错误码
+- `src/main/ipc/handlers.ts` — `SW_STATUS` 处理器改为优先问边车(手改)
+
 ## [0.2.62] - 2026-07-30
 
 ### Fixed (P72 — 连不上 SolidWorks 的根因:启动路径被拖死) 紧急修复

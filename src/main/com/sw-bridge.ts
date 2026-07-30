@@ -25,7 +25,14 @@ const VBS_TIMEOUT_MS = 15_000;
 // Shared VBS helper: attach to a running SolidWorks via any registered ProgID.
 // Returns Nothing when no attach succeeds (explicit, so `Is Nothing` works —
 // a failed GetObject leaves the variable Empty, not Nothing).
+// P73: LAST_ERR carries the real Err.Number/Description out of the attach loop. The old
+// code discarded it and inferred "must be a UAC mismatch" from "process running + attach
+// failed" — an inference that sent the user chasing privilege levels while the actual COM
+// error went unread. A guessed diagnosis is worse than a raw error code.
 const ATTACH_FN = `
+Dim LAST_ERR
+LAST_ERR = ""
+
 Function AttachSW()
     On Error Resume Next
     Dim ids, i, o
@@ -41,12 +48,17 @@ Function AttachSW()
             Set AttachSW = o
             Exit Function
         End If
+        If i = 0 Then LAST_ERR = "0x" & Hex(Err.Number) & " " & Err.Description
     Next
     Err.Clear
     Set AttachSW = Nothing
 End Function`;
 
-type ConnCheck = 'ok' | 'proc' | 'fail';
+/** P73: the probe's verdict, plus the COM error when one was reported. */
+interface ConnResult {
+  kind: 'ok' | 'proc' | 'fail';
+  comError?: string;
+}
 
 export class SolidWorksBridge {
   private cachedStatus: SWStatus = { connected: false };
@@ -61,11 +73,11 @@ export class SolidWorksBridge {
     }
     const check = await this.checkConnection();
     this.cachedStatus =
-      check === 'ok'
+      check.kind === 'ok'
         ? await this.fetchStatus()
-        : { connected: false, processRunning: check === 'proc' };
+        : { connected: false, processRunning: check.kind === 'proc', comError: check.comError };
     this.lastCheck = Date.now();
-    return check === 'ok';
+    return check.kind === 'ok';
   }
 
   disconnect(): void {
@@ -82,9 +94,9 @@ export class SolidWorksBridge {
     }
     const check = await this.checkConnection();
     this.cachedStatus =
-      check === 'ok'
+      check.kind === 'ok'
         ? await this.fetchStatus()
-        : { connected: false, processRunning: check === 'proc' };
+        : { connected: false, processRunning: check.kind === 'proc', comError: check.comError };
     this.lastCheck = Date.now();
     return this.cachedStatus;
   }
@@ -94,8 +106,12 @@ export class SolidWorksBridge {
       return this.cachedStatus.connected;
     }
     this.checkConnection().then((check) => {
-      if (check !== 'ok') {
-        this.cachedStatus = { connected: false, processRunning: check === 'proc' };
+      if (check.kind !== 'ok') {
+        this.cachedStatus = {
+          connected: false,
+          processRunning: check.kind === 'proc',
+          comError: check.comError,
+        };
         this.lastCheck = Date.now();
       }
     });
@@ -158,7 +174,7 @@ export class SolidWorksBridge {
   // ===== Private =====
 
   /** 'ok' = attached · 'proc' = SLDWORKS.exe running but COM refused (UAC mismatch) · 'fail' = not running */
-  private async checkConnection(): Promise<ConnCheck> {
+  private async checkConnection(): Promise<ConnResult> {
     const vbs = `
 On Error Resume Next
 Dim swApp
@@ -175,7 +191,7 @@ If Err.Number = 0 And IsObject(wmi) Then
     Set procs = wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE Name='SLDWORKS.exe'")
     If Err.Number = 0 Then
         If procs.Count > 0 Then
-            WScript.Echo "PROC"
+            WScript.Echo "PROC|" & LAST_ERR
             WScript.Quit 0
         End If
     End If
@@ -184,11 +200,15 @@ WScript.Echo "FAIL"
 ${ATTACH_FN}`;
     try {
       const stdout = await runVBS(vbs);
-      if (stdout === 'OK') return 'ok';
-      if (stdout === 'PROC') return 'proc';
-      return 'fail';
-    } catch {
-      return 'fail';
+      if (stdout === 'OK') return { kind: 'ok' };
+      if (stdout.startsWith('PROC')) {
+        const comError = stdout.slice(5).trim();
+        return { kind: 'proc', comError: comError || undefined };
+      }
+      return { kind: 'fail' };
+    } catch (e) {
+      // A cscript failure is not evidence about SolidWorks — say which one failed.
+      return { kind: 'fail', comError: `cscript: ${e instanceof Error ? e.message : String(e)}` };
     }
   }
 
