@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+## [0.2.69] - 2026-07-31
+
+### Fixed (P75-77 合包: 边分类 + 零件堆积 + 全量 API 核对)
+
+#### 边分类:两条新路线
+
+**P76: GetCurveParams2/3** — 之前四次尝试失败都是因为入了 SolidWorks API 的
+`I` 前缀陷阱:带 `I` 前缀的版本是给 C++ 直调接口用的(返裸指针,pywin32 拿不到),
+不带前缀的返回 VARIANT 数组才是 VBA/pywin32 该用的。GetCurveParams2 的 6 元素
+数组 `[0..2]起点 [3..5]终点` 可直接算方向,不需要 ICurve/IVertex。
+
+**P75: 相邻面** — 所有读边自身几何的路由此机器全失败,但面一直可读。
+一条边是两个面的交界,两侧面法向都水平 = 竖边,一个面 Y 向 > 0.9 = 水平边。
+
+#### 零件不再堆积(P75)
+
+`new_part` 加护栏:活动文档已是没有实体特征的零件时直接复用。
+提示词:任何一步失败都不许 `new_part` 另起一份。
+
+#### 圆角不许画进草图(P75 提示词)
+
+`fillet_edges` 失败要报告失败原文,不许退回草图画圆角;孔用 `cut_extrude`。
+
+#### 全量 API 核对(P77)
+
+- `AddMate5`:对齐方向 `swMateAlign_e` 默认改 `CLOSEST`(不是反的 1),暴露 `align` 参数
+- `InsertReferencePoint`:补齐 `along_curve` 类型 + `count`/`distance` 参数
+- `export_stl`:STL 精度 best-effort(设不上继续导出),扩展名检查
+- 其余全部正确(AddComponent5/InsertRefPlane/SetSuppression2/SaveAs 等)
+
+### Changed
+
+- `sidecar/sw_agent/tools/document.py` — new_part 空零件复用
+- `sidecar/sw_agent/tools/assembly.py` — 配合对齐方向 + align 参数
+- `sidecar/sw_agent/tools/reference.py` — 参考点 along_curve
+- `sidecar/sw_agent/tools/export.py` — STL best-effort + 扩展名检查
+- `src/main/llm/prompts.ts` — 一个任务一个文档 + 圆角用特征
+- `sidecar/sw_agent/bridge.py` — _edge_kind 新路线(P76 在前 + P75 在后)
+
 ## [0.2.67] - 2026-07-30
 
 ### Fixed (_edge_kind Route D: IGetCurveParams2 → IEdge.IGetCurve)

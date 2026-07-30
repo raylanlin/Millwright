@@ -40,8 +40,46 @@ def _new(ctx: Context, doc_type: int, label: str):
     return {"created": label, "title": sw_get(model, "GetTitle")}
 
 
-@tool("new_part", "Create a new part document (= 新建零件; NewDocument with the default part template)", params={}, category="document")
+def _empty_part(ctx: Context):
+    """The active document, if it is a part with no real features — otherwise None.
+
+    P75: Millwright left trails of 零件1..零件7 behind, because whenever a feature failed
+    the model's recovery instinct was to start a fresh part and try again. The user then
+    has to guess which of seven documents is the deliverable, which is worse than the
+    original failure. An empty part already IS a new part, so hand it back.
+    """
+    try:
+        cur = ctx.sw.ActiveDoc
+        if cur is None or sw_get(cur, "GetType") != DOC_PART:
+            return None
+        # Folders, planes and the origin are present in every new part and are not work.
+        boilerplate = {
+            "HistoryFolder", "SensorFolder", "DocsFolder", "DetailCabinet",
+            "MaterialFolder", "RefPlane", "OriginProfileFeature", "CommentsFolder",
+            "SolidBodyFolder", "SurfaceBodyFolder", "EnvFolder", "FavoriteFolder",
+        }
+        for f in list(cur.FeatureManager.GetFeatures(True) or []):
+            try:
+                if sw_get(f, "GetTypeName2") not in boilerplate:
+                    return None
+            except Exception:  # noqa: BLE001 — an unreadable feature still counts as work
+                return None
+        return cur
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@tool("new_part", "Create a new part document, or reuse the active one if it is still empty (= 新建零件; NewDocument with the default part template)", params={}, category="document")
 def new_part(ctx: Context):
+    reuse = _empty_part(ctx)
+    if reuse is not None:
+        return {
+            "created": "part",
+            "title": sw_get(reuse, "GetTitle"),
+            "reused": True,
+            "note": "the active part was still empty, so it was reused — a failed feature "
+                    "is not a reason to start another document",
+        }
     return _new(ctx, DOC_PART, "part")
 
 

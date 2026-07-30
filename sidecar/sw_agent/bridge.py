@@ -352,6 +352,46 @@ class Context:
             n = (dx * dx + dy * dy + dz * dz) ** 0.5
             return None if n < 1e-9 else (dx / n, dy / n, dz / n)
 
+        # Route 0 (P76): IEdge::GetCurveParams2/3 — the officially documented way, and the
+        # one that actually marshals through pywin32.
+        #
+        # Four earlier routes failed because of a naming trap in the SolidWorks API: the
+        # I-prefixed variants (IGetCurveParams2, IGetCurve) are for direct C++ interface
+        # use and hand back raw pointers, while the UNPREFIXED ones return VARIANT arrays.
+        # VBA and pywin32 need the unprefixed form; we had been reaching for the other.
+        #
+        # GetCurveParams2 returns a flat array: [0..2] start point, [3..5] end point,
+        # [6..7] u range (per the official VBA example). Start and end are all that
+        # vertical/horizontal classification needs.
+        def _unit(dx, dy, dz):
+            n = (dx * dx + dy * dy + dz * dz) ** 0.5
+            return None if n < 1e-9 else (dx / n, dy / n, dz / n)
+
+        try:
+            fn = getattr(edge, "GetCurveParams3", None)
+            if fn is not None:
+                data = fn()
+                if data is not None:
+                    sp, ep = data.StartPoint, data.EndPoint
+                    d = _unit(ep[0] - sp[0], ep[1] - sp[1], ep[2] - sp[2])
+                    if d:
+                        return "line", d
+        except Exception:  # noqa: BLE001 — closed curves have no distinct endpoints
+            pass
+
+        try:
+            fn = getattr(edge, "GetCurveParams2", None)
+            if fn is not None:
+                p = fn()
+                if p is not None and len(p) >= 6:
+                    d = _unit(p[3] - p[0], p[4] - p[1], p[5] - p[2])
+                    if d:
+                        return "line", d
+                    # start == end → the edge closes on itself → a circle
+                    return "circle", None
+        except Exception:  # noqa: BLE001
+            pass
+
         # Route A — the curve object, when the typelib exposes it
         try:
             curve = edge.GetCurve()
@@ -415,6 +455,48 @@ class Context:
                 radius = data[7]
                 if isinstance(radius, (int, float)) and radius > 0:
                     return "circle", radius
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Route E (P75): derive the edge's direction from its TWO ADJACENT FACES.
+        # Every earlier route reads the edge's own geometry, and on this install none of
+        # them resolve. Faces however have always been readable. An edge is where two
+        # faces meet, so the faces are enough: two horizontal-normal faces meet at a
+        # VERTICAL edge, and a face whose normal runs along Y caps a HORIZONTAL one.
+        try:
+            faces = None
+            for name in ("IGetTwoAdjacentFaces2", "GetTwoAdjacentFaces2"):
+                fn = getattr(edge, name, None)
+                if fn is None:
+                    continue
+                try:
+                    faces = fn()
+                except Exception:  # noqa: BLE001
+                    continue
+                if faces:
+                    break
+            normals = []
+            cylindrical = False
+            for f in (faces or []):
+                if f is None:
+                    continue
+                try:
+                    surf = f.GetSurface()
+                    if not surf.IsPlane():
+                        cylindrical = True
+                        continue
+                    n = f.Normal
+                    normals.append((abs(n[0]), abs(n[1]), abs(n[2])))
+                except Exception:  # noqa: BLE001
+                    continue
+            if cylindrical:
+                return "circle", None
+            if len(normals) >= 2:
+                # Y is up in SolidWorks. A face normal with no Y component is a side wall.
+                if all(ny < 0.1 for _nx, ny, _nz in normals):
+                    return "line", (0.0, 1.0, 0.0)      # vertical edge
+                if any(ny > 0.9 for _nx, ny, _nz in normals):
+                    return "line", (1.0, 0.0, 0.0)      # horizontal edge
         except Exception:  # noqa: BLE001
             pass
 
