@@ -255,6 +255,20 @@ def sketch_rectangle(ctx: Context, width: float, height: float, x: float = 0, y:
 def sketch_circle(ctx: Context, radius: float, x: float = 0, y: float = 0):
     _require_sketch(ctx)
     ctx.sketch_mgr.CreateCircle(units.mm(x), units.mm(y), 0, units.mm(x + radius), units.mm(y), 0)
+    # P69: confirm the circle actually landed. A circle that reports success but is not
+    # on the solid produces the most misleading failure we have seen: the cut then fails
+    # with "the sketch profile may not overlap the solid", which reads like a planning
+    # mistake when in fact the geometry never arrived. Comparing the sketch extent
+    # against the requested diameter catches it at the source.
+    got_w, got_h = _sketch_extent(ctx)
+    want = 2.0 * float(radius)
+    if got_w is not None and max(got_w, got_h) < want * 0.5:
+        raise SWError(
+            f"the circle was requested at ({x}, {y}) r{radius} but the sketch measures only "
+            f"{got_w:.1f}x{got_h:.1f}mm — the geometry did not reach the sketch. Re-open the "
+            "sketch with start_sketch and draw it again; do not cut against this sketch."
+        )
+
     return {"circle": {"x": x, "y": y, "r": radius}}
 
 

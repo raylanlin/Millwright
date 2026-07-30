@@ -6,6 +6,61 @@
 
 ## [Unreleased]
 
+## [0.2.59] - 2026-07-30
+
+### Fixed (P69 — 早绑缓存生成不了 / 所有切除与圆角失败的共同根因)
+
+那份日志把根因钉死了——一百轮里每次失败都带着同一行：
+
+```
+constants load: This COM object can not automate the makepy process
+```
+
+**gen_py 早绑缓存从来没生成成功过。** 后果是一条完整的因果链，末端症状离病因非常远：
+
+```
+EnsureDispatch(活动的 swApp) → 拒绝提供类型信息
+  → 没有 gen_py 模块
+  → win32com.client.constants 是空的
+  → swFmCut 取不到
+  → IFeatureManager.CreateDefinition(swFmCut)（唯一不依赖参数个数的切除写法）不可用
+  → 退化成猜 FeatureCut4/27 → "接受了但不生成特征"
+并且 SelectByID2(name, "SKETCH") 也解析不了 → "failed to select sketch: 草图2"
+```
+
+所以「cut_extrude 有时候好有时候不好」的真正原因，是**类型库从来没装载过**。模型花一百轮在下游试参数个数、试草图状态、试宏，全猜不到上游。
+
+#### 修法：从注册表的 .tlb 生成，而不是从活动对象
+
+`EnsureDispatch` 是向**活着的 COM 对象**要类型信息，这台机器的 SolidWorks 不给，而且没办法让它给。但类型库本身就在磁盘上、而且注册过——SolidWorks 装的时候就把 `sldworks.tlb` 写进了 `HKEY_CLASSES_ROOT\TypeLib`。**读注册表 + 从 .tlb 生成，完全不需要运行中的应用配合。**
+
+新增 `sidecar/sw_agent/typelib.py`，三条路依次尝试：注册表 `EnsureModule` → `makepy.GenerateFromTypeLibSpec` → 老的 `EnsureDispatch`。注册表里的版本号是**十六进制**（"1f.0"），按十进制读会静默选错版本——单独处理了。
+
+启动时在预热线程里跑（那个线程本来就是干这个的），失败会在日志里明说「typelib cache unavailable」，不再静默。
+
+**兜底**：`swFmCut` 等枚举值硬编码进表里。即使类型库在某台机器上真的生成不了，definition 路径（不需要猜参数个数）依然可用。
+
+#### 顺带修两个日志暴露的问题
+
+**① 画完的圆没落到草图里，却报告成功。** 多次出现「圆不可见」而 `sketch_circle` 返回 ok，紧接着 `cut_extrude` 报「轮廓与实体不重叠」—— 报错听起来像规划错了，实际几何根本没到位。现在画完立刻比对草图外廓与请求的直径，不符就当场报错，并明说「不要拿这张草图去切」。
+
+**② 新增 `sw_diagnostics` 工具。** 这个项目里每个硬 bug 都是「文档上有、这台机器上没有」：GetBodies2 挂在别的接口、ICurve 取不到、类型库拒绝生成——每次都表现为一个误导性的下游错误，都要花一轮才追回来。这个工具直接问：早绑缓存在不在、实体/面/边能不能读、边能分成几类、哪条特征创建路径可用。以后遇到「工具的失败方式不符合模型」，一次调用就有答案。
+
+### Added
+
+- `sidecar/sw_agent/typelib.py` — 注册表生成早绑缓存 + 枚举硬编码兜底
+- `sidecar/sw_agent/tools/diagnose.py` — `sw_diagnostics` 工具
+
+### Changed (P69 顺带覆盖 P67/P68)
+
+- `sidecar/sw_agent/server.py` — 启动时生成缓存 + 注册 diagnose
+- `sidecar/sw_agent/tools/feature.py` — definition 路径改用硬编码枚举（含 P67 切除重试）
+- `sidecar/sw_agent/tools/sketch.py` — 圆落地校验（含 P65/P67）
+- `sidecar/sw_agent/bridge.py` — 边分类三条路线（P67）
+- `src/main/llm/prompts.ts` — 圆角矩形走 fillet_edges（P67）
+- `src/shared/sw-tools.ts` — Tools 页英文化（P68）
+- `src/renderer/components/ToolsList.tsx` — 同上（P68）
+
 ## [0.2.58] - 2026-07-30
 
 ### Fixed (P68 — Tools 页面英文化补齐)

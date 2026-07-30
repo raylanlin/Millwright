@@ -26,11 +26,10 @@ import threading
 
 from . import registry
 from .bridge import Context
-
-# Trigger tool registration (the import order also defines category display order)
 from .tools import (  # noqa: F401
     assembly,
     batch,
+    diagnose,
     document,
     drawing,
     export,
@@ -41,6 +40,9 @@ from .tools import (  # noqa: F401
     sketch,
     view,
 )
+
+# Trigger tool registration (the import order also defines category display order)
+from .typelib import ensure_typelib
 
 
 def _write(obj: dict) -> None:
@@ -58,9 +60,22 @@ def _warm_up() -> None:
         pythoncom.CoInitialize()
     except Exception:  # noqa: BLE001
         return
+    # P69: build the type-library cache from the REGISTERED .tlb before touching the
+    # application. EnsureDispatch asks the LIVE object for its type info, and this
+    # SolidWorks answers "This COM object can not automate the makepy process" — so the
+    # cache was never built, win32com.client.constants stayed empty, swFmCut never
+    # resolved, and IFeatureManager.CreateDefinition (the one cut path that does not
+    # depend on guessing an argument count) was unreachable. Reading the .tlb off disk
+    # needs no cooperation from the running application.
+    state = ensure_typelib(log=lambda s: _write({"id": None, "ok": True, "data": {"log": s}}))
+    if not state.get("ok"):
+        _write({"id": None, "ok": True, "data": {
+            "log": "typelib cache unavailable — cut/fillet fall back to argument-count "
+                   f"search: {state.get('tried')}",
+        }})
     try:
-        Context().sw  # throwaway connect: GetActiveObject + EnsureDispatch → builds gen_py cache
-    except Exception:  # noqa: BLE001 — SW may not be running; the real call path will report properly
+        Context().sw  # throwaway connect, purely to warm the connection path
+    except Exception:  # noqa: BLE001 — SW may not be running; the real call path reports properly
         pass
     finally:
         try:

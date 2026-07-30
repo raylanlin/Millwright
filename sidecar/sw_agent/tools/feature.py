@@ -246,12 +246,16 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
         to guess (every positional arity of FeatureCut3/4 raised DISP_E_PARAMNOTOPTIONAL
         on this install), and it is the API SolidWorks documents for automation."""
         try:
-            import win32com.client as wc
-            fm_cut = getattr(wc.constants, "swFmCut", None)
+            # P69: the enum value comes from the hard-coded table when the type library
+            # is unavailable, so the definition path — which needs no argument-count
+            # guessing — stays usable on a machine where makepy cannot run.
+            from ..typelib import feature_id
+            fm_cut = feature_id("cut")
             if fm_cut is None:
                 # P40: the sidecar talks to SW via dynamic dispatch, so makepy constants
                 # are never loaded into this process. CastTo an early-bound interface
                 # (gen_py cache exists thanks to the P17 warmup) to populate them.
+                import win32com.client as wc
                 wc.CastTo(ctx.feat_mgr, "IFeatureManager")
                 fm_cut = getattr(wc.constants, "swFmCut", None)
         except Exception as e:  # noqa: BLE001
