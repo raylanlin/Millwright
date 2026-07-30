@@ -90,6 +90,16 @@ class Context:
                 return gencache.EnsureDispatch(raw)
             except Exception:  # noqa: BLE001 — makepy unavailable → degrade to dynamic dispatch
                 return raw
+        # P73: GetActiveObject requires SolidWorks to be registered in the ROT, which
+        # some installs / configurations don't do (even when SolidWorks IS running).
+        # Dispatch goes through the COM class factory instead — it will connect to the
+        # running instance (SolidWorks is a singleton) and does not start a new one.
+        # We gate it behind an explicit fallback so the ROT path stays the primary.
+        try:
+            return win32com.client.Dispatch("SldWorks.Application")
+        except Exception as e_dispatch:  # noqa: BLE001
+            errors.append(f"SldWorks.Application (Dispatch): {e_dispatch}")
+
         # P24: report the BARE-ProgID error (the meaningful one) — the old code
         # reported the LAST versioned ProgID's error ("invalid class string" for an
         # unregistered .25), masking the real failure cause.

@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.2.64] - 2026-07-30
+
+### Fixed (P73 补: GetActiveObject → Dispatch 回落)
+
+P73 把状态栏改为先问边车,方向对了,但边车自己的 `_connect()` 只走 `GetActiveObject`。
+这台装机的 SolidWorks 不在 ROT 里注册(即便 SW 开着),所以 `ctx.sw` 持续
+`MK_E_UNAVAILABLE`。`sw_status` 永远 `connected: false`,handlers.ts 落到
+VBS 探针那条错的 0x1AD。
+
+修法:`_connect()` 的 `GetActiveObject` 全失败后,加一档 `Dispatch`。
+`Dispatch` 走 COM class factory,不依赖 ROT — SW 是 singleton,连回去不开新实例。
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — `_connect()` 加 `Dispatch` 回落
+
 ## [0.2.63] - 2026-07-30
 
 ### Fixed (P73 — 状态栏该听边车的,而不是听那个次要探测)
