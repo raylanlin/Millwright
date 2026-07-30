@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+## [0.2.66] - 2026-07-30
+
+### Fixed (P73 后续: _edge_kind 加 IGetCurveParams2 路由)
+
+`fillet_edges` 在涉及 ICurve 接口的 SolidWorks 上失败了所有三条
+分类路径（GetCurve、GetStartVertex/GetEndVertex、
+GetStartVertexParams/GetEndVertexParams），导致"read 12 edges but
+none could be classified"。
+
+第四条路由 `IGetCurveParams2()` 返回纯双精度 SAFEARRAY——
+不需要 ICurve 或 IVertex COM 对象。线段的开始/结束点和圆的
+半径直接从双精度参数中提取。
+
+这条路径在 ICurve/IVertex 接口均不可用的场合有效。
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — `_edge_kind` 新增路由 D（IGetCurveParams2）
+
 ## [0.2.65] - 2026-07-30
 
 ### Fixed (P73 补 2: Dispatch 提到 GetActiveObject 前面)

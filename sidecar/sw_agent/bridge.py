@@ -390,6 +390,35 @@ class Context:
                 return "line", d
         except Exception:  # noqa: BLE001
             pass
+
+        # Route D — IGetCurveParams2 returns curve type + parameters as SAFEARRAY of
+        # doubles. No COM ICurve / IVertex objects needed at all, which is why it
+        # works on installs where GetCurve() and GetStartVertex() both resolve to
+        # nothing (the first three routes).
+        # Params layout:
+        #   LINE:    [startPt(3), endPt(3), startU, endU, paramA, paramB]
+        #            → direction = endPt - startPt
+        #   CIRCLE:  [center(3), axis(3), radius, startU, endU, paramA, paramB]
+        #   ARC:     same layout as CIRCLE
+        #   ELLIPSE:  radius is major-axis radius
+        try:
+            params = edge.IGetCurveParams2()
+            if not params:
+                return None, None
+            # The first element is a tuple of curve-data doubles. len varies by type.
+            data = params[0] if isinstance(params, tuple) else params
+            n = len(data)
+            if n >= 9:  # LINE: 3+3+3 = at least 9
+                d = unit(data[3] - data[0], data[4] - data[1], data[5] - data[2])
+                if d:
+                    return "line", d
+            if n >= 10:  # CIRCLE/ARC/ELLIPSE
+                r = data[9] if n > 9 else data[6]
+                if isinstance(r, (int, float)) and r > 0:
+                    return "circle", r
+        except Exception:  # noqa: BLE001
+            pass
+
         return None, None
 
     def select_edges(self, which: str = "all", append=False, mark=0) -> int:
