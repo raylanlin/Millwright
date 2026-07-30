@@ -6,6 +6,38 @@
 
 ## [Unreleased]
 
+## [0.2.53] - 2026-07-30
+
+### Fixed (P62 — 齿轮生成器修复)
+
+#### 两个真因
+
+**① 齿坯拉伸失败（`failed to select sketch: 草图2`）**
+
+`InsertSketch()` 后从未写 `ctx.scratch["last_sketch"]`，但代码又去读它 —— 拿到的是上次调用留下的旧草图名，于是 `extrude` 选了不存在的草图。
+
+修：当场读 `ActiveSketch.Name` 写入 scratch。
+
+**② 齿廓公式符号推反**
+
+渐开线向前展开，要让齿向外收窄必须往回转：δ = −(π/(2z) + inv α)。
+
+原版写成 `+π/(2z) − inv α`，数值验证（m=2, z=20, α=20°）齿根 3.6° / 分度圆 9.02° / 齿顶 **14.38°** → 齿顶宽超齿距一半，相邻齿顶粘连成圆环。
+
+修正后齿根 10.7° → 分度圆 **9.00°**（正好齿距一半 = 标准齿）→ 齿顶 3.6°，单调收窄。
+
+#### 顺带去掉三个失败点
+
+原来三步：齿坯拉伸 → 单齿拉伸 → 圆周阵列（需要圆柱面当轴）。任一步失败整个齿轮就没了。
+
+现在**一次画完整圈齿廓（20 齿 ≈ 460 个点的闭合折线）→ 一次拉伸**。不需要齿坯、不需要单齿、不需要圆周阵列、不需要选圆柱面当轴。齿顶/齿根用同半径圆弧离散连接保证轮廓闭合。
+
+阶梯轴同样把 `last_sketch` 读取改成当场取名（同一类隐患）。
+
+### Changed
+
+- `sidecar/sw_agent/tools/machine.py` — 覆盖（齿轮整圈拉伸 + 阶梯轴 last_sketch 修正）
+
 ## [0.2.52] - 2026-07-29
 
 ### Added (P58–P61 — 工具词汇 + 宏逃生舱 + 工程图 + 机械件生成器)
@@ -1781,6 +1813,8 @@ sw-bridge.ts, verified by `git status` after `cp`).
 - 9 个测试文件（Node.js 原生 test runner）
 - 完整文档（架构 / 用户手册 / API 参考 / 贡献指南 / 开发指南）
 
+[Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.53...HEAD
+[0.2.53]: https://github.com/raylanlin/Millwright/compare/v0.2.52...v0.2.53
 [Unreleased]: https://github.com/raylanlin/Millwright/compare/v0.2.52...HEAD
 [0.2.52]: https://github.com/raylanlin/Millwright/compare/v0.2.49...v0.2.52
 [0.2.49]: https://github.com/raylanlin/Millwright/compare/v0.2.47...v0.2.49

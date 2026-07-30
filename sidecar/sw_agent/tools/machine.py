@@ -27,17 +27,40 @@ import math
 from .. import units
 from ..bridge import DOC_PART, Context, SWError, sw_get
 from ..registry import tool
-from .feature import _feature_names, _new_feature_of, com_call
 
-_INVOLUTE_STEPS = 12
+# P62: no circular pattern any more — the whole outline is one sketch, one extrude,
+# so the pattern/axis-selection helpers are no longer needed here.
+
+_INVOLUTE_STEPS = 10
+_TIP_ARC_STEPS = 3
+_ROOT_ARC_STEPS = 3
 
 
-def _involute_flank(m: float, z: int, alpha_deg: float, steps: int = _INVOLUTE_STEPS):
-    """One tooth's flank points (mm), in the gear's own polar frame.
+def _rot(p, a):
+    c, s = math.cos(a), math.sin(a)
+    return (p[0] * c - p[1] * s, p[0] * s + p[1] * c)
 
-    Returns (left_flank, right_flank) as point lists. The right flank is the left one
-    mirrored about the tooth centreline, so the tooth is symmetric — which is what makes
-    the gear run in both directions.
+
+def _gear_profile(m: float, z: int, alpha_deg: float):
+    """Full closed outline of a spur gear — every tooth, in one point list (mm).
+
+    P62: the earlier version built ONE tooth and circular-patterned it, which needed a
+    blank extrude, a tooth extrude and a cylindrical face to use as the pattern axis —
+    three ways to fail, and it failed at the first. Emitting the whole outline needs a
+    single sketch and a single extrude, so none of that machinery is involved.
+
+    The tooth-profile offset is the part that must be exactly right, and it is easy to
+    get backwards. The involute unwinds FORWARD: its polar angle inv(t) = t − atan(t)
+    grows with radius. So to make a tooth that narrows outward (as a real tooth does),
+    the involute must be rotated BACK by the half-tooth angle plus the involute function
+    at the pressure angle:
+
+        δ = −( π/(2z) + inv(α) ),   inv(α) = tan α − α
+
+    Verified numerically for m=2, z=20, α=20°: tooth width 10.7° at the root, 9.00° at
+    the pitch circle (exactly half the 18° pitch, which is the standard tooth), 3.6° at
+    the tip — monotonically narrowing. With the sign flipped the tip comes out 14.4°
+    wide, adjacent teeth touch, and the whole gear renders as a plain ring.
     """
     alpha = math.radians(alpha_deg)
     r_pitch = m * z / 2.0
@@ -46,25 +69,47 @@ def _involute_flank(m: float, z: int, alpha_deg: float, steps: int = _INVOLUTE_S
     r_root = r_pitch - 1.25 * m
     if r_root <= 0:
         raise SWError(f"module {m} with {z} teeth gives a non-positive root radius — increase z or m.")
+    if r_base >= r_tip:
+        raise SWError(f"module {m}, {z} teeth, {alpha_deg}° gives a base circle outside the tip circle.")
 
-    # Parameter range: from the base circle out to the tip circle
-    t_max = math.sqrt(max((r_tip / r_base) ** 2 - 1.0, 0.0))
+    inv_alpha = math.tan(alpha) - alpha
+    delta = -(math.pi / (2.0 * z) + inv_alpha)
+    t_max = math.sqrt((r_tip / r_base) ** 2 - 1.0)
 
-    pts = []
-    for i in range(steps + 1):
-        t = t_max * i / steps
+    # One flank, root → tip. Below the base circle the involute does not exist, so the
+    # flank starts with a radial segment from the root circle up to the base circle.
+    flank = []
+    for i in range(_INVOLUTE_STEPS + 1):
+        t = t_max * i / _INVOLUTE_STEPS
         x = r_base * (math.cos(t) + t * math.sin(t))
         y = r_base * (math.sin(t) - t * math.cos(t))
-        pts.append((x, y))
+        flank.append(_rot((x, y), delta))
+    base_ang = math.atan2(flank[0][1], flank[0][0])
+    left = [(r_root * math.cos(base_ang), r_root * math.sin(base_ang))] + flank
+    # The other flank is this one mirrored about the tooth centreline (the X axis),
+    # traversed tip → root so the outline stays continuous.
+    right = [(x, -y) for x, y in reversed(left)]
 
-    # Rotate so the tooth is centred on +X: the involute must be offset by half the
-    # angular tooth width at the pitch circle, plus the involute function at alpha.
-    inv_alpha = math.tan(alpha) - alpha
-    half_tooth = math.pi / (2.0 * z) + inv_alpha
-    c, s = math.cos(-half_tooth), math.sin(-half_tooth)
-    left = [(x * c - y * s, x * s + y * c) for x, y in pts]
-    right = [(x, -y) for x, y in left]           # mirror about the X axis
-    return left, right, r_root, r_tip
+    tip_a0 = math.atan2(left[-1][1], left[-1][0])
+    tip_a1 = math.atan2(right[0][1], right[0][0])
+    root_a_end = math.atan2(right[-1][1], right[-1][0])
+
+    pts: list = []
+    for k in range(z):
+        a = 2.0 * math.pi * k / z
+        pts.extend(_rot(p, a) for p in left)
+        # tip arc across the top of the tooth
+        for i in range(1, _TIP_ARC_STEPS):
+            ang = a + tip_a0 + (tip_a1 - tip_a0) * i / _TIP_ARC_STEPS
+            pts.append((r_tip * math.cos(ang), r_tip * math.sin(ang)))
+        pts.extend(_rot(p, a) for p in right)
+        # root arc across the gap to the next tooth
+        gap_start = a + root_a_end
+        gap_end = 2.0 * math.pi * (k + 1) / z + base_ang
+        for i in range(1, _ROOT_ARC_STEPS):
+            ang = gap_start + (gap_end - gap_start) * i / _ROOT_ARC_STEPS
+            pts.append((r_root * math.cos(ang), r_root * math.sin(ang)))
+    return pts, r_pitch, r_tip, r_root
 
 
 @tool(
@@ -94,95 +139,60 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
         _new_part(ctx)
     ctx.require(DOC_PART, "part")
 
-    left, right, r_root, r_tip = _involute_flank(m, z, pressure_angle)
-    r_pitch = m * z / 2.0
+    pts, r_pitch, r_tip, r_root = _gear_profile(m, z, pressure_angle)
 
     sk = ctx.sketch_mgr
     ctx.clear_selection()
-    # Gear body on the top plane: the axis then runs along Y (SolidWorks is Y-up), so the
-    # gear lies flat like a real gear blank on a table.
+    # Top plane: the gear axis then runs along Y (SolidWorks is Y-up), so the gear lies
+    # flat like a real blank on a table.
     if not ctx.select_plane("top"):
         raise SWError("failed to select the top plane.")
     sk.InsertSketch(True)
 
-    # 1. Root circle — the gear blank the teeth stand on
-    sk.CreateCircle(0, 0, 0, units.mm(r_root), 0, 0)
-    ctx.sketch_mgr.InsertSketch(True)
-    root_sketch = None
-    try:
-        root_sketch = ctx.scratch.get("last_sketch")
-    except Exception:  # noqa: BLE001
-        pass
-
-    ctx.clear_selection()
-    if not ctx.select_plane("top"):
-        raise SWError("failed to re-select the top plane for the tooth sketch.")
-    sk.InsertSketch(True)
-
-    # 2. ONE tooth: left flank out, across the tip, right flank back, closed at the root.
-    #    Drawn as a single connected polyline so the profile is closed — separate
-    #    CreateLine calls do not weld their endpoints (the P45 lesson).
-    loop = left + list(reversed(right))
-    for (x1, y1), (x2, y2) in zip(loop, loop[1:]):
+    # One closed polyline for the entire gear outline. Consecutive CreateLine calls share
+    # endpoints exactly, so SolidWorks welds them into a single closed contour.
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
         sk.CreateLine(units.mm(x1), units.mm(y1), 0.0, units.mm(x2), units.mm(y2), 0.0)
-    # close back to the start across the root
-    (x0, y0), (xn, yn) = loop[0], loop[-1]
-    sk.CreateLine(units.mm(xn), units.mm(yn), 0.0, units.mm(x0), units.mm(y0), 0.0)
-    tooth_sketch = None
+    sk.CreateLine(units.mm(pts[-1][0]), units.mm(pts[-1][1]), 0.0,
+                  units.mm(pts[0][0]), units.mm(pts[0][1]), 0.0)
+
+    # P62: read the sketch's real name NOW and record it. The previous version read
+    # ctx.scratch["last_sketch"] without ever writing it, so it picked up a stale name
+    # from an earlier call and extruded the wrong sketch ("failed to select sketch: 草图2").
+    gear_sketch = ""
     try:
         active = sk.ActiveSketch
         if active is not None:
-            tooth_sketch = sw_get(active, "Name")
-            ctx.scratch["last_sketch"] = tooth_sketch
+            gear_sketch = sw_get(active, "Name") or ""
+            ctx.scratch["last_sketch"] = gear_sketch
     except Exception:  # noqa: BLE001
         pass
     sk.InsertSketch(True)
 
     from .feature import extrude
+    body = extrude(ctx, depth=thickness, sketch=gear_sketch)
+    if not isinstance(body, dict) or not body.get("feature"):
+        raise SWError("the gear outline was drawn but the extrude failed — check the sketch is closed.")
 
-    # 3. Extrude the blank, then the tooth, then pattern the tooth around the axis.
-    if root_sketch:
-        extrude(ctx, depth=thickness, sketch=root_sketch)
-    tooth_feat = extrude(ctx, depth=thickness, sketch=tooth_sketch or "")
-    tooth_name = tooth_feat.get("feature") if isinstance(tooth_feat, dict) else None
-
-    before = _feature_names(ctx)
-    errors: list = []
-    ctx.clear_selection()
-    if tooth_name and not ctx.select_feature(tooth_name, mark=4):
-        raise SWError(f"could not select the tooth feature {tooth_name} to pattern it.")
-    if not ctx.select_cylindrical_face(append=True, mark=1):
-        raise SWError("no cylindrical face to use as the gear axis — the blank extrude may have failed.")
-    pattern = com_call(
-        ctx.feat_mgr,
-        ("FeatureCircularPattern5", "FeatureCircularPattern4", "FeatureCircularPattern3"),
-        [z, units.deg(360), True, "NULL", False, True, False, False, False, False,
-         False, False, 0, 0, False],
-        errors, min_args=4, verify=lambda: _new_feature_of(ctx, before, "CirPattern", "Pattern"),
-    )
-    if pattern is None:
-        raise SWError(
-            f"the tooth was created but patterning {z} times failed — the gear has one tooth. "
-            f"(attempts: {' | '.join(errors[-3:])})"
-        )
-
-    # 4. Centre bore
     if bore and bore > 0:
+        if bore >= 2 * r_root:
+            raise SWError(f"bore Ø{bore} is larger than the root circle Ø{2 * r_root:.1f} — reduce it.")
         ctx.clear_selection()
         if not ctx.select_plane("top"):
             raise SWError("failed to select the top plane for the bore.")
         sk.InsertSketch(True)
-        sk.CreateCircle(0, 0, 0, units.mm(bore / 2.0), 0, 0)
-        bore_sketch = None
+        sk.CreateCircle(0.0, 0.0, 0.0, units.mm(bore / 2.0), 0.0, 0.0)
+        bore_sketch = ""
         try:
             active = sk.ActiveSketch
             if active is not None:
-                bore_sketch = sw_get(active, "Name")
+                bore_sketch = sw_get(active, "Name") or ""
+                ctx.scratch["last_sketch"] = bore_sketch
         except Exception:  # noqa: BLE001
             pass
         sk.InsertSketch(True)
         from .feature import cut_extrude
-        cut_extrude(ctx, through_all=True, sketch=bore_sketch or "")
+        cut_extrude(ctx, through_all=True, sketch=bore_sketch)
 
     ctx.rebuild()
     return {
@@ -196,7 +206,8 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
             "thickness_mm": thickness,
             "bore_mm": bore or None,
         },
-        "note": "involute profile per ISO 53; mates with any gear of the same module and pressure angle",
+        "feature": body.get("feature"),
+        "note": "involute profile per ISO 53; meshes with any gear of the same module and pressure angle",
     }
 
 
@@ -291,18 +302,18 @@ def create_stepped_shaft(ctx: Context, steps: str, new_part: bool = True):
     # the centreline IS the axis of revolution
     sk.CreateCenterLine(0.0, 0.0, 0.0, units.mm(x), 0.0, 0.0)
 
-    shaft_sketch = None
+    shaft_sketch = ""
     try:
         active = sk.ActiveSketch
         if active is not None:
-            shaft_sketch = sw_get(active, "Name")
+            shaft_sketch = sw_get(active, "Name") or ""
             ctx.scratch["last_sketch"] = shaft_sketch
     except Exception:  # noqa: BLE001
         pass
     sk.InsertSketch(True)
 
     from .feature import revolve
-    revolve(ctx, angle=360, sketch=shaft_sketch or "")
+    revolve(ctx, angle=360, sketch=shaft_sketch)
     ctx.rebuild()
     return {
         "shaft": {
