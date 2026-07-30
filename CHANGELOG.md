@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 仓库文档中英双语化（与 README.md / README.zh-CN.md 同一模式）：每个文档默认英文版，`.zh-CN.md` 为中文版。
+  - 根目录：`CLAUDE.md` / `CLAUDE.zh-CN.md`
+  - `docs/`：`CONTRIBUTING` / `ARCHITECTURE` / `DEVELOPMENT` / `USER-GUIDE` / `API-REFERENCE`（各双版本）
+  - `.github/` 模板：`PULL_REQUEST_TEMPLATE` / `ISSUE_TEMPLATE/bug_report` / `ISSUE_TEMPLATE/feature_request`（各双版本）
+- `CODE_OF_CONDUCT.md` / `SECURITY.md` / `AUTHORS.md` / `CHANGELOG.md` 保持原样（前者为中英混排标准文本，后两者无需双语）
+
 ## [0.2.69] - 2026-07-31
 
 ### Fixed (P75-77 合包: 边分类 + 零件堆积 + 全量 API 核对)
