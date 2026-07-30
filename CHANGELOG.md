@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+### Added (P63 — CI / 打包门禁加固)
+
+发版时的两道质量门是虚设的：tag 推送不触发 ci.yml（注释明确写了），而 build.yml 里 lint/test 都是 `continue-on-error: true` —— 所以发版时测试失败照样出包。同时 sidecar 走 extraResources，TS 工具链一行都不读它，P36 那次 Python 语法错就是这么进了装机版。
+
+三处改动落位：
+
+- **build.yml 门禁实化** —— Lint/Test 去 `continue-on-error`，新增 Sidecar syntax check + Sidecar lint + tests，Typecheck/Lint/Test 全部 fail the build
+- **两个 workflow 都加 Python 语法检查** —— `python -m compileall -q sidecar/sw_agent` 排第一步，几秒就能拦下 P36 那类语法错误
+- **build.yml 新增 Verify packaged payload** —— 校验打包后必需文件齐全（sidecar/python.exe/win32com/PIL）+ 包内 sidecar 与仓库一致 + installer 文件名带正确版本号。三类历史事故（P31 旧 sidecar / 缺 Python 运行时 / electron-builder 缓存导致版本错）全在这一步现形
+
+顺带：删了 Debug version + cache state 那步（注释里自己写着 v0.2.13 后该删）；`prepare-python.ps1` 移到质量门之后（门禁不过就别浪费时间）。
+
+### Added
+
+- `scripts/precommit-check.sh` 新增 `--ci-only` 旗标：跳过 package.json bump + CHANGELOG [V] 段两项检查，其余全跑（污染/compileall/握手）。白名单：`.github/**`、`scripts/*.ps1`、`scripts/*.sh`、`.ruff.toml`、`.eslintrc*`、`.prettierrc*`、`tsconfig*.json`；出现 `src/`、`sidecar/(非 *.md)`、`package.json`、`electron-builder.yml` 任一即失败。与 `--docs-only` 互斥，同时传报错。
+
 ## [0.2.53] - 2026-07-30
 
 ### Fixed (P62 — 齿轮生成器修复)

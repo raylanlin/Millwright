@@ -5,6 +5,7 @@ name: CI
 #   - ci.yml   → 轻量、快(ubuntu)、真失败就拦,给 PR 即时反馈
 #   - build.yml → 重(windows + NSIS 打包),只负责出安装包 / 发版
 # 注:tag 推送不在此触发(交给 build.yml 出 Release),避免重复跑。
+#     ——正因如此,build.yml 必须自带一份同等强度的门禁,否则 tag 发版是无人看守的。
 
 on:
   pull_request:
@@ -38,9 +39,20 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       # 仓库未提交 package-lock.json,用 npm install(与 build.yml 保持一致)
       - name: Install dependencies
         run: npm install
+
+      # P63: sidecar 语法检查排在最前 —— 它最快(几秒)、也最容易被漏掉。
+      # sidecar 走 extraResources,TS 工具链一行都不看它;一个缩进错误就能让
+      # 装好的应用静默回退到 VBS 引擎(P36 就是这么进的装机版)。
+      - name: Sidecar syntax check
+        run: python -m compileall -q sidecar/sw_agent
 
       # 三个 tsconfig 全量类型检查(main / preload / renderer),这是最有价值的门
       - name: Typecheck

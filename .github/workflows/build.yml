@@ -21,6 +21,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Setup Python (for the sidecar syntax gate)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install dependencies
         shell: pwsh
         run: |
@@ -35,38 +40,39 @@ jobs:
           if (Test-Path "$env:USERPROFILE\.cache\electron-builder") { Remove-Item -Recurse -Force "$env:USERPROFILE\.cache\electron-builder" }
           npm install
 
-      # DEBUG: print package.json version + electron-builder cache state so we can
-      # verify the build is reading the right source. Remove once v0.2.13 name
-      # is confirmed.
-      - name: Debug version + cache state
-        shell: pwsh
-        run: |
-          Write-Host "=== package.json ==="
-          Get-Content package.json | Select-String -Pattern '"version"'
-          Write-Host "=== electron-builder Cache (LOCALAPPDATA) ==="
-          if (Test-Path "$env:LOCALAPPDATA\electron-builder\Cache") {
-            Get-ChildItem "$env:LOCALAPPDATA\electron-builder\Cache" | Select-Object -First 5
-          } else { Write-Host "  (empty)" }
-          Write-Host "=== electron-builder Cache (USERPROFILE) ==="
-          if (Test-Path "$env:USERPROFILE\.cache\electron-builder") {
-            Get-ChildItem "$env:USERPROFILE\.cache\electron-builder" | Select-Object -First 5
-          } else { Write-Host "  (empty)" }
+      # ===== P63: real quality gates =====
+      # A tag push does NOT trigger ci.yml (see the note there), and lint/test here were
+      # continue-on-error — so releases went out entirely unguarded. These now FAIL the
+      # build: a broken release costs the user an install/uninstall cycle to discover.
 
-      # P12: download the bundled Python embeddable + install pywin32 into
+      # Python syntax first — the sidecar ships as extraResources, so nothing else in the
+      # toolchain reads it. One bad indent silently degrades the installed app to the VBS
+      # fallback engine, which is exactly how P36 reached a released installer.
+      - name: Sidecar syntax check
+        run: python -m compileall -q sidecar/sw_agent
+
+      - name: Sidecar lint + tests
+        run: |
+          pip install --quiet ruff pytest
+          ruff check sidecar/
+          pytest sidecar/tests -q
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      # P12: download the bundled Python embeddable + install pywin32/pillow into
       # vendor/python/ before electron-builder runs. Idempotent — safe to re-run.
       # This is a build-time network op; end users have no network requirement.
       - name: Prepare bundled Python runtime
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: ./scripts/prepare-python.ps1
-
-      - name: Lint
-        run: npm run lint
-        continue-on-error: true
-
-      - name: Test
-        run: npm test
-        continue-on-error: true
 
       - name: Build
         run: npm run build
@@ -82,6 +88,61 @@ jobs:
         run: npm run pack
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # P63: verify what actually landed in the package. We have shipped an installer
+      # whose bundled sidecar was stale, and another with no Python runtime at all —
+      # both only surfaced after a user installed it. This check takes seconds and makes
+      # that class of accident impossible. It also confirms the installer filename carries
+      # the version from package.json (the old electron-builder cache bug).
+      - name: Verify packaged payload
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $res = 'release/win-unpacked/resources'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Write-Host "package.json version: $version"
+
+          $required = @(
+            "$res/sidecar/sw_agent/server.py",
+            "$res/sidecar/sw_agent/bridge.py",
+            "$res/sidecar/sw_agent/registry.py",
+            "$res/sidecar/sw_agent/tools/feature.py",
+            "$res/sidecar/sw_agent/tools/sketch.py",
+            "$res/sidecar/sw_agent/tools/batch.py",
+            "$res/sidecar/sw_agent/tools/drawing.py",
+            "$res/sidecar/sw_agent/tools/machine.py",
+            "$res/python/python.exe",
+            "$res/python/Lib/site-packages/win32com",
+            "$res/python/Lib/site-packages/PIL"
+          )
+          $missing = @($required | Where-Object { -not (Test-Path $_) })
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Packaged payload is incomplete:"
+            $missing | ForEach-Object { Write-Host "::error::  missing $_" }
+            exit 1
+          }
+          Write-Host "sidecar + bundled Python runtime: OK"
+
+          # the sidecar inside the package must match the sidecar in the repo
+          $repoPy = Get-ChildItem sidecar/sw_agent -Recurse -Filter *.py | ForEach-Object { $_.Name } | Sort-Object
+          $pkgPy = Get-ChildItem "$res/sidecar/sw_agent" -Recurse -Filter *.py | ForEach-Object { $_.Name } | Sort-Object
+          $diff = Compare-Object $repoPy $pkgPy
+          if ($diff) {
+            Write-Host "::error::Packaged sidecar differs from the repo:"
+            $diff | ForEach-Object { Write-Host "::error::  $($_.SideIndicator) $($_.InputObject)" }
+            exit 1
+          }
+          Write-Host "packaged sidecar matches the repo ($($repoPy.Count) modules): OK"
+
+          # the installer must be named for the version we just built
+          $exe = Get-ChildItem release/*.exe | Select-Object -First 1
+          Write-Host "installer: $($exe.Name)"
+          if ($exe.Name -notmatch [regex]::Escape($version)) {
+            Write-Host "::error::Installer name lacks version $version — stale electron-builder cache?"
+            exit 1
+          }
+          Write-Host "installer name carries $version: OK"
 
       - name: Upload installer artifact
         if: startsWith(github.ref, 'refs/tags/')
