@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [0.2.55] - 2026-07-30
+
+### Fixed (P66 — Verify packaged payload PowerShell ParserError)
+
+v0.2.54 Build 在 Verify packaged payload 步骤 X 在 ParserError：脚本里 `Write-Host "installer name carries $version: OK"` —— PowerShell 把 `$version:` 当作 scope 限定符（像 `$env: $global:`），紧跟冒号时报错 "Variable reference is not valid"。
+
+P63 加进 Verify packaged payload 时三处用了 `$version` 字面量，三处都修成 `${version}` 包起来避免歧义。门禁把自己拦住了 —— 一个语法错的校验步骤如果静默通过，比没有校验更糟，所以这次直接 bump v0.2.55 重发。
+
+### Changed
+
+- `.github/workflows/build.yml` —— `Verify packaged payload` 步骤三处 `$version` 改成 `${version}`
+
 ## [0.2.54] - 2026-07-30
 
 ### Added (P65 + P64 — 草图几何:真圆弧、防推断吸附、失败不留残骸)

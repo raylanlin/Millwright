@@ -101,7 +101,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $res = 'release/win-unpacked/resources'
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          Write-Host "package.json version: $version"
+          Write-Host "package.json version: ${version}"
 
           $required = @(
             "$res/sidecar/sw_agent/server.py",
@@ -139,10 +139,10 @@ jobs:
           $exe = Get-ChildItem release/*.exe | Select-Object -First 1
           Write-Host "installer: $($exe.Name)"
           if ($exe.Name -notmatch [regex]::Escape($version)) {
-            Write-Host "::error::Installer name lacks version $version — stale electron-builder cache?"
+            Write-Host "::error::Installer name lacks version ${version} — stale electron-builder cache?"
             exit 1
           }
-          Write-Host "installer name carries $version: OK"
+          Write-Host "installer name carries ${version}: OK"
 
       - name: Upload installer artifact
         if: startsWith(github.ref, 'refs/tags/')
