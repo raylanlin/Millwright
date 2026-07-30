@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import type { ThemeTokens } from '../themes';
 import type { ScriptResult } from '../../shared/types';
-import { useT } from '../i18n/LocaleContext';
+import { useLocale } from '../i18n/LocaleContext';
 import {
   SW_TOOLS,
-  CATEGORY_LABELS,
+  categoryLabel,
+  toolDescription,
   getToolsByCategory,
   type SWToolDefinition,
 } from '../../shared/sw-tools';
@@ -23,7 +24,8 @@ interface PreviewState {
 }
 
 export function ToolsList({ t }: Props) {
-  const tr = useT();
+  const { t: tr, locale } = useLocale();
+  const lc = locale === 'zh' ? 'zh' : 'en';
   const grouped = getToolsByCategory();
   const total = SW_TOOLS.length;
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -79,13 +81,13 @@ export function ToolsList({ t }: Props) {
                 textTransform: 'uppercase',
               }}
             >
-              {CATEGORY_LABELS[cat as keyof typeof CATEGORY_LABELS]}
+              {categoryLabel(cat, lc)}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
               {tools.map((tool) => (
                 <button
                   key={tool.name}
-                  title={tool.description}
+                  title={toolDescription(tool, lc)}
                   onClick={() => handleGenerate(tool)}
                   style={{
                     padding: '7px 12px',
@@ -144,7 +146,8 @@ interface PreviewProps {
 }
 
 function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps) {
-  const tr = useT();
+  const { t: tr, locale } = useLocale();
+  const lc = locale === 'zh' ? 'zh' : 'en';
   const { tool, code, executing, result } = preview;
   return (
     <div
@@ -185,7 +188,7 @@ function ScriptPreviewModal({ t, preview, onClose, onRun, onCopy }: PreviewProps
               {tool.name}
             </div>
             <div style={{ fontSize: 12, color: t.textMuted, marginTop: 3 }}>
-              {tool.description} · {tr('tools.vbaPreview')}
+              {toolDescription(tool, lc)} · {tr('tools.vbaPreview')}
             </div>
           </div>
           <button

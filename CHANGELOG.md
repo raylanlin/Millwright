@@ -6,6 +6,23 @@
 
 ## [Unreleased]
 
+## [0.2.58] - 2026-07-30
+
+### Fixed (P68 — Tools 页面英文化补齐)
+
+英文界面下 Tools 页仍显示中文：分类标题（文档管理 / 草图 / 特征 / 装配体 / 导出 / 批量操作 / 查询）和 26 个工具的描述。
+
+根因：`src/shared/sw-tools.ts` 里 `CATEGORY_LABELS` 和每条 `description` 都是硬编码中文，`ToolsList` 直接取用。旁边的 Automations 页早就本地化了，唯独这份数据漏了。
+
+修法：不动 `description` 字段的类型（主进程用它当能力清单，改类型会牵连），而是**新增**并列字段 `descriptionEn`，26 条全部补齐；新增 `CATEGORY_LABELS_EN`；新增 `categoryLabel()` / `toolDescription()` 两个取值函数。`ToolsList` 改用这两个函数（三处：分类标题、按钮 title、预览弹窗副标题）。
+
+工具名本身（`create_part` 等）是 API 标识符，不翻译。
+
+### Changed
+
+- `src/shared/sw-tools.ts` — `descriptionEn` ×27 + `CATEGORY_LABELS_EN` + `categoryLabel()` / `toolDescription()` 两个取值函数
+- `src/renderer/components/ToolsList.tsx` — 改用 locale 取值（分类标题 / 按钮 title / 预览弹窗副标题三处）
+
 ## [0.2.57] - 2026-07-30
 
 ### Fixed (P67 — 边分类兜底 + 面草图切除 + 轮廓尺寸自检)
