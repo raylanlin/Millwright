@@ -391,31 +391,30 @@ class Context:
         except Exception:  # noqa: BLE001
             pass
 
-        # Route D — IGetCurveParams2 returns curve type + parameters as SAFEARRAY of
-        # doubles. No COM ICurve / IVertex objects needed at all, which is why it
-        # works on installs where GetCurve() and GetStartVertex() both resolve to
-        # nothing (the first three routes).
-        # Params layout:
-        #   LINE:    [startPt(3), endPt(3), startU, endU, paramA, paramB]
-        #            → direction = endPt - startPt
-        #   CIRCLE:  [center(3), axis(3), radius, startU, endU, paramA, paramB]
-        #   ARC:     same layout as CIRCLE
-        #   ELLIPSE:  radius is major-axis radius
+        # Route D — IEdge.IGetCurve() returns curve data as SAFEARRAY of doubles.
+        # No COM ICurve / IVertex interfaces needed (they resolve to nothing on some
+        # SolidWorks installs). The first element is the curve type:
+        #   0 = LINE:   [0, startPt(3), endPt(3)] -> direction = endPt - startPt
+        #   1 = CIRCLE: [1, center(3), axis(3), radius]
+        #   2 = ELLIPSE, 3 = PARABOLA, 4 = SPLINE
+        # IGetCurveParams2 is on ICurve (not IEdge) and needs GetCurve() first,
+        # which Route A already failed on.
         try:
-            params = edge.IGetCurveParams2()
-            if not params:
+            curve = edge.IGetCurve()
+            if not curve:
                 return None, None
-            # The first element is a tuple of curve-data doubles. len varies by type.
-            data = params[0] if isinstance(params, tuple) else params
-            n = len(data)
-            if n >= 9:  # LINE: 3+3+3 = at least 9
-                d = unit(data[3] - data[0], data[4] - data[1], data[5] - data[2])
+            data = curve[0] if isinstance(curve, tuple) and len(curve) > 0 else curve
+            if not data or len(data) < 2:
+                return None, None
+            typ = int(data[0]) if data[0] is not None else None
+            if typ == 0 and len(data) >= 7:  # LINE
+                d = unit(data[4] - data[1], data[5] - data[2], data[6] - data[3])
                 if d:
                     return "line", d
-            if n >= 10:  # CIRCLE/ARC/ELLIPSE
-                r = data[9] if n > 9 else data[6]
-                if isinstance(r, (int, float)) and r > 0:
-                    return "circle", r
+            if typ == 1 and len(data) >= 8:  # CIRCLE
+                radius = data[7]
+                if isinstance(radius, (int, float)) and radius > 0:
+                    return "circle", radius
         except Exception:  # noqa: BLE001
             pass
 

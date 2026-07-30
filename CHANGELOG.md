@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.2.67] - 2026-07-30
+
+### Fixed (_edge_kind Route D: IGetCurveParams2 → IEdge.IGetCurve)
+
+v0.2.66 的路由 D 用了 `IGetCurveParams2()`——这是 **ICurve** 接口的方法,
+需要先 `edge.GetCurve()` 拿到 ICurve,而 GetCurve 在 Route A 已经失败了,
+所以 Route D 同样全灭,12 条边仍为 unclassified。
+
+正确方法: `IEdge.IGetCurve()`,直接在 IEdge 上调。返回 SAFEARRAY,
+第一个双精度数是曲线类型(0=直线, 1=圆, ...),后续是几何参数。
+不走 COM ICurve / IVertex 接口,应在这台 SW 上跑通。
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — Route D: IGetCurveParams2 → IEdge.IGetCurve
+
 ## [0.2.66] - 2026-07-30
 
 ### Fixed (P73 后续: _edge_kind 加 IGetCurveParams2 路由)
