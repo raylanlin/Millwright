@@ -49,8 +49,9 @@ def sw_diagnostics(ctx: Context):
         "tried": state.get("tried", []),
         "note": (
             "ok — constants loaded from the type library" if loaded
-            else "type library did not generate, but the built-in enum table supplies the "
-                 "same values, so CreateDefinition is still usable" if definition_ok
+            else "the type library is not generated, which is FINE: the built-in enum table "
+                 "supplies the same values, so CreateDefinition is usable. Generation is "
+                 "deliberately not attempted at startup (it starved the COM connection)" if definition_ok
             else "NEITHER the type library nor the enum table is available — cut/fillet "
                  "must fall back to argument-count search"
         ),
