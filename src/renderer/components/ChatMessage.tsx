@@ -13,6 +13,8 @@ import { ToolCallGroup } from './ToolCallGroup';
 import { ConfirmCard } from './ConfirmCard';
 import { ThinkingBlock } from './ThinkingBlock';
 import { PendingTool } from './PendingTool';
+import { useState } from 'react';
+import { messageToText, copyText } from '../session-export';
 
 interface Props {
   msg: ChatMsg;
@@ -43,6 +45,11 @@ export function ChatMessage({
   }
 
   const hasSteps = !isUser && !!msg.steps && msg.steps.length > 0;
+  // P66: copy affordance per message. Hidden until hover so it never competes with the
+  // content, and it copies the READABLE form (prose + tool calls with their arguments
+  // and results) rather than the raw object — the tool record is the part worth keeping.
+  const [hover, setHover] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // P48: an assistant message with nothing in it yet (the placeholder pushed on send,
   // or a round that only ran tools) used to paint an empty grey bubble.
@@ -50,14 +57,23 @@ export function ChatMessage({
 
   return (
     <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => { setHover(false); setCopied(false); }}
       style={{
         display: 'flex',
+        alignItems: 'flex-start',
+        gap: 6,
         justifyContent: isUser ? 'flex-end' : 'flex-start',
         marginBottom: 14,
         paddingLeft: isUser ? 60 : 0,
         paddingRight: isUser ? 0 : 60,
       }}
     >
+      {isUser && (
+        <CopyButton t={t} visible={hover} copied={copied} onCopy={async () => {
+          if (await copyText(messageToText(msg))) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
+        }} />
+      )}
       <div
         style={{
           maxWidth: '85%',
@@ -129,7 +145,44 @@ export function ChatMessage({
         {/* P22: prose interleaved with collapsible tool-call groups */}
         {hasSteps ? renderSteps(msg.steps!, t) : msg.content}
       </div>
+      {!isUser && (
+        <CopyButton t={t} visible={hover} copied={copied} onCopy={async () => {
+          if (await copyText(messageToText(msg))) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
+        }} />
+      )}
     </div>
+  );
+}
+
+/** P66: small, quiet copy button — only visible while the message is hovered. */
+function CopyButton({
+  t, visible, copied, onCopy,
+}: { t: ThemeTokens; visible: boolean; copied: boolean; onCopy: () => void }) {
+  return (
+    <button
+      onClick={onCopy}
+      title={copied ? '已复制' : '复制这条消息'}
+      style={{
+        marginTop: 9, width: 24, height: 24, flexShrink: 0,
+        borderRadius: 6, border: 'none', cursor: 'pointer', padding: 0,
+        background: 'transparent', color: copied ? t.successText : t.textMuted,
+        opacity: visible || copied ? 1 : 0,
+        transition: 'opacity 0.12s',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'inherit',
+      }}
+    >
+      {copied ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <path d="M20 6L9 17l-5-5" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 012-2h8" />
+        </svg>
+      )}
+    </button>
   );
 }
 

@@ -6,6 +6,37 @@
 
 ## [Unreleased]
 
+## [0.2.56] - 2026-07-30
+
+### Added (P66 — 一键复制 + 会话导出)
+
+一次建模跑完，**真正有价值的是那份记录** —— 哪个工具、什么参数、SolidWorks 回了什么。现在只能一张张展开折叠卡片去看，复制不出来。
+
+#### ① 每条消息一键复制
+
+消息悬停时（用户消息左侧、助手消息右侧）出现一个小复制按钮，点击变成对勾。复制内容是**可读形式**：叙述文字 + 工具调用（含参数 JSON 和返回结果），不是原始对象。思考过程默认不含（太长，事后基本没用）。
+
+#### ② 会话导出菜单（App.tsx 工具栏）
+
+三个动作：
+- **导出 Markdown** —— 按角色分节、带时间戳、工具调用是缩进代码块
+- **导出 JSON** —— 完整 `AgentStep` 结构，不做任何扁平化
+- **复制全部到剪贴板** —— 同 Markdown 内容
+
+一个勾选项「包含思考过程」，默认关。工具调用默认**包含** —— 那才是这份记录的意义。空会话时菜单项灰掉。
+
+导出用临时 object URL 触发下载，不走主进程。文件名 `millwright-YYYYMMDD-HHMM.{md,json}`。
+
+### Added
+
+- `src/renderer/session-export.ts` — 消息/会话 → Markdown / JSON + 剪贴板 + 下载
+- `src/renderer/components/ExportSessionMenu.tsx` — 导出下拉菜单
+
+### Changed
+
+- `src/renderer/components/ChatMessage.tsx` — 悬停复制按钮（覆盖）
+- `src/renderer/App.tsx` — 工具栏挂 `ExportSessionMenu`（手改）
+
 ## [0.2.55] - 2026-07-30
 
 ### Fixed (P66 — Verify packaged payload PowerShell ParserError)

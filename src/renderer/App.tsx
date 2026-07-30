@@ -16,6 +16,7 @@ import { Sidebar, type TabKey } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ChatInput, type ChatInputHandle } from './components/ChatInput';
 import { SettingsModal } from './components/SettingsModal';
+import { ExportSessionMenu } from './components/ExportSessionMenu';
 import { Automations } from './components/Automations';
 import { ToolsList } from './components/ToolsList';
 import { ErrorBanner } from './components/ErrorBanner';
@@ -271,21 +272,24 @@ export default function App() {
             {tabTitle[activeTab]}
           </span>
           {activeTab === 'chat' && messages.length > 1 && (
-            <button
-              onClick={handleClear}
-              style={{
-                background: 'none',
-                border: `1px solid ${t.cardBorder}`,
-                color: t.textMuted,
-                padding: '4px 10px',
-                borderRadius: 5,
-                cursor: 'pointer',
-                fontSize: 11,
-                fontFamily: 'inherit',
-              }}
-            >
-              {tr('app.clearChat')}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ExportSessionMenu messages={messages} t={t} />
+              <button
+                onClick={handleClear}
+                style={{
+                  background: 'none',
+                  border: `1px solid ${t.cardBorder}`,
+                  color: t.textMuted,
+                  padding: '4px 10px',
+                  borderRadius: 5,
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontFamily: 'inherit',
+                }}
+              >
+                {tr('app.clearChat')}
+              </button>
+            </div>
           )}
         </header>
 
