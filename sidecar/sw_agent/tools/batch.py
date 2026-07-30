@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+import json
+
 from ..bridge import Context, SWError
 from ..registry import TOOLS, call, tool
 
@@ -44,10 +46,23 @@ _FORBIDDEN = {
     params={
         "steps": {
             "type": "array",
+            # P78: the element schema MUST be declared. Without "items" the provider's
+            # function-calling layer has no idea the array holds objects, and some of them
+            # flatten each element to an empty string on the way out — every submission
+            # arrived as ["", "", ""] and failed with "step 1 is not an object", three
+            # times in a row, until the model gave up and fell back to single calls.
+            "items": {
+                "type": "object",
+                "properties": {
+                    "tool": {"type": "string", "description": "Tool name, e.g. start_sketch / sketch_rectangle / extrude"},
+                    "params": {"type": "object", "description": "That tool's arguments, mm/degrees as usual"},
+                },
+                "required": ["tool"],
+            },
             "desc": 'Ordered feature steps, each {"tool": "<tool name>", "params": {...}} — '
                     'e.g. [{"tool":"start_sketch","params":{"plane":"top"}}, '
-                    '{"tool":"sketch_circle","params":{"radius":20}}, '
-                    '{"tool":"extrude","params":{"depth":20}}]',
+                    '{"tool":"sketch_rectangle","params":{"x":0,"y":0,"width":80,"height":50}}, '
+                    '{"tool":"extrude","params":{"depth":10}}]',
         },
         "part": {
             "type": "string",
@@ -57,7 +72,58 @@ _FORBIDDEN = {
     },
     category="feature", destructive=True,
 )
-def build_part(ctx: Context, steps: list, part: str = ""):
+def _coerce_step(raw, index: int):
+    """One step, from whatever shape the provider actually delivered.
+
+    P78: providers reshape nested arguments in incompatible ways — some send the object,
+    some a JSON string per element, some the whole array as one JSON string. Rejecting
+    everything but the canonical form meant a correct request from the model could still
+    fail three times running. Accept what is unambiguous; only complain when the intent
+    is genuinely unreadable.
+    """
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise SWError(
+                f"step {index} arrived empty — the nested step objects were lost in transit. "
+                "Resubmit with each step as an object, e.g. "
+                '{"tool":"extrude","params":{"depth":10}}'
+            )
+        try:
+            raw = json.loads(text)
+        except ValueError:
+            # A bare tool name with no arguments is unambiguous enough to honour.
+            if text.replace("_", "").isalnum():
+                return {"tool": text, "params": {}}
+            raise SWError(f"step {index} is not valid JSON: {text[:80]}") from None
+    if not isinstance(raw, dict):
+        raise SWError(f"step {index} is not an object: {raw!r}")
+
+    name = raw.get("tool") or raw.get("name")
+    if not name:
+        raise SWError(f'step {index} has no "tool" field: {raw!r}')
+    params = raw.get("params") or raw.get("args") or raw.get("arguments") or {}
+    if isinstance(params, str):
+        try:
+            params = json.loads(params) if params.strip() else {}
+        except ValueError:
+            raise SWError(f"step {index} ({name}) has unparseable params: {params[:80]}") from None
+    if not isinstance(params, dict):
+        raise SWError(f"step {index} ({name}) params must be an object, got {params!r}")
+    # Tool arguments the model may have put alongside "tool" instead of inside "params"
+    for k, v in raw.items():
+        if k not in ("tool", "name", "params", "args", "arguments") and k not in params:
+            params[k] = v
+    return {"tool": name, "params": params}
+
+
+def build_part(ctx: Context, steps, part: str = ""):
+    # The whole array may itself arrive as one JSON string
+    if isinstance(steps, str):
+        try:
+            steps = json.loads(steps)
+        except ValueError:
+            raise SWError(f"steps is not valid JSON: {steps[:120]}") from None
     if not isinstance(steps, list) or not steps:
         raise SWError("steps must be a non-empty array of {tool, params} objects.")
     if len(steps) > MAX_STEPS:
@@ -68,12 +134,9 @@ def build_part(ctx: Context, steps: list, part: str = ""):
     # than not starting. Everything checkable statically is checked up front.
     plan = []
     for i, raw in enumerate(steps):
-        if not isinstance(raw, dict):
-            raise SWError(f"step {i + 1} is not an object: {raw!r}")
-        name = raw.get("tool") or raw.get("name")
-        params = raw.get("params") or raw.get("arguments") or {}
-        if not name:
-            raise SWError(f'step {i + 1} has no "tool" field.')
+        # P78: normalise whatever shape the provider delivered before validating it
+        step = _coerce_step(raw, i + 1)
+        name, params = step["tool"], step["params"]
         if name in _FORBIDDEN:
             raise SWError(
                 f"step {i + 1}: {name} cannot be used inside build_part "

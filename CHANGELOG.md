@@ -6,13 +6,25 @@
 
 ## [Unreleased]
 
+## [0.2.70] - 2026-07-31
+
+### Fixed (P78 — build_part 参数被抹空的根因:schema 缺 items 声明)
+
+上一轮日志里模型三次提交 build_part 都失败,参数到达时变成 `["", "", ""]`,
+第四步放弃批量退回单步调用——零件7的来路。
+
+**根因**:`steps` 参数声明成了 `type: "array"` 但没写 `items`。
+厂商 function-calling 层依据 schema 序列化参数,看到一个无元素类型的数组,
+就把每个嵌套对象压成了空字符串。
+
+**修法(两层)**:
+① 补 `items` schema(治本):`{type:object, properties:{tool, params}, required:[tool]}`
+② 容忍被压平的形式(防复发):新增 `_coerce_step()` — 解析 JSON 字符串、
+收拢平铺参数、接受多种键名,只在意图不可读时才报错。
+
 ### Changed
 
-- 仓库文档中英双语化（与 README.md / README.zh-CN.md 同一模式）：每个文档默认英文版，`.zh-CN.md` 为中文版。
-  - 根目录：`CLAUDE.md` / `CLAUDE.zh-CN.md`
-  - `docs/`：`CONTRIBUTING` / `ARCHITECTURE` / `DEVELOPMENT` / `USER-GUIDE` / `API-REFERENCE`（各双版本）
-  - `.github/` 模板：`PULL_REQUEST_TEMPLATE` / `ISSUE_TEMPLATE/bug_report` / `ISSUE_TEMPLATE/feature_request`（各双版本）
-- `CODE_OF_CONDUCT.md` / `SECURITY.md` / `AUTHORS.md` / `CHANGELOG.md` 保持原样（前者为中英混排标准文本，后两者无需双语）
+- `sidecar/sw_agent/tools/batch.py` — build_part steps 加 items schema + _coerce_step() 容错
 
 ## [0.2.69] - 2026-07-31
 
