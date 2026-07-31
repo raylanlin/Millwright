@@ -42,6 +42,32 @@ const METRIC_APIS = [
 /** A literal this large can only be a mm value fed to a metre API (1 m = a metre-wide part). */
 const SUSPICIOUS_MM = 1.0;
 
+/**
+ * P79: a length that big is not a length at all — it is an option bitmask.
+ *
+ * The check used to flag EVERY large literal near a metric API, so
+ * FeatureFillet3(196609, 0.01, …) was rejected for "passing 196609 millimetres" when
+ * 196609 is swFilletFeature flags and 0.01 is the actual radius. The model wrote correct
+ * code twice and was refused both times, which is worse than not checking: it teaches the
+ * model to distrust a guard that is usually right.
+ *
+ * 10 metres is already an implausible dimension for a SolidWorks part, and every real
+ * mm-for-metres slip we have seen was a plain part dimension (40, 80, 194…). Anything
+ * beyond this is left alone.
+ */
+const IMPLAUSIBLE_AS_MM = 10_000;
+
+/** Argument positions that are flags/enums rather than lengths, per API. */
+const FLAG_ARGS: Record<string, number[]> = {
+  FeatureFillet: [0],        // options bitmask
+  FeatureChamfer: [0],
+  FeatureExtrusion: [0, 1, 2, 3, 4],   // Sd, Flip, Dir, T1, T2 — lengths start at D1
+  FeatureCut: [0, 1, 2, 3, 4],
+  FeatureRevolve: [0],
+  InsertRefPlane: [0, 2, 4],  // constraint types interleave with values
+  SetSystemValue: [],
+};
+
 function stripStrings(line: string): string {
   return line.replace(/"(?:[^"]|"")*"/g, '""');
 }
@@ -70,10 +96,18 @@ export function lintMacro(code: string): MacroLintResult {
       const re = new RegExp(`\\b${api}\\d*\\s*\\(([^)]*)\\)`, 'i');
       const m = re.exec(line);
       if (!m) continue;
+      const flagPositions = FLAG_ARGS[api] ?? [];
       const bad = m[1]
         .split(',')
-        .map((a) => a.trim())
-        .filter((a) => /^-?\d+(\.\d+)?$/.test(a) && Math.abs(parseFloat(a)) > SUSPICIOUS_MM);
+        .map((a, idx) => ({ a: a.trim(), idx }))
+        // P79: skip the argument slots that carry flags/enums rather than lengths
+        .filter(({ idx }) => !flagPositions.includes(idx))
+        .filter(({ a }) => /^-?\d+(\.\d+)?$/.test(a))
+        .map(({ a }) => a)
+        .filter((a) => {
+          const v = Math.abs(parseFloat(a));
+          return v > SUSPICIOUS_MM && v < IMPLAUSIBLE_AS_MM;
+        });
       if (bad.length) {
         issues.push({
           severity: 'error',

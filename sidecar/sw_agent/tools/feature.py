@@ -246,16 +246,12 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
         to guess (every positional arity of FeatureCut3/4 raised DISP_E_PARAMNOTOPTIONAL
         on this install), and it is the API SolidWorks documents for automation."""
         try:
-            # P69: the enum value comes from the hard-coded table when the type library
-            # is unavailable, so the definition path — which needs no argument-count
-            # guessing — stays usable on a machine where makepy cannot run.
-            from ..typelib import feature_id
-            fm_cut = feature_id("cut")
+            import win32com.client as wc
+            fm_cut = getattr(wc.constants, "swFmCut", None)
             if fm_cut is None:
                 # P40: the sidecar talks to SW via dynamic dispatch, so makepy constants
                 # are never loaded into this process. CastTo an early-bound interface
                 # (gen_py cache exists thanks to the P17 warmup) to populate them.
-                import win32com.client as wc
                 wc.CastTo(ctx.feat_mgr, "IFeatureManager")
                 fm_cut = getattr(wc.constants, "swFmCut", None)
         except Exception as e:  # noqa: BLE001
@@ -703,7 +699,12 @@ def _select_feature(ctx: Context, name: str):
       category="feature")
 def suppress_feature(ctx: Context, name: str):
     _select_feature(ctx, name)
-    ctx.model.EditSuppress2()
+    # P79: EditSuppress2 resolves as a PROPERTY on some installs — calling it then raises
+    # "'bool' object is not callable", which reads like a bug in our code rather than a
+    # binding quirk. sw_get tolerates either form (the same fix as GetTypeName2 et al).
+    ok = sw_get(ctx.model, "EditSuppress2")
+    if ok is False:
+        raise SWError(f"SolidWorks refused to suppress {name}.")
     return {"suppressed": name}
 
 
@@ -712,7 +713,9 @@ def suppress_feature(ctx: Context, name: str):
       category="feature")
 def unsuppress_feature(ctx: Context, name: str):
     _select_feature(ctx, name)
-    ctx.model.EditUnsuppress2()
+    ok = sw_get(ctx.model, "EditUnsuppress2")
+    if ok is False:
+        raise SWError(f"SolidWorks refused to unsuppress {name}.")
     return {"unsuppressed": name}
 
 

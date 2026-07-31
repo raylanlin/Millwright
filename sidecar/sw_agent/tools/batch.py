@@ -35,6 +35,74 @@ _FORBIDDEN = {
 }
 
 
+def _coerce_step(raw, index: int):
+    """One step, from whatever shape the provider actually delivered.
+
+    P78/P79: providers reshape nested arguments incompatibly — some send the object, some
+    a JSON string per element, some the whole array as one string, and some stringify every
+    number inside it. Rejecting all but the canonical form meant a correct request from the
+    model could fail several times running, after which it gives up on batching entirely.
+    Accept what is unambiguous; complain only when the intent is genuinely unreadable.
+    """
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise SWError(
+                f"step {index} arrived empty — the nested step objects were lost in transit. "
+                'Resubmit with each step as an object, e.g. {"tool":"extrude","params":{"depth":10}}'
+            )
+        try:
+            raw = json.loads(text)
+        except ValueError:
+            if text.replace("_", "").isalnum():
+                return {"tool": text, "params": {}}   # a bare tool name is unambiguous
+            raise SWError(f"step {index} is not valid JSON: {text[:80]}") from None
+    if not isinstance(raw, dict):
+        raise SWError(f"step {index} is not an object: {raw!r}")
+
+    name = raw.get("tool") or raw.get("name")
+    if not name:
+        raise SWError(f'step {index} has no "tool" field: {raw!r}')
+    params = raw.get("params") or raw.get("args") or raw.get("arguments") or {}
+    if isinstance(params, str):
+        try:
+            params = json.loads(params) if params.strip() else {}
+        except ValueError:
+            raise SWError(f"step {index} ({name}) has unparseable params: {params[:80]}") from None
+    if not isinstance(params, dict):
+        raise SWError(f"step {index} ({name}) params must be an object, got {params!r}")
+    # Arguments the model put next to "tool" instead of inside "params"
+    for k, v in raw.items():
+        if k not in ("tool", "name", "params", "args", "arguments") and k not in params:
+            params[k] = v
+    return {"tool": name, "params": _coerce_values(params)}
+
+
+def _coerce_values(params: dict) -> dict:
+    """P79: un-stringify numbers and booleans.
+
+    Providers serialise nested objects loosely: a step arrived as
+    {"x": "-40", "width": "80", "through_all": "true"}. Every downstream tool then does
+    arithmetic on a string. Converting here is right because these values came through a
+    schema that already declared their types — the quoting is transport noise, not intent.
+    """
+    out = {}
+    for k, v in params.items():
+        if isinstance(v, str):
+            s = v.strip()
+            low = s.lower()
+            if low in ("true", "false"):
+                out[k] = low == "true"
+                continue
+            try:
+                out[k] = int(s) if s.lstrip("+-").isdigit() else float(s)
+                continue
+            except ValueError:
+                pass
+        out[k] = v
+    return out
+
+
 @tool(
     "build_part",
     "Build a whole part in ONE call by submitting its complete feature sequence. "
@@ -47,10 +115,10 @@ _FORBIDDEN = {
         "steps": {
             "type": "array",
             # P78: the element schema MUST be declared. Without "items" the provider's
-            # function-calling layer has no idea the array holds objects, and some of them
-            # flatten each element to an empty string on the way out — every submission
-            # arrived as ["", "", ""] and failed with "step 1 is not an object", three
-            # times in a row, until the model gave up and fell back to single calls.
+            # function-calling layer does not know the array holds objects, and some of them
+            # flatten each element to an empty string — every submission arrived as
+            # ["", "", ""] and failed with "step 1 is not an object", repeatedly, until the
+            # model abandoned batching and fell back to one call per feature.
             "items": {
                 "type": "object",
                 "properties": {
@@ -72,54 +140,8 @@ _FORBIDDEN = {
     },
     category="feature", destructive=True,
 )
-def _coerce_step(raw, index: int):
-    """One step, from whatever shape the provider actually delivered.
-
-    P78: providers reshape nested arguments in incompatible ways — some send the object,
-    some a JSON string per element, some the whole array as one JSON string. Rejecting
-    everything but the canonical form meant a correct request from the model could still
-    fail three times running. Accept what is unambiguous; only complain when the intent
-    is genuinely unreadable.
-    """
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text:
-            raise SWError(
-                f"step {index} arrived empty — the nested step objects were lost in transit. "
-                "Resubmit with each step as an object, e.g. "
-                '{"tool":"extrude","params":{"depth":10}}'
-            )
-        try:
-            raw = json.loads(text)
-        except ValueError:
-            # A bare tool name with no arguments is unambiguous enough to honour.
-            if text.replace("_", "").isalnum():
-                return {"tool": text, "params": {}}
-            raise SWError(f"step {index} is not valid JSON: {text[:80]}") from None
-    if not isinstance(raw, dict):
-        raise SWError(f"step {index} is not an object: {raw!r}")
-
-    name = raw.get("tool") or raw.get("name")
-    if not name:
-        raise SWError(f'step {index} has no "tool" field: {raw!r}')
-    params = raw.get("params") or raw.get("args") or raw.get("arguments") or {}
-    if isinstance(params, str):
-        try:
-            params = json.loads(params) if params.strip() else {}
-        except ValueError:
-            raise SWError(f"step {index} ({name}) has unparseable params: {params[:80]}") from None
-    if not isinstance(params, dict):
-        raise SWError(f"step {index} ({name}) params must be an object, got {params!r}")
-    # Tool arguments the model may have put alongside "tool" instead of inside "params"
-    for k, v in raw.items():
-        if k not in ("tool", "name", "params", "args", "arguments") and k not in params:
-            params[k] = v
-    return {"tool": name, "params": params}
-
-
 def build_part(ctx: Context, steps, part: str = ""):
-    # The whole array may itself arrive as one JSON string
-    if isinstance(steps, str):
+    if isinstance(steps, str):   # the whole array may arrive as one JSON string
         try:
             steps = json.loads(steps)
         except ValueError:

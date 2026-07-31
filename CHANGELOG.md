@@ -6,6 +6,31 @@
 
 ## [Unreleased]
 
+## [0.2.71] - 2026-07-31
+
+### Fixed (P79 — 修 P78 落位 bug + lint 误报 + 失败行为约束)
+
+① `_coerce_step() got an unexpected keyword argument 'steps'` — P78 把
+助手函数插进了 @tool 装饰器和 def 之间,注册错函数。助手移到装饰器前。
+
+② 参数被当成字符串传 — 新增 `_coerce_values()`:字符串数字/布尔还原。
+
+③ macro-lint 误判位掩码 — `FLAG_ARGS` 跳过标志位(FeatureFillet 第 0 位等),
+上限 10000(超过 10 米不是可信尺寸)。
+
+④ `suppress_feature failed: 'bool' object is not callable` —
+EditSuppress2/EditUnsuppress2 走 sw_get() 容忍两种绑定形式。
+
+⑤ 提示词:失败是报告不是即兴创作 — 同一工具最多重试一次,
+失败停下报告工具名+报错原文;禁止删特征重来/new_part 另起/画进草图。
+
+### Changed
+
+- `sidecar/sw_agent/tools/batch.py` — 助手函数移到装饰器前 + 字符串值还原
+- `sidecar/sw_agent/tools/feature.py` — EditSuppress2/EditUnsuppress2 走 sw_get
+- `src/main/scripts/macro-lint.ts` — FLAG_ARGS 跳过标志位 + 10000 上限
+- `src/main/llm/prompts.ts` — 失败时的行为约束
+
 ## [0.2.70] - 2026-07-31
 
 ### Fixed (P78 — build_part 参数被抹空的根因:schema 缺 items 声明)
