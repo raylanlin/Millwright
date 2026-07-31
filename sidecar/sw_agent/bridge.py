@@ -352,44 +352,31 @@ class Context:
             n = (dx * dx + dy * dy + dz * dz) ** 0.5
             return None if n < 1e-9 else (dx / n, dy / n, dz / n)
 
-        # Route 0 (P76): IEdge::GetCurveParams2/3 — the officially documented way, and the
-        # one that actually marshals through pywin32.
+        # Route 0 (P81): edge -> ICurve -> GetCurveParams2, verified on this machine by a
+        # macro that actually ran.
         #
-        # Four earlier routes failed because of a naming trap in the SolidWorks API: the
-        # I-prefixed variants (IGetCurveParams2, IGetCurve) are for direct C++ interface
-        # use and hand back raw pointers, while the UNPREFIXED ones return VARIANT arrays.
-        # VBA and pywin32 need the unprefixed form; we had been reaching for the other.
+        # P76 reached for edge.GetCurveParams2 — wrong interface. GetCurveParams2 belongs to
+        # ICurve, not IEdge, so that route could never resolve. GetCurve() itself is fine
+        # here (the macro obtained the curve object without trouble); what fails is the
+        # PROPERTY access that Route A does next — curve.IsLine / curve.LineParams do not
+        # marshal, while this METHOD does.
         #
-        # GetCurveParams2 returns a flat array: [0..2] start point, [3..5] end point,
-        # [6..7] u range (per the official VBA example). Start and end are all that
-        # vertical/horizontal classification needs.
-        def _unit(dx, dy, dz):
-            n = (dx * dx + dy * dy + dz * dz) ** 0.5
-            return None if n < 1e-9 else (dx / n, dy / n, dz / n)
-
+        # Returns a flat array: [0] curve type (1=BZCURVE 2=ARC 4=LINE 8=ELLIPSE
+        # 16=INTERSECTION 32=BSURF), [1..3] start point, [4..6] end point, in metres.
         try:
-            fn = getattr(edge, "GetCurveParams3", None)
-            if fn is not None:
-                data = fn()
-                if data is not None:
-                    sp, ep = data.StartPoint, data.EndPoint
-                    d = _unit(ep[0] - sp[0], ep[1] - sp[1], ep[2] - sp[2])
-                    if d:
-                        return "line", d
-        except Exception:  # noqa: BLE001 — closed curves have no distinct endpoints
-            pass
-
-        try:
-            fn = getattr(edge, "GetCurveParams2", None)
-            if fn is not None:
-                p = fn()
-                if p is not None and len(p) >= 6:
-                    d = _unit(p[3] - p[0], p[4] - p[1], p[5] - p[2])
-                    if d:
-                        return "line", d
-                    # start == end → the edge closes on itself → a circle
-                    return "circle", None
-        except Exception:  # noqa: BLE001
+            curve = edge.GetCurve()
+            if curve is not None:
+                p = curve.GetCurveParams2()
+                if p is not None and len(p) >= 7:
+                    kind_id = int(p[0])
+                    if kind_id == 2:                     # ARC — radius is not in this array
+                        return "circle", None
+                    dx, dy, dz = p[4] - p[1], p[5] - p[2], p[6] - p[3]
+                    n = (dx * dx + dy * dy + dz * dz) ** 0.5
+                    if n > 1e-9:
+                        return "line", (dx / n, dy / n, dz / n)
+                    return "circle", None                # start == end → closed curve
+        except Exception:  # noqa: BLE001 — fall through to the remaining routes
             pass
 
         # Route A — the curve object, when the typelib exposes it

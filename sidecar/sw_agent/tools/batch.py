@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from ..bridge import Context, SWError
 from ..registry import TOOLS, call, tool
@@ -33,6 +34,35 @@ _FORBIDDEN = {
     "new_part", "new_assembly", "new_drawing", "open_document",
     "save_as",
 }
+
+
+def _steps_from_xml(text: str):
+    """P81: recover steps from an XML-ish payload.
+
+    MiniMax serialised the steps array as XML rather than JSON:
+
+        <item><tool>start_sketch</tool><params><plane>top</plane></params></item>
+
+    ...and prefixed it with a stray token, so json.loads failed and the model retried
+    twice before abandoning batching. The declared schema says array-of-objects; this is
+    the provider's own encoding of exactly that, so accepting it costs nothing and saves
+    the whole batch. Values arrive as text and are typed by _coerce_values downstream.
+    """
+    items = re.findall(r"<item>(.*?)</item>", text, re.DOTALL)
+    if not items:
+        return None
+    steps = []
+    for chunk in items:
+        m = re.search(r"<tool>(.*?)</tool>", chunk, re.DOTALL)
+        if not m:
+            continue
+        params: dict = {}
+        pm = re.search(r"<params>(.*?)</params>", chunk, re.DOTALL)
+        if pm:
+            for k, v in re.findall(r"<([A-Za-z_][\w]*)>(.*?)</\1>", pm.group(1), re.DOTALL):
+                params[k] = v.strip()
+        steps.append({"tool": m.group(1).strip(), "params": params})
+    return steps or None
 
 
 def _coerce_step(raw, index: int):
@@ -141,11 +171,19 @@ def _coerce_values(params: dict) -> dict:
     category="feature", destructive=True,
 )
 def build_part(ctx: Context, steps, part: str = ""):
-    if isinstance(steps, str):   # the whole array may arrive as one JSON string
+    if isinstance(steps, str):   # the whole array may arrive as one string
+        text = steps.strip()
         try:
-            steps = json.loads(steps)
+            steps = json.loads(text)
         except ValueError:
-            raise SWError(f"steps is not valid JSON: {steps[:120]}") from None
+            # P81: some providers emit XML for an array-of-objects parameter
+            recovered = _steps_from_xml(text)
+            if recovered is None:
+                raise SWError(
+                    "steps must be an array of objects, but arrived as unparseable text "
+                    f"(neither JSON nor <item> XML): {text[:120]}"
+                ) from None
+            steps = recovered
     if not isinstance(steps, list) or not steps:
         raise SWError("steps must be a non-empty array of {tool, params} objects.")
     if len(steps) > MAX_STEPS:

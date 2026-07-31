@@ -6,6 +6,31 @@
 
 ## [Unreleased]
 
+## [0.2.73] - 2026-07-31
+
+### Fixed (P81 — 边分类的真正答案:GetCurveParams2 在 ICurve 上,不在 IEdge 上)
+
+诊断宏跑通,答案明确:`GetCurveParams2` 是 **ICurve** 的方法,不是 IEdge 的。
+P76 找错了对象,Route 0 必然全灭。同时排除了旧猜测:`edge.GetCurve()`
+在这台机器上是好的 — Route A 失败的原因是 `curve.IsLine()`/`LineParams`
+这些属性在 pywin32 下取不到,而 `GetCurveParams2()` 这个方法可以。
+
+① bridge.py Route 0 重写:edge → ICurve → GetCurveParams2,
+  真机验证过的路径。曲线类型 4=LINE 2=ARC,起点终点直接算方向。
+② batch.py:`build_part` 收到的是 XML 不是 JSON(MiniMax 序列化方式),
+  新增 `_steps_from_xml()` 容错。
+③ engine.ts:run_macro 只报「退出码 1」不给错误原文 — cscript 把
+  语法错误写到 stdout 不是 stderr。stderr 空时回落取 stdout 末尾。
+④ prompts.ts:不许编造工具输出 — MsgBox 弹在 SW 里模型看不到,
+  要如实说「宏已执行,内容请看弹窗」,不以推算冒充真实读数。
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — Route 0 改走 curve.GetCurveParams2
+- `sidecar/sw_agent/tools/batch.py` — XML 步骤容错
+- `src/main/scripts/engine.ts` — 失败时回落读 stdout
+- `src/main/llm/prompts.ts` — 不许编造工具输出
+
 ## [0.2.72] - 2026-07-31
 
 ### Fixed (P80 — 让「未知错误」不可能出现 + 处理只有推理的一轮)

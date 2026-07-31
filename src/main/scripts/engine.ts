@@ -179,10 +179,21 @@ export class ScriptEngine {
       };
     }
     if (out.exitCode !== 0) {
+      // P81: cscript reports syntax errors on STDOUT, not stderr, so a failing macro used
+      // to surface as a bare "脚本退出码 1" with no clue what was wrong — the model then
+      // rewrote the macro five times, bisecting blind, and blamed our static checker for
+      // rejecting valid code it had never actually rejected. Fall through to stdout.
+      const detail =
+        (resultData && !resultData.success ? resultData.message : '') ||
+        out.stderr?.trim() ||
+        out.stdout?.trim().split(/\r?\n/).filter(Boolean).slice(-4).join('\n') ||
+        '';
       return {
         success: false,
         output: out.stdout,
-        error: resultData && !resultData.success ? resultData.message : out.stderr || `脚本退出码 ${out.exitCode}`,
+        error: detail
+          ? `脚本执行失败(退出码 ${out.exitCode}):\n${detail}`
+          : `脚本退出码 ${out.exitCode}，且未产生任何错误输出。`,
         duration: Date.now() - startedAt,
         data: resultData ?? undefined,
       };
