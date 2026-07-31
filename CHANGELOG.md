@@ -6,6 +6,27 @@
 
 ## [Unreleased]
 
+## [0.2.72] - 2026-07-31
+
+### Fixed (P80 — 让「未知错误」不可能出现 + 处理只有推理的一轮)
+
+模型思考了 9443 字然后整轮崩掉 `Agent execution failed: 未知错误` ——
+推理模型一轮只产出 reasoning、没有 content 也没有 tool_calls,循环没为它准备。
+
+① handlers.ts:永不显示「未知错误」 — 新增 `describeError()` 助手,把
+任何抛出的对象挖出可读信息(含 cause / stack 位置),报错必带具体类型和位置。
+
+② agent-loop-sidecar.ts:处理「只有推理」的一轮 — 推理不为空但正文为空
+且无工具调用时,nudge 一次让模型把思考转成动作,不再空转或崩掉。
+
+③ 循环末尾兜底 — 区分「连续多轮无产出」(只有思考 / 返回为空)
+与「达到轮数上限仍在工作」,分别给出可操作建议。
+
+### Changed
+
+- `src/main/ipc/handlers.ts` — describeError + catch 块换掉 toLLMError
+- `src/main/agent/agent-loop-sidecar.ts` — 只有推理的一轮 nudge + 末尾兜底分类
+
 ## [0.2.71] - 2026-07-31
 
 ### Fixed (P79 — 修 P78 落位 bug + lint 误报 + 失败行为约束)

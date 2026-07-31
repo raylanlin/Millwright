@@ -158,6 +158,7 @@ export async function runSidecarAgent(
   const maxRounds = opts.maxRounds ?? 24; // P30: 12 was too tight for real modeling sessions
   let history: ChatMessage[] = [...messages];
   let nudged = false;
+  let lastHadReasoning = false;
   let finalText = '';
   let backupDone = false;
 
@@ -273,12 +274,28 @@ export async function runSidecarAgent(
 
     const resp = await runTurn(adapter, history, tools, opts);
 
+    lastHadReasoning = !!(resp.reasoning ?? '').trim();
+
     if (resp.content) resp.content = stripThinking(resp.content);
     if (resp.content && !resp.streamed) {
       finalText = resp.content;
       opts.onEvent?.({ type: 'text', text: resp.content });
     }
     if (!resp.toolCalls || resp.toolCalls.length === 0) {
+      // P80: a reasoning model can spend an entire round thinking and return NO content
+      // and NO tool calls. That is a real API outcome, not an error — but the loop had no
+      // branch for it, so the turn fell through to "done" with nothing to show, or threw.
+      // Nudge once with the reasoning acknowledged, so the model converts its thinking
+      // into an action instead of restarting it.
+      if (!nudged && !(resp.content ?? '').trim() && (resp.reasoning ?? '').length > 200) {
+        nudged = true;
+        history.push({
+          role: 'user',
+          content: '你已经想清楚了方案，现在直接调用工具执行。不要重新分析，也不需要我批准；'
+                 + '如果某个工具不可用，就先执行其余步骤，最后如实告诉我哪一步没做成。',
+        });
+        continue;
+      }
       // P46: models habitually write the plan and STOP, waiting for approval that was
       // never asked for — the user then has to type "continue". Nudge once: push the
       // plan into history and tell it to proceed. Only on the first round, and only
@@ -390,7 +407,17 @@ export async function runSidecarAgent(
   } catch { /* summary is best-effort */ }
 
   opts.onEvent?.({ type: 'error', error: `达到最大轮数(${maxRounds})，已停止。` });
-  return finalText || `已多步执行但未收敛（${maxRounds} 轮上限）。`;
+  // P80: distinguish "ran out of rounds while working" from "produced nothing at all" —
+  // they need different responses from the user, and lumping them together as one message
+  // hid the second case entirely.
+  if (!finalText.trim()) {
+    const msg = `模型连续 ${maxRounds} 轮没有产出可执行的动作`
+      + `（最后一轮${lastHadReasoning ? '只有思考、没有工具调用' : '返回为空'}）。`
+      + '可能是任务描述太宽泛，或推理深度设得过高——试着把任务拆小，或在设置里把推理深度调低。';
+    opts.onEvent?.({ type: 'error', error: msg });
+    return msg;
+  }
+  return finalText;
 }
 
 interface AnalyzeViewResult {

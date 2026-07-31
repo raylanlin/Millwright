@@ -25,6 +25,29 @@ import { toLLMError } from '../llm/errors';
 import { runAgentLoop } from '../agent/agent-loop';
 import { runSidecarAgent, type AgentEvent } from '../agent/agent-loop-sidecar';
 
+/** P80: a human-readable description of anything that can be thrown. */
+function describeError(err: unknown): string {
+  if (err instanceof Error) {
+    const cause = (err as any).cause;
+    const extra = cause ? ` (cause: ${cause instanceof Error ? cause.message : String(cause)})` : '';
+    const where = err.stack?.split('\n')[1]?.trim();
+    return `${err.name}: ${err.message || '(empty message)'}${extra}${where ? `\n  at ${where}` : ''}`;
+  }
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object') {
+    const o = err as any;
+    // LLMErrorInfo, fetch failures, COM errors — all carry the detail somewhere different
+    const msg = o.message || o.error?.message || o.error || o.reason || o.statusText;
+    if (msg) return String(msg);
+    try {
+      return JSON.stringify(o);
+    } catch {
+      return Object.prototype.toString.call(o);
+    }
+  }
+  return `non-error thrown: ${String(err)}`;
+}
+
 /**
  * Cancellation-token table: `requestId` → `AbortController`.
  * The renderer can cancel an in-flight streaming request via its `requestId`.
@@ -251,6 +274,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     const controller = new AbortController();
     activeRequests.set(requestId, controller); // reuse the same map as LLM_CANCEL
     agentRunning = true;
+    // P80: defined OUTSIDE the try so the catch block can also send events (the agent
+    // execution error path needs to notify the renderer before returning).
+    const send = (ev: AgentEvent) =>
+      e.sender.send(IpcChannels.LLM_AGENT_EVENT, { ...ev, requestId });
     try {
       // FEATURE: refresh the real current document before each agent session
       await bridge.refresh();
@@ -264,9 +291,6 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       // LOW: build the adapter only once (the enriched config is final here)
       // P5: drop the OpenAIAdapter-only restriction; both protocols now run agent via the sidecar / VBS paths
       const adapter = createAdapter(enrichedConfig);
-
-      const send = (ev: AgentEvent) =>
-        e.sender.send(IpcChannels.LLM_AGENT_EVENT, { ...ev, requestId });
 
       // P3: prefer the sidecar; only fall back to VBS when the sidecar fails to *start* (e.g. python/pywin32 missing).
       // Once the sidecar is up, runtime errors (including user cancellation) propagate normally — never silently rerun via the VBS fallback.
@@ -323,7 +347,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       });
       return { ok: true, text, requestId };
     } catch (err) {
-      return { ok: false, error: toLLMError(err, 'Agent execution failed'), requestId };
+      // P80: never surface "未知错误". An error with no message is a bug in OUR error
+      // handling, not a legitimate outcome — and it leaves the user (and us) with nothing
+      // to act on. Dig out whatever the object actually carries.
+      const detail = describeError(err);
+      console.error('[agent] execution failed:', err);
+      send({ type: 'error', error: detail });
+      return { ok: false, error: { code: 'AGENT_ERROR', message: detail }, requestId };
     } finally {
       activeRequests.delete(requestId);
       agentRunning = false;
