@@ -86,8 +86,11 @@ def _faces_strategy(ctx: Context, which: str):
     两个侧面相交于竖直边，侧面与顶/底面相交于水平边，圆柱面上的边是圆形边。
     只用 GetFaces / face.Normal / face.GetEdges / IsSame。
     """
-    edges = _faces_buckets(ctx).get(which, [])
-    return _select_all(ctx, edges)
+    notes: list = []
+    edges = _faces_buckets(ctx, notes).get(which, [])
+    got = _select_all(ctx, edges)
+    got.notes.extend(notes[:2])
+    return got
 
 
 class Picked:
@@ -150,43 +153,84 @@ def _edges_of_face(face) -> list:
         return []
 
 
-def _face_kind(face) -> str:
-    """side (wall) / cap (floor or ceiling) / cyl — SolidWorks is Y-up."""
+def _face_kind(face, notes: list | None = None) -> str:
+    """side (wall) / cap (floor or ceiling) / cyl — SolidWorks is Y-up.
+
+    P89: this used to answer "cap" whenever anything failed, so a machine where the face
+    normal cannot be read looked exactly like a machine where every face happens to be
+    horizontal — and the caller then filed all twelve edges as horizontal. A failure now
+    says so.
+    """
     try:
         surf = sw_get(face, "GetSurface")
-        if not sw_get(surf, "IsPlane"):
+        if surf is not None and not sw_get(surf, "IsPlane"):
             return "cyl"
-        return "side" if abs(sw_get(face, "Normal")[1]) < _SIDE_FACE_TOL else "cap"
-    except Exception:  # noqa: BLE001
-        return "cap"
+    except Exception as ex:  # noqa: BLE001 — a non-planar surface is still worth reporting
+        if notes is not None and len(notes) < 3:
+            notes.append(f"face.GetSurface/IsPlane: {ex}")
+    for member in ("Normal", "GetNormal"):
+        try:
+            n = sw_get(face, member)
+            if n and len(n) >= 3:
+                return "side" if abs(float(n[1])) < _SIDE_FACE_TOL else "cap"
+        except Exception as ex:  # noqa: BLE001
+            if notes is not None and len(notes) < 3:
+                notes.append(f"face.{member}: {ex}")
+    return "unknown"
 
 
-def _bucket_faces(faces) -> dict:
-    """Group the edges of `faces` by which face kinds each edge touches."""
+def _adjacent_faces(edge):
+    """The two faces an edge separates."""
+    for name in ("GetTwoAdjacentFaces2", "IGetTwoAdjacentFaces2"):
+        try:
+            faces = sw_get(edge, name)
+        except Exception:  # noqa: BLE001
+            continue
+        if faces:
+            return [f for f in faces if f is not None]
+    return []
+
+
+def _bucket_edges(edges, notes: list) -> dict:
+    """Group edges by the kinds of face they separate.
+
+    P89: this used to walk the FACES and collect their edges, which needed the same edge
+    to be recognised across two faces — and `IsSame` was silently failing, so every edge
+    was counted twice. The tell was "found: 24" on a box that has twelve edges: 12 x 2
+    faces, no de-duplication, and every one bucketed as horizontal because the face
+    classification was falling into its `except` branch and returning "cap" for all six
+    faces.
+
+    Walking the EDGES instead removes both problems at once. Each edge is visited exactly
+    once, and it names its own two faces, so there is nothing to de-duplicate and nothing
+    to compare for identity.
+    """
     buckets: dict = {"vertical": [], "horizontal": [], "circular": []}
-    seen: list = []   # [(edge, {face kinds})]
-    for face in faces:
-        kind = _face_kind(face)
-        for e in _edges_of_face(face):
-            slot = None
-            for rec in seen:
-                try:
-                    if rec[0].IsSame(e):
-                        slot = rec
-                        break
-                except Exception:  # noqa: BLE001
-                    continue
-            if slot is None:
-                seen.append((e, {kind}))
-            else:
-                slot[1].add(kind)
-    for e, kinds in seen:
+    kinds_seen: dict = {}
+    for edge in edges:
+        faces = _adjacent_faces(edge)
+        if not faces:
+            if len(notes) < 3:
+                notes.append("GetTwoAdjacentFaces2 没有返回相邻面")
+            continue
+        kinds = set()
+        for f in faces:
+            k = _face_kind(f, notes)
+            kinds.add(k)
+            kinds_seen[k] = kinds_seen.get(k, 0) + 1
         if "cyl" in kinds:
-            buckets["circular"].append(e)
+            buckets["circular"].append(edge)
         elif kinds == {"side"}:
-            buckets["vertical"].append(e)
+            buckets["vertical"].append(edge)
+        elif "cap" in kinds and "side" in kinds:
+            buckets["horizontal"].append(edge)
         else:
-            buckets["horizontal"].append(e)
+            # Two cap faces meeting means the normals did not read — say so rather than
+            # quietly filing it as horizontal, which is what produced 24 bogus edges.
+            if len(notes) < 3:
+                notes.append(f"无法判断这条边（相邻面类型 {sorted(kinds)}）")
+    if kinds_seen and len(notes) < 3:
+        notes.append(f"相邻面类型统计 {kinds_seen}")
     return buckets
 
 
@@ -219,52 +263,39 @@ def _feature_strategy(ctx: Context, which: str) -> int:
         return Picked(0, 0, [f"feature.GetFaces: {e}"])
     if not faces:
         return Picked(0, 0, [f"特征 {name} 没有返回任何面"])
-    edges = _bucket_faces(faces).get(which, [])
-    return _select_all(ctx, edges)
+    notes: list = []
+    edges = []
+    for f in faces:
+        edges.extend(_edges_of_face(f))
+    if not edges:
+        return Picked(0, 0, [f"特征 {name} 的面上取不到边"])
+    picked = _bucket_edges(edges, notes).get(which, [])
+    got = _select_all(ctx, picked)
+    got.notes.extend(notes[:2])
+    return got
 
 
-def _faces_buckets(ctx: Context) -> dict:
+def _faces_buckets(ctx: Context, notes: list) -> dict:
+    """All of the body's edges, grouped by the faces they separate."""
     buckets: dict = {"vertical": [], "horizontal": [], "circular": []}
     try:
         bodies = ctx.solid_bodies()
-    except SWError:
+    except SWError as ex:
+        notes.append(str(ex))
         return buckets
-
     for body in bodies:
-        seen: list = []   # [(edge, {face kinds})]
-        for face in (sw_get(body, "GetFaces") or []):
-            try:
-                kind = "cyl" if not face.GetSurface().IsPlane() else (
-                    "side" if abs(face.Normal[1]) < _SIDE_FACE_TOL else "cap"
-                )
-            except Exception:  # noqa: BLE001
-                kind = "cap"
-            face_edges = _edges_of_face(face)
-            for e in face_edges:
-                slot = None
-                for rec in seen:
-                    try:
-                        if rec[0].IsSame(e):
-                            slot = rec
-                            break
-                    except Exception:  # noqa: BLE001
-                        continue
-                if slot is None:
-                    seen.append((e, {kind}))
-                else:
-                    slot[1].add(kind)
-
-        for e, kinds in seen:
-            if "cyl" in kinds:
-                buckets["circular"].append(e)
-            elif kinds == {"side"}:
-                buckets["vertical"].append(e)
-            else:
-                buckets["horizontal"].append(e)
+        try:
+            edges = list(sw_get(body, "GetEdges") or [])
+        except Exception as ex:  # noqa: BLE001
+            notes.append(f"body.GetEdges: {ex}")
+            continue
+        if not edges:
+            notes.append("body.GetEdges 返回空")
+            continue
+        part = _bucket_edges(edges, notes)
+        for k, value in buckets.items():
+            value.extend(part[k])
     return buckets
-
-
-# ===== 策略 2：包围盒角点 =====
 
 def _box_strategy(ctx: Context, which: str) -> Picked:
     """按位置点选：SelectByID2 会选中离给定三维点最近的实体。
@@ -283,6 +314,7 @@ def _box_strategy(ctx: Context, which: str) -> Picked:
     x1, y1, z1, x2, y2, z2 = (float(v) for v in box[:6])
     if min(abs(x2 - x1), abs(y2 - y1), abs(z2 - z1)) < 1e-9:
         return Picked(0, 0, ["包围盒是退化的（某个方向厚度为 0）"])
+    mx, my, mz = (x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2
 
     # P88: probe a point ON the edge but AWAY from its ends, and nudged very slightly
     # outward from the solid.
@@ -315,6 +347,10 @@ def _box_strategy(ctx: Context, which: str) -> Picked:
     try:
         ctx.model.ShowNamedView2("*Isometric", 7)
         ctx.model.ViewZoomtofit2()
+        # P89: the FIRST pick after a view change consistently lost — always the same
+        # corner, the first one probed, both before and after the offset change. The view
+        # has not settled when the pick fires, so fire one throwaway pick and discard it.
+        ctx.model.Extension.SelectByID2("", "EDGE", mx, my, mz, False, 0, _variant_null(), 0)
     except Exception:  # noqa: BLE001 — orientation is an aid, not a requirement
         pass
 
@@ -338,7 +374,14 @@ def _box_strategy(ctx: Context, which: str) -> Picked:
         if hit:
             n += 1
         elif len(notes) < 2:
-            notes.append(f"({px * 1000:.1f}, {py * 1000:.1f}, {pz * 1000:.1f})mm 处没有选到边")
+            # P89: coordinate picking only reaches what the current view can see, so the
+            # bottom edges are unreachable from an isometric view — an inherent limit of
+            # this strategy, not a fixable miss. Name it, so it is not chased again.
+            hidden = abs(py - y1) < abs(py - y2)
+            notes.append(
+                f"({px * 1000:.1f}, {py * 1000:.1f}, {pz * 1000:.1f})mm 处没有选到边"
+                + ("（底面边在等轴测视角下不可见——坐标法的固有限制）" if hidden else "")
+            )
     if n == 0:
         ctx.clear_selection()
         notes.append(
