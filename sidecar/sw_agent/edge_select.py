@@ -27,10 +27,14 @@
 """
 from __future__ import annotations
 
-from .bridge import Context, SWError
+from .bridge import Context, SWError, sw_get
 
 # 面法向的 Y 分量小于这个值就认为是"侧面"（SolidWorks 是 Y-UP）
 _SIDE_FACE_TOL = 0.1
+
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return lo if v < lo else min(v, hi)
 
 
 def _variant_null():
@@ -130,9 +134,9 @@ def _edges_of_face(face) -> list:
     """
     out = []
     try:
-        for loop in (face.GetLoops() or []):
+        for loop in (sw_get(face, "GetLoops") or []):
             try:
-                out.extend(list(loop.GetEdges() or []))
+                out.extend(list(sw_get(loop, "GetEdges") or []))
             except Exception:  # noqa: BLE001
                 continue
     except Exception:  # noqa: BLE001
@@ -141,7 +145,7 @@ def _edges_of_face(face) -> list:
         return out
     # Shortcut path, kept as a fallback for installs where it does work
     try:
-        return list(face.GetEdges() or [])
+        return list(sw_get(face, "GetEdges") or [])
     except Exception:  # noqa: BLE001
         return []
 
@@ -149,9 +153,10 @@ def _edges_of_face(face) -> list:
 def _face_kind(face) -> str:
     """side (wall) / cap (floor or ceiling) / cyl — SolidWorks is Y-up."""
     try:
-        if not face.GetSurface().IsPlane():
+        surf = sw_get(face, "GetSurface")
+        if not sw_get(surf, "IsPlane"):
             return "cyl"
-        return "side" if abs(face.Normal[1]) < _SIDE_FACE_TOL else "cap"
+        return "side" if abs(sw_get(face, "Normal")[1]) < _SIDE_FACE_TOL else "cap"
     except Exception:  # noqa: BLE001
         return "cap"
 
@@ -205,7 +210,11 @@ def _feature_strategy(ctx: Context, which: str) -> int:
     if feat is None:
         return Picked(0, 0, [f"特征树里找不到 {name}"])
     try:
-        faces = list(feat.GetFaces() or [])
+        # P88: GetFaces resolves as a PROPERTY on this install, so calling it raised
+        # "'tuple' object is not callable". sw_get tolerates either binding — the same
+        # trap we已 hit with GetTypeName2 and EditSuppress2, and new code keeps walking
+        # into it, so every COM member reached from this module now goes through sw_get.
+        faces = list(sw_get(feat, "GetFaces") or [])
     except Exception as e:  # noqa: BLE001
         return Picked(0, 0, [f"feature.GetFaces: {e}"])
     if not faces:
@@ -223,7 +232,7 @@ def _faces_buckets(ctx: Context) -> dict:
 
     for body in bodies:
         seen: list = []   # [(edge, {face kinds})]
-        for face in (body.GetFaces() or []):
+        for face in (sw_get(body, "GetFaces") or []):
             try:
                 kind = "cyl" if not face.GetSurface().IsPlane() else (
                     "side" if abs(face.Normal[1]) < _SIDE_FACE_TOL else "cap"
@@ -274,12 +283,29 @@ def _box_strategy(ctx: Context, which: str) -> Picked:
     x1, y1, z1, x2, y2, z2 = (float(v) for v in box[:6])
     if min(abs(x2 - x1), abs(y2 - y1), abs(z2 - z1)) < 1e-9:
         return Picked(0, 0, ["包围盒是退化的（某个方向厚度为 0）"])
-    mx, my, mz = (x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2
 
-    corners = [(x1, my, z1), (x2, my, z1), (x2, my, z2), (x1, my, z2)]
+    # P88: probe a point ON the edge but AWAY from its ends, and nudged very slightly
+    # outward from the solid.
+    #
+    # SelectByID2 picks whatever entity is nearest the point, so probing exactly at a
+    # corner is a three-way tie between the edge, the vertex terminating it and the two
+    # faces meeting there — which is why 3 of 4 vertical edges came back selected and one
+    # lost the tie. Sampling at 40% along the edge removes the vertex from contention, and
+    # a hair of outward offset breaks the tie with the faces.
+    eps = min(abs(x2 - x1), abs(y2 - y1), abs(z2 - z1)) * 0.01
+    y_mid = y1 + (y2 - y1) * 0.4          # off-centre: never coincides with a mid-edge vertex
+    x_mid = x1 + (x2 - x1) * 0.4
+    z_mid = z1 + (z2 - z1) * 0.4
+
+    corners = [
+        (x1 - eps, y_mid, z1 - eps), (x2 + eps, y_mid, z1 - eps),
+        (x2 + eps, y_mid, z2 + eps), (x1 - eps, y_mid, z2 + eps),
+    ]
     rims = [
-        (mx, y2, z1), (x2, y2, mz), (mx, y2, z2), (x1, y2, mz),
-        (mx, y1, z1), (x2, y1, mz), (mx, y1, z2), (x1, y1, mz),
+        (x_mid, y2 + eps, z1 - eps), (x2 + eps, y2 + eps, z_mid),
+        (x_mid, y2 + eps, z2 + eps), (x1 - eps, y2 + eps, z_mid),
+        (x_mid, y1 - eps, z1 - eps), (x2 + eps, y1 - eps, z_mid),
+        (x_mid, y1 - eps, z2 + eps), (x1 - eps, y1 - eps, z_mid),
     ]
     points = corners if which == "vertical" else rims if which == "horizontal" else corners + rims
 
@@ -297,15 +323,22 @@ def _box_strategy(ctx: Context, which: str) -> Picked:
     n = 0
     notes: list = []
     for px, py, pz in points:
-        try:
-            if ctx.model.Extension.SelectByID2("", "EDGE", px, py, pz, True, 0, null, 0):
-                n += 1
-            elif len(notes) < 2:
-                notes.append(f"({px * 1000:.1f}, {py * 1000:.1f}, {pz * 1000:.1f})mm 处没有选到边")
-        except Exception as e:  # noqa: BLE001
-            if len(notes) < 2:
-                notes.append(f"SelectByID2: {e}")
-            continue
+        hit = False
+        # P88: the offset helps in the common case but can overshoot on a thin part, so a
+        # miss is retried at the exact surface point before it counts as a failure.
+        for qx, qy, qz in ((px, py, pz), (_clamp(px, x1, x2), _clamp(py, y1, y2), _clamp(pz, z1, z2))):
+            try:
+                if ctx.model.Extension.SelectByID2("", "EDGE", qx, qy, qz, True, 0, null, 0):
+                    hit = True
+                    break
+            except Exception as e:  # noqa: BLE001
+                if len(notes) < 2:
+                    notes.append(f"SelectByID2: {e}")
+                break
+        if hit:
+            n += 1
+        elif len(notes) < 2:
+            notes.append(f"({px * 1000:.1f}, {py * 1000:.1f}, {pz * 1000:.1f})mm 处没有选到边")
     if n == 0:
         ctx.clear_selection()
         notes.append(

@@ -6,6 +6,43 @@
 
 ## [Unreleased]
 
+## [0.2.77] - 2026-07-31
+
+### Fixed (P88 — 修我自己的三个 bug)
+
+#### ① `_steps_from_text() got an unexpected keyword argument 'steps'`
+
+`_steps_from_text` 插进了 `@tool("build_part", ...)` 装饰器和 `def build_part`
+之间,装饰器注册的是助手函数。这和 P78/P79 是同一个错误,犯了第二次。
+助手函数移到装饰器之前,并在打包脚本加了断言:`@tool` 与 `def build_part`
+之间出现任何 `def`/`class` 就直接失败,不让它再溜出去一次。
+
+#### ② `feature.GetFaces: 'tuple' object is not callable`
+
+`GetFaces` 在这台机器上解析成**属性**而非方法。这个坑修过好几次
+(`GetTypeName2` / `EditSuppress2`),但 `edge_select.py` 是新写的又直接调用了。
+现在这个模块里**每一个** COM 成员都走 `sw_get()`:`GetFaces` / `GetLoops` /
+`GetEdges` / `GetSurface` / `IsPlane` / `Normal`,不再逐个踩坑逐个修。
+
+#### ③ `box` 策略漏边(4 选中 3、8 选中 6)
+
+上一轮首次拿到非零结果但有 1–2 条边选不中。原因是**探测点正落在角上**
+—— `SelectByID2` 选离该点最近的实体,而角上是「边 + 终结它的顶点 +
+交汇的两个面」的三方平局,有的边就输掉了。
+
+这也解释了很早之前那个现象:**「四个角只有两个是真圆角」** —— 不是
+倒角失败,是有的角没选中。
+
+两处调整:
+- 探测点取棱上 **40% 位置**(而不是正中),把顶点排除出竞争
+- 向外偏移一丝(最小尺寸的 1%),打破与面的平局
+- 万一偏移在薄壁件上过冲,**回落到精确表面点重试一次**才算失败
+
+### Changed
+
+- `sidecar/sw_agent/tools/batch.py` — 助手函数移到 `@tool` 装饰器之前
+- `sidecar/sw_agent/edge_select.py` — 全模块走 `sw_get()` + 探测点避开角点 + 失败回落
+
 ## [0.2.76] - 2026-07-31
 
 ### Fixed (P87 — 把诊断修对 + 给 build_part 一条标量路)

@@ -105,6 +105,37 @@ def _coerce_values(params: dict) -> dict:
     return out
 
 
+def _steps_from_text(text: str):
+    """P87: parse the line-oriented form
+    (P88: defined ABOVE the @tool decorator — a helper placed between the decorator and
+    `def build_part` gets registered as the tool itself, which is how the second-time
+    "unexpected keyword argument 'steps'" happened. The assertion below now guards it.) — "<tool> key=value key=value" per line.
+
+    Why this exists: MiniMax flattens the nested step objects to empty strings on the way
+    out, so a correct request arrives as ["", "", ""] however the schema declares itself.
+    Three rounds of schema work did not fix that, because the problem is not in the schema
+    — the provider simply does not serialise arrays-of-objects faithfully.
+
+    A scalar string does survive, so this is the escape hatch. Values are typed by
+    _coerce_values downstream, so "depth=10" arrives as a number.
+    """
+    steps = []
+    for raw in (text or "").replace("|", "\n").splitlines():
+        line = raw.strip().lstrip("-").strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        tool = parts[0].rstrip(":,")
+        params: dict = {}
+        for token in parts[1:]:
+            if "=" not in token:
+                continue
+            k, v = token.split("=", 1)
+            params[k.strip()] = v.strip().strip("\"'`,")
+        steps.append({"tool": tool, "params": params})
+    return steps
+
+
 @tool(
     "build_part",
     "Build a whole part in ONE call by submitting its complete feature sequence. "
@@ -150,34 +181,6 @@ def _coerce_values(params: dict) -> dict:
     },
     category="feature", destructive=True,
 )
-def _steps_from_text(text: str):
-    """P87: parse the line-oriented form — "<tool> key=value key=value" per line.
-
-    Why this exists: MiniMax flattens the nested step objects to empty strings on the way
-    out, so a correct request arrives as ["", "", ""] however the schema declares itself.
-    Three rounds of schema work did not fix that, because the problem is not in the schema
-    — the provider simply does not serialise arrays-of-objects faithfully.
-
-    A scalar string does survive, so this is the escape hatch. Values are typed by
-    _coerce_values downstream, so "depth=10" arrives as a number.
-    """
-    steps = []
-    for raw in (text or "").replace("|", "\n").splitlines():
-        line = raw.strip().lstrip("-").strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        tool = parts[0].rstrip(":,")
-        params: dict = {}
-        for token in parts[1:]:
-            if "=" not in token:
-                continue
-            k, v = token.split("=", 1)
-            params[k.strip()] = v.strip().strip("\"'`,")
-        steps.append({"tool": tool, "params": params})
-    return steps
-
-
 def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
     # P87: fall back to the line form when the array arrived empty or was never sent.
     hollow = not steps or (
