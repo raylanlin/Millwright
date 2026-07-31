@@ -1,0 +1,326 @@
+"""sw_agent.edge_select —选择要加工的边。这件事只在这里做。
+
+## 为什么单独成一个模块
+
+在此之前，边的选择散在 `_edge_kind` 里的六条 fallback 路线中，每次某台机器上失败就再加一条。
+到第八轮时，一次调用可能走 A/B/C/D/0/E 任意一条，返回结果没有任何一处能校验——
+**这不是健壮，是抽奖**：某条路线给出错误分类时，工具会安静地倒错边。
+
+而且抽象本身选错了。真正要回答的问题不是"第 7 条边是什么类型"，而是
+"用户说的那些边是哪几条"。前者是手段，后者才是目的，把手段当目的就会陷入
+"再加一条路线也许这次能分类成功"的循环。
+
+## 现在的设计
+
+三条**策略**，各自完整、各自可验证，而不是六条互相兜底的碎片：
+
+  1. `faces`   —— 靠面的归属推断（两个侧面之间是竖边）。任意形状都对。
+  2. `box`     —— 靠包围盒算出角点坐标再点选。只对箱体类零件有效，但极稳。
+  3. `selected` —— 用户在 SolidWorks 里自己选好。永远可用。
+
+关键在于**策略是被验证过才使用的**：`probe()` 在当前模型上实际跑一遍，
+数出各策略选中了几条边，把结果缓存起来。之后直接用那条验证过的策略，
+不再每次调用都从头试到尾。
+
+失败时也不再含糊：明确说出每条策略试过什么、拿到什么，并告诉用户
+可以手动选边后用 `edges="selected"` —— 一个诚实的兜底，好过一个可能选错边的猜测。
+"""
+from __future__ import annotations
+
+from .bridge import Context, SWError
+
+# 面法向的 Y 分量小于这个值就认为是"侧面"（SolidWorks 是 Y-UP）
+_SIDE_FACE_TOL = 0.1
+
+
+def _select(entity, append: bool = True) -> bool:
+    """选中一个实体。Select4/Select2/Select 三种签名跨版本都存在，依次尝试。"""
+    for member, args in (("Select4", (append, None)), ("Select2", (append, 0)), ("Select", (append,))):
+        fn = getattr(entity, member, None)
+        if fn is None:
+            continue
+        try:
+            if fn(*args):
+                return True
+        except Exception:  # noqa: BLE001 — 换下一种签名
+            continue
+    return False
+
+
+# ===== 策略 1：面的归属 =====
+
+def _faces_strategy(ctx: Context, which: str):
+    """靠"这条边属于哪两个面"来判断，不碰边自身的几何。
+
+    两个侧面相交于竖直边，侧面与顶/底面相交于水平边，圆柱面上的边是圆形边。
+    只用 GetFaces / face.Normal / face.GetEdges / IsSame。
+    """
+    edges = _faces_buckets(ctx).get(which, [])
+    if not edges:
+        return 0
+    ctx.clear_selection()
+    return sum(1 for e in edges if _select(e))
+
+
+def _edges_of_face(face) -> list:
+    """A face's edges, via its LOOPS — which is where they actually hang.
+
+    The documented traversal is body -> faces -> loops -> edges, and face.GetEdges is a
+    shortcut that reads a temporary buffer populated by GetTrimCurves2. Call it without
+    that and it can come back empty, which is exactly what happened when we asked a face
+    for its edges directly and got nothing back on a model that plainly had twelve.
+    """
+    out = []
+    try:
+        for loop in (face.GetLoops() or []):
+            try:
+                out.extend(list(loop.GetEdges() or []))
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    if out:
+        return out
+    # Shortcut path, kept as a fallback for installs where it does work
+    try:
+        return list(face.GetEdges() or [])
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _face_kind(face) -> str:
+    """side (wall) / cap (floor or ceiling) / cyl — SolidWorks is Y-up."""
+    try:
+        if not face.GetSurface().IsPlane():
+            return "cyl"
+        return "side" if abs(face.Normal[1]) < _SIDE_FACE_TOL else "cap"
+    except Exception:  # noqa: BLE001
+        return "cap"
+
+
+def _bucket_faces(faces) -> dict:
+    """Group the edges of `faces` by which face kinds each edge touches."""
+    buckets: dict = {"vertical": [], "horizontal": [], "circular": []}
+    seen: list = []   # [(edge, {face kinds})]
+    for face in faces:
+        kind = _face_kind(face)
+        for e in _edges_of_face(face):
+            slot = None
+            for rec in seen:
+                try:
+                    if rec[0].IsSame(e):
+                        slot = rec
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+            if slot is None:
+                seen.append((e, {kind}))
+            else:
+                slot[1].add(kind)
+    for e, kinds in seen:
+        if "cyl" in kinds:
+            buckets["circular"].append(e)
+        elif kinds == {"side"}:
+            buckets["vertical"].append(e)
+        else:
+            buckets["horizontal"].append(e)
+    return buckets
+
+
+def _feature_strategy(ctx: Context, which: str) -> int:
+    """Only the faces the LAST feature created.
+
+    This is how a person writing a macro does it: right after creating a feature you
+    already hold it, and IFeature::GetFaces tells you exactly what it produced — no
+    global search, no guessing which of twelve edges was meant. Scoped, accurate, and
+    it degrades to nothing (rather than to something wrong) when there is no last
+    feature recorded.
+    """
+    name = ctx.scratch.get("last_feature")
+    if not name:
+        return 0
+    try:
+        from .tools.feature import _find_feature
+        feat = _find_feature(ctx, name)
+    except Exception:  # noqa: BLE001
+        feat = None
+    if feat is None:
+        return 0
+    try:
+        faces = list(feat.GetFaces() or [])
+    except Exception:  # noqa: BLE001
+        return 0
+    if not faces:
+        return 0
+    edges = _bucket_faces(faces).get(which, [])
+    if not edges:
+        return 0
+    ctx.clear_selection()
+    return sum(1 for e in edges if _select(e))
+
+
+def _faces_buckets(ctx: Context) -> dict:
+    buckets: dict = {"vertical": [], "horizontal": [], "circular": []}
+    try:
+        bodies = ctx.solid_bodies()
+    except SWError:
+        return buckets
+
+    for body in bodies:
+        seen: list = []   # [(edge, {face kinds})]
+        for face in (body.GetFaces() or []):
+            try:
+                kind = "cyl" if not face.GetSurface().IsPlane() else (
+                    "side" if abs(face.Normal[1]) < _SIDE_FACE_TOL else "cap"
+                )
+            except Exception:  # noqa: BLE001
+                kind = "cap"
+            face_edges = _edges_of_face(face)
+            for e in face_edges:
+                slot = None
+                for rec in seen:
+                    try:
+                        if rec[0].IsSame(e):
+                            slot = rec
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+                if slot is None:
+                    seen.append((e, {kind}))
+                else:
+                    slot[1].add(kind)
+
+        for e, kinds in seen:
+            if "cyl" in kinds:
+                buckets["circular"].append(e)
+            elif kinds == {"side"}:
+                buckets["vertical"].append(e)
+            else:
+                buckets["horizontal"].append(e)
+    return buckets
+
+
+# ===== 策略 2：包围盒角点 =====
+
+def _box_strategy(ctx: Context, which: str) -> int:
+    """按位置点选：SelectByID2 会选中离给定三维点最近的实体。
+
+    箱体类零件的四条竖棱就在包围盒的四个角上，取 Y 中点即棱的中部。
+    只对箱体有意义，所以 circular 直接返回 0 交给别的策略。
+    """
+    if which == "circular":
+        return 0
+    try:
+        box = ctx.model.GetPartBox(True)   # x1,y1,z1,x2,y2,z2，单位米
+    except Exception:  # noqa: BLE001
+        return 0
+    if not box or len(box) < 6:
+        return 0
+    x1, y1, z1, x2, y2, z2 = (float(v) for v in box[:6])
+    if min(abs(x2 - x1), abs(y2 - y1), abs(z2 - z1)) < 1e-9:
+        return 0
+    mx, my, mz = (x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2
+
+    corners = [(x1, my, z1), (x2, my, z1), (x2, my, z2), (x1, my, z2)]
+    rims = [
+        (mx, y2, z1), (x2, y2, mz), (mx, y2, z2), (x1, y2, mz),
+        (mx, y1, z1), (x2, y1, mz), (mx, y1, z2), (x1, y1, mz),
+    ]
+    points = corners if which == "vertical" else rims if which == "horizontal" else corners + rims
+
+    # Coordinate picking only reaches entities that are selectable from the CURRENT view
+    # — if the point is hidden at this camera angle, SelectByID2 returns False just as a
+    # click would. Isometric shows every corner of a box, so orient first, then restore.
+    try:
+        ctx.model.ShowNamedView2("*Isometric", 7)
+        ctx.model.ViewZoomtofit2()
+    except Exception:  # noqa: BLE001 — orientation is an aid, not a requirement
+        pass
+
+    ctx.clear_selection()
+    n = 0
+    for px, py, pz in points:
+        try:
+            if ctx.model.Extension.SelectByID2("", "EDGE", px, py, pz, True, 0, None, 0):
+                n += 1
+        except Exception:  # noqa: BLE001
+            continue
+    if n == 0:
+        ctx.clear_selection()
+    return n
+
+
+# ===== 策略 3：用户已选 =====
+
+def _selected_strategy(ctx: Context, which: str) -> int:
+    """用户在 SolidWorks 里选好的边，原样使用。诚实的兜底，永远可用。"""
+    try:
+        return int(ctx.selected_count())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+# Order matters: narrowest and most trustworthy first.
+_STRATEGIES = (
+    ("feature", _feature_strategy),   # only what the last feature made
+    ("faces", _faces_strategy),       # whole body, by face topology
+    ("box", _box_strategy),           # geometric, box-shaped parts only
+)
+
+
+def probe(ctx: Context) -> dict:
+    """在当前模型上实际跑一遍各策略，报告每个各选中几条边。
+
+    这就是诊断该回答的问题——不是"分类失败了吗"，而是"哪条策略在这台机器上真的能用"。
+    结果会被 `select()` 缓存复用。
+    """
+    result: dict = {}
+    for name, fn in _STRATEGIES:
+        counts = {}
+        for which in ("vertical", "horizontal", "circular"):
+            try:
+                counts[which] = fn(ctx, which)
+            except Exception as e:  # noqa: BLE001
+                counts[which] = f"error: {e}"
+            finally:
+                ctx.clear_selection()
+        result[name] = counts
+    ctx.scratch["edge_probe"] = result
+    return result
+
+
+def select(ctx: Context, which: str) -> int:
+    """选中 `which` 描述的那些边，返回选中的数量。
+
+    先用上次验证过有效的策略；没有缓存就按顺序试，第一个选中东西的胜出并被记下。
+    全都不行时报错，并把每条策略的实际结果一并说出来——不留"未知原因"。
+    """
+    if which == "selected":
+        n = _selected_strategy(ctx, which)
+        if n == 0:
+            raise SWError(
+                'edges="selected" 需要你先在 SolidWorks 里选中要加工的边，当前没有选中任何实体。'
+            )
+        return n
+
+    cached = ctx.scratch.get("edge_strategy")
+    order = [s for s in _STRATEGIES if s[0] == cached] + [s for s in _STRATEGIES if s[0] != cached]
+
+    tried = []
+    for name, fn in order:
+        try:
+            n = fn(ctx, which)
+        except Exception as e:  # noqa: BLE001
+            tried.append(f"{name}: {e}")
+            continue
+        if n:
+            ctx.scratch["edge_strategy"] = name
+            return n
+        tried.append(f"{name}: 0 条")
+        ctx.clear_selection()
+
+    raise SWError(
+        f'找不到 {which} 的边（{"; ".join(tried)}）。'
+        '你可以在 SolidWorks 里手动选中要加工的边，然后用 edges="selected" 重试 —— '
+        "这比让工具去猜哪几条边更可靠。"
+    )

@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+## [0.2.75] - 2026-07-31
+
+### Refactored (P86 — 边选择收束:删 200 行八条路线,三策略各可验证)
+
+P75–P83 在 `_edge_kind` 一个函数里堆了八条 fallback 路线,某条
+返回错分类时工具会安静地倒错边。把手段当目的,困在"再加一条路线
+也许这次能成"里。
+
+新增 `edge_select.py`,三条策略:
+- **feature**:最近特征的 `GetFaces` → 环 → 边(范围最小最准)
+- **faces**:整个实体,按面归属推断(任意形状)
+- **box**:包围盒角点坐标点选(箱体类,摆正视图后极稳)
+- **selected**:用户在 SolidWorks 里自己选好(永远可用)
+
+`probe()` 在当前模型上实际跑一遍数出各策略能选几条,失败时说人话
+列出每条试过什么,告诉用户可手动选边用 `selected`。全程用对象
+自己的 `.Select2()`,只有 `box` 不得不用坐标点选。
+
+### Added
+
+- `sidecar/sw_agent/edge_select.py` — 三策略 + probe() + select()
+
+### Removed
+
+- `bridge.py` 删 `_classify_by_faces` + `_edge_kind`(全部 Route A/B/C/D/0/E)
+- `bridge.py` 删 `select_edges` 旧实现
+
+### Changed
+
+- `bridge.py` — `select_edges` 委派到 edge_select.select()
+- `diagnose.py` — 三个碎片字段 → 一个 `edge_strategies`
+- `feature.py` — extrude/cut_extrude/revolve 成功时记 `last_feature`
+- `prompts.ts` — 撤销"圆角不许画进草图"禁令,改为优先 `sketch_fillet`
+
 ## [0.2.74] - 2026-07-31
 
 ### Fixed (P82 — 边分类换方向:靠面的归属,完全不碰边的几何)

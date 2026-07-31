@@ -2,12 +2,12 @@
 
 Every hard bug in this project has been an API that is present on paper and missing in
 practice: GetBodies2 declared on the wrong interface, ICurve unreachable, the type
-library refusing to generate. Each one surfaced as a misleading downstream error and
-took a round of guessing to trace back.
+library refusing to generate, edges hanging off loops rather than faces. Each one
+surfaced as a misleading downstream error and cost a round of guessing to trace back.
 
 This tool asks the questions directly, so the answer is one call instead of an
 afternoon: is the early-binding cache there, can bodies/faces/edges be read, which
-feature-creation route is available.
+edge-selection strategy works here, which feature-creation route is available.
 """
 from __future__ import annotations
 
@@ -18,8 +18,9 @@ from ..registry import tool
 @tool(
     "sw_diagnostics",
     "Report which SolidWorks APIs are actually reachable on this machine (type-library "
-    "cache, body/face/edge access, feature-creation route). Call this when a tool fails "
-    "in a way that does not match the model — it turns a guessing game into one answer",
+    "cache, body/face/edge access, edge-selection strategy, feature-creation route). "
+    "Call this when a tool fails in a way that does not match the model — it turns a "
+    "guessing game into one answer",
     params={},
     category="query",
 )
@@ -27,8 +28,7 @@ def sw_diagnostics(ctx: Context):
     out: dict = {}
 
     # 1. Early-binding cache. Reporting only true/false was not enough — when it came
-    #    back false there was no way to tell WHICH of the three generation routes failed
-    #    or why, so the trace is included now.
+    #    back false there was no way to tell WHICH generation route failed or why.
     from ..typelib import feature_id, typelib_state
     try:
         import win32com.client as wc
@@ -61,29 +61,28 @@ def sw_diagnostics(ctx: Context):
     # 2. Geometry access
     try:
         faces, edges, trace = ctx.geometry()
-        kinds: dict = {}
-        for e in (edges or [])[:40]:
-            kind, _info = ctx._edge_kind(e)
-            kinds[kind or "unclassified"] = kinds.get(kind or "unclassified", 0) + 1
         out["geometry"] = {
             "faces": len(faces or []),
             "edges": len(edges or []),
-            "edge_kinds": kinds,
             "route": trace[-2:] if trace else [],
         }
-        # P82: face-membership classification runs in parallel — if this machine
-        # answers but edge-geometry routes do not, edge_kinds_by_faces will say so.
-        try:
-            by_faces = ctx._classify_by_faces()
-            out["geometry"]["edge_kinds_by_faces"] = {
-                k: len(v) for k, v in by_faces.items() if v
-            }
-        except Exception as e:  # noqa: BLE001
-            out["geometry"]["edge_kinds_by_faces_error"] = str(e)
     except Exception as e:  # noqa: BLE001
         out["geometry"] = {"error": str(e)}
 
-    # 3. Which feature APIs exist at all
+    # 3. Which edge-selection STRATEGY works here.
+    #
+    #    This replaces three earlier fields (edge_kinds / edge_kinds_by_faces /
+    #    select_by_box) that each answered a fragment of the question and none of which
+    #    said what to do next. Running the strategies for real and reporting the counts
+    #    is the only report that settles it: a non-zero number means that strategy can
+    #    pick those edges on this machine, today, on this model.
+    try:
+        from ..edge_select import probe
+        out["edge_strategies"] = probe(ctx)
+    except Exception as e:  # noqa: BLE001
+        out["edge_strategies"] = {"error": str(e)}
+
+    # 4. Which feature APIs exist at all
     try:
         fm = ctx.feat_mgr
         out["feature_api"] = {
@@ -94,12 +93,13 @@ def sw_diagnostics(ctx: Context):
     except Exception as e:  # noqa: BLE001
         out["feature_api"] = {"error": str(e)}
 
-    # 4. Document / sketch state — a stale active sketch explains a lot of odd failures
+    # 5. Document / sketch state — a stale active sketch explains a lot of odd failures
     try:
         active = ctx.sketch_mgr.ActiveSketch
         out["sketch"] = {
             "active": None if active is None else sw_get(active, "Name"),
             "last_recorded": ctx.scratch.get("last_sketch"),
+            "last_feature": ctx.scratch.get("last_feature"),
         }
     except Exception as e:  # noqa: BLE001
         out["sketch"] = {"error": str(e)}

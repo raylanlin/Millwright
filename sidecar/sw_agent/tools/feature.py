@@ -199,6 +199,7 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = Fal
     )
     if feat is None:
         raise SWError("extrude failed: make sure there is a closed sketch.")
+    ctx.scratch["last_feature"] = feat.Name
     return {"feature": feat.Name, "depth_mm": depth}
 
 
@@ -285,6 +286,8 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
                 made = new_cut(before)
             if made is None:
                 errors.append(f"CreateFeature(reverse={reverse}) made nothing")
+            if made is not None:
+                ctx.scratch["last_feature"] = made.Name
             return made
         except Exception as e:  # noqa: BLE001
             errors.append(f"definition(reverse={reverse}): {e}")
@@ -346,6 +349,7 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
                 if made is None:
                     made = new_cut(before)  # some versions return None yet still create it
                 if made is not None:
+                    ctx.scratch["last_feature"] = made.Name
                     return made
                 errors.append(f"{member}/{n}: accepted but produced no Cut feature")
                 break
@@ -425,6 +429,7 @@ def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = "
             "revolve failed — the sketch needs a closed profile plus a centerline as the axis. "
             f"(attempts: {' | '.join(errors[-3:])})"
         )
+    ctx.scratch["last_feature"] = sw_get(feat, "Name")
     return {"feature": sw_get(feat, "Name"), "angle_deg": angle, "cut": bool(cut)}
 
 
