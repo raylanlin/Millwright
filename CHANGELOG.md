@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [0.2.74] - 2026-07-31
+
+### Fixed (P82 — 边分类换方向:靠面的归属,完全不碰边的几何)
+
+七轮路线全挂 — ICurve 属性、顶点访问器、GetCurveParams2 任一接口
+都不可达。但诊断一直显示 `bodies=1 faces=6 edges=12`,面、面的法向、
+从面枚举边都可用,只有「边自己的几何」这一类 API 在这台机器上死。
+
+不要问边「你朝哪个方向」,问「你属于哪两个面」:
+- 两侧面交接 = 竖直边
+- 侧面 + 顶/底面交接 = 水平边
+- 圆柱面 = 圆形边
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — 新增 `_classify_by_faces()`,select_edges 优先走这条路
+- `sidecar/sw_agent/tools/diagnose.py` — 加 `edge_kinds_by_faces` 字段(判据)
+
 ## [0.2.73] - 2026-07-31
 
 ### Fixed (P81 — 边分类的真正答案:GetCurveParams2 在 ICurve 上,不在 IEdge 上)

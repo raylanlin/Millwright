@@ -335,6 +335,82 @@ class Context:
                 continue
         return False
 
+    def _classify_by_faces(self):
+        """P82: classify every edge by WHICH FACES it belongs to.
+
+        Seven rounds of edge-geometry routes have failed on this install — ICurve
+        properties, vertex accessors, GetCurveParams2 on either interface, all
+        unreachable. But the diagnostics have been reporting "bodies=1 faces=6 edges=12"
+        the whole time: faces, face normals and face->edge enumeration all work, and
+        select_face has relied on them since P44.
+
+        So stop asking an edge which way it points and ask which faces it separates:
+
+          * two side faces (no Y component in either normal) meet at a VERTICAL edge
+          * a side face and a top/bottom face meet at a HORIZONTAL one
+          * anything on a cylindrical face is CIRCULAR
+
+        Returns {"vertical": [edges], "horizontal": [...], "circular": [...]}.
+        """
+        buckets = {"vertical": [], "horizontal": [], "circular": []}
+        try:
+            bodies = self.solid_bodies()
+        except SWError:
+            return buckets
+
+        for body in bodies:
+            faces = list(body.GetFaces() or [])
+            # Group each face as side / cap / cylindrical, and remember its edges.
+            groups = []
+            for f in faces:
+                try:
+                    surf = f.GetSurface()
+                    planar = bool(surf.IsPlane())
+                except Exception:  # noqa: BLE001
+                    planar = False
+                kind = "cap"
+                if not planar:
+                    kind = "cyl"
+                else:
+                    try:
+                        n = f.Normal
+                        # Y is up in SolidWorks: a normal with no Y component is a wall.
+                        kind = "side" if abs(n[1]) < 0.1 else "cap"
+                    except Exception:  # noqa: BLE001
+                        kind = "cap"
+                try:
+                    edges = list(f.GetEdges() or [])
+                except Exception:  # noqa: BLE001
+                    edges = []
+                groups.append((kind, edges))
+
+            # Walk the edges once, recording which face kinds each one touches. Edge
+            # objects cannot be compared with ==, so identity goes through IEntity::IsSame.
+            seen = []   # [(edge, {kinds})]
+            for kind, edges in groups:
+                for e in edges:
+                    slot = None
+                    for rec in seen:
+                        try:
+                            if rec[0].IsSame(e):
+                                slot = rec
+                                break
+                        except Exception:  # noqa: BLE001
+                            continue
+                    if slot is None:
+                        seen.append((e, {kind}))
+                    else:
+                        slot[1].add(kind)
+
+            for e, kinds in seen:
+                if "cyl" in kinds:
+                    buckets["circular"].append(e)
+                elif kinds == {"side"}:
+                    buckets["vertical"].append(e)
+                else:
+                    buckets["horizontal"].append(e)
+        return buckets
+
     def _edge_kind(self, edge):
         """Classify an edge: ('line', unit-direction) | ('circle', radius) | (None, None).
 
@@ -497,6 +573,36 @@ class Context:
         _faces, edges, trace = self.geometry()
         if not edges:
             raise SWError(f"could not read any edge of the solid ({'; '.join(trace)})")
+
+        # P82: face-membership classification first — it uses only APIs proven to work
+        # here, while every edge-geometry route has come back unclassified. Only run
+        # this path for the descriptive keys; precise edge-geometry selection still
+        # falls through to the original loop if needed.
+        if key in ("vertical", "horizontal", "circular", "all"):
+            by_faces = self._classify_by_faces()
+            if key == "all":
+                picked = [e for group in by_faces.values() for e in group]
+            else:
+                picked = by_faces.get(key, [])
+            if picked:
+                if not append:
+                    self.clear_selection()
+                first = True
+                n = 0
+                for e in picked:
+                    for member, args in (("Select4", (True, None)), ("Select2", (True, 0)), ("Select", (True,))):
+                        fn = getattr(e, member, None)
+                        if fn is None:
+                            continue
+                        try:
+                            if fn(*args):
+                                n += 1
+                                break
+                        except Exception:  # noqa: BLE001
+                            continue
+                if n:
+                    return n
+
         n, unread = 0, 0
         first = not append
         for edge in edges:

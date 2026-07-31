@@ -71,6 +71,15 @@ def sw_diagnostics(ctx: Context):
             "edge_kinds": kinds,
             "route": trace[-2:] if trace else [],
         }
+        # P82: face-membership classification runs in parallel — if this machine
+        # answers but edge-geometry routes do not, edge_kinds_by_faces will say so.
+        try:
+            by_faces = ctx._classify_by_faces()
+            out["geometry"]["edge_kinds_by_faces"] = {
+                k: len(v) for k, v in by_faces.items() if v
+            }
+        except Exception as e:  # noqa: BLE001
+            out["geometry"]["edge_kinds_by_faces_error"] = str(e)
     except Exception as e:  # noqa: BLE001
         out["geometry"] = {"error": str(e)}
 
