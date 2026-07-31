@@ -6,6 +6,57 @@
 
 ## [Unreleased]
 
+## [0.2.76] - 2026-07-31
+
+### Fixed (P87 — 把诊断修对 + 给 build_part 一条标量路)
+
+#### 诊断报告从「几」改为「几 + 为什么没拿到」
+
+上一轮 `edge_strategies` 三条全 0。但 `bounding_box` 正常返回了
+40/10/30,说明 `GetPartBox` 可用——那 `box` 策略返回 0 就只能是**选择那一步**
+失败,而不是「找不到边」。
+
+问题是 `probe()` 只数最终选中数:
+- 找不到任何边 → 0
+- 找到 12 条但一条都选不中 → 也是 0
+
+两种情况修法完全不同,报告却分辨不出来。这正是反复犯的同
+一个错:报结果不报步骤,于是每次都只能猜下一条路线。所以本
+轮**不加第四条策略**,先把报告修对。
+
+#### `Select4` / `SelectByID2` callout 参数从裸 `None` 改 `VARIANT(VT_DISPATCH, None)`
+
+`Select4(append, callout)` 的第二个参数是接口指针,新模块里传
+了 Python 的裸 `None` — pywin32 有时会拒。`select_face` 之前就是这样
+修的,新模块里又写回了裸 `None`。如果这就是元凶,那三条策略
+会一起恢复 —— 它们都走同一个 `_select()`。
+
+#### `build_part` 标量路:不再让 MiniMax 抹平数组
+
+P78 加了 `items` schema、P79 加了容错解析、P81 加了 XML 兼容
+—— 对 MiniMax 全都没用。这家厂商就是不会忠实序列化
+array-of-objects,再怎么声明都一样。
+
+新增 `steps_text` 参数,每行一个步骤,标量字符串不会被篡改:
+
+```
+start_sketch plane=top
+sketch_rectangle x=-20 y=-15 width=40 height=30
+extrude depth=10
+```
+
+- `steps` 为空(或没传)而 `steps_text` 有内容时自动走这条
+- 值仍交给已有的 `_coerce_values` 定型,`depth=10` 到达时是数字
+- 报错文案也改了:不再说「重发一次同样的结构」(那必然同样失败),
+  而是直接告诉模型改用 `steps_text`
+
+### Changed
+
+- `sidecar/sw_agent/edge_select.py` — `found` / `selected` 分离 + `VARIANT`
+  null + 探测坐标落进 `notes`
+- `sidecar/sw_agent/tools/diagnose.py` — `edge_strategies` 报告新结构
+- `sidecar/sw_agent/tools/batch.py` — `steps_text` 标量路 + 报错指向它
+
 ## [0.2.75] - 2026-07-31
 
 ### Refactored (P86 — 边选择收束:删 200 行八条路线,三策略各可验证)

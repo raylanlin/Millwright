@@ -33,16 +33,43 @@ from .bridge import Context, SWError
 _SIDE_FACE_TOL = 0.1
 
 
-def _select(entity, append: bool = True) -> bool:
-    """选中一个实体。Select4/Select2/Select 三种签名跨版本都存在，依次尝试。"""
-    for member, args in (("Select4", (append, None)), ("Select2", (append, 0)), ("Select", (append,))):
+def _variant_null():
+    """VARIANT 形式的空引用。
+
+    P87: Select4 的 callout 参数是接口指针，pywin32 传 Python 的 None 过去有时会被拒；
+    显式的 VT_DISPATCH/null 才是正确形式。这一点之前踩过（select_face 就是这么修的），
+    但新模块里写回了裸 None。
+    """
+    try:
+        import pythoncom
+        from win32com.client import VARIANT
+        return VARIANT(pythoncom.VT_DISPATCH, None)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _select(entity, append: bool = True, errors: list | None = None) -> bool:
+    """选中一个实体。Select4/Select2/Select 三种签名跨版本都存在，依次尝试。
+
+    P87: 失败原因会记进 errors。之前它只返回 True/False，于是"一条边都没找到"和
+    "找到了但选不中"在上层看起来完全一样 —— 报告最终结果而不报告中间步骤，
+    结果就是只能靠猜。
+    """
+    null = _variant_null()
+    for member, args in (("Select4", (append, null)), ("Select2", (append, 0)), ("Select", (append,))):
         fn = getattr(entity, member, None)
         if fn is None:
+            if errors is not None:
+                errors.append(f"{member}: 不存在")
             continue
         try:
             if fn(*args):
                 return True
-        except Exception:  # noqa: BLE001 — 换下一种签名
+            if errors is not None:
+                errors.append(f"{member}: 返回 False")
+        except Exception as e:  # noqa: BLE001 — 换下一种签名
+            if errors is not None:
+                errors.append(f"{member}: {e}")
             continue
     return False
 
@@ -56,10 +83,41 @@ def _faces_strategy(ctx: Context, which: str):
     只用 GetFaces / face.Normal / face.GetEdges / IsSame。
     """
     edges = _faces_buckets(ctx).get(which, [])
+    return _select_all(ctx, edges)
+
+
+class Picked:
+    """一次选边的结果：找到几条、选中几条、以及为什么没选中。
+
+    P87: 只回一个数字时，0 既可能是"没找到边"也可能是"找到了但选不中"，
+    两者的修法完全不同却分辨不出来。这个类存在的唯一目的就是让它们分开。
+    """
+
+    __slots__ = ("found", "notes", "selected")
+
+    def __init__(self, found: int = 0, selected: int = 0, notes=None):
+        self.found = found
+        self.selected = selected
+        self.notes = notes or []
+
+    def __bool__(self):
+        return self.selected > 0
+
+    def report(self):
+        r: dict = {"found": self.found, "selected": self.selected}
+        if self.notes:
+            r["why"] = self.notes[:3]
+        return r
+
+
+def _select_all(ctx: Context, edges) -> Picked:
+    """把这些边全部选中，并如实报告找到多少、选中多少、失败原因。"""
     if not edges:
-        return 0
+        return Picked(0, 0, ["没有找到符合描述的边"])
     ctx.clear_selection()
-    return sum(1 for e in edges if _select(e))
+    errors: list = []
+    n = sum(1 for e in edges if _select(e, True, errors))
+    return Picked(len(edges), n, errors)
 
 
 def _edges_of_face(face) -> list:
@@ -138,25 +196,22 @@ def _feature_strategy(ctx: Context, which: str) -> int:
     """
     name = ctx.scratch.get("last_feature")
     if not name:
-        return 0
+        return Picked(0, 0, ["会话里没有记录最近创建的特征"])
     try:
         from .tools.feature import _find_feature
         feat = _find_feature(ctx, name)
-    except Exception:  # noqa: BLE001
-        feat = None
+    except Exception as e:  # noqa: BLE001
+        return Picked(0, 0, [f"查找特征 {name} 失败: {e}"])
     if feat is None:
-        return 0
+        return Picked(0, 0, [f"特征树里找不到 {name}"])
     try:
         faces = list(feat.GetFaces() or [])
-    except Exception:  # noqa: BLE001
-        return 0
+    except Exception as e:  # noqa: BLE001
+        return Picked(0, 0, [f"feature.GetFaces: {e}"])
     if not faces:
-        return 0
+        return Picked(0, 0, [f"特征 {name} 没有返回任何面"])
     edges = _bucket_faces(faces).get(which, [])
-    if not edges:
-        return 0
-    ctx.clear_selection()
-    return sum(1 for e in edges if _select(e))
+    return _select_all(ctx, edges)
 
 
 def _faces_buckets(ctx: Context) -> dict:
@@ -202,23 +257,23 @@ def _faces_buckets(ctx: Context) -> dict:
 
 # ===== 策略 2：包围盒角点 =====
 
-def _box_strategy(ctx: Context, which: str) -> int:
+def _box_strategy(ctx: Context, which: str) -> Picked:
     """按位置点选：SelectByID2 会选中离给定三维点最近的实体。
 
     箱体类零件的四条竖棱就在包围盒的四个角上，取 Y 中点即棱的中部。
     只对箱体有意义，所以 circular 直接返回 0 交给别的策略。
     """
     if which == "circular":
-        return 0
+        return Picked(0, 0, ["箱体坐标法不适用于圆形边"])
     try:
         box = ctx.model.GetPartBox(True)   # x1,y1,z1,x2,y2,z2，单位米
-    except Exception:  # noqa: BLE001
-        return 0
+    except Exception as e:  # noqa: BLE001
+        return Picked(0, 0, [f"GetPartBox: {e}"])
     if not box or len(box) < 6:
-        return 0
+        return Picked(0, 0, ["GetPartBox 没有返回包围盒"])
     x1, y1, z1, x2, y2, z2 = (float(v) for v in box[:6])
     if min(abs(x2 - x1), abs(y2 - y1), abs(z2 - z1)) < 1e-9:
-        return 0
+        return Picked(0, 0, ["包围盒是退化的（某个方向厚度为 0）"])
     mx, my, mz = (x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2
 
     corners = [(x1, my, z1), (x2, my, z1), (x2, my, z2), (x1, my, z2)]
@@ -238,16 +293,26 @@ def _box_strategy(ctx: Context, which: str) -> int:
         pass
 
     ctx.clear_selection()
+    null = _variant_null()
     n = 0
+    notes: list = []
     for px, py, pz in points:
         try:
-            if ctx.model.Extension.SelectByID2("", "EDGE", px, py, pz, True, 0, None, 0):
+            if ctx.model.Extension.SelectByID2("", "EDGE", px, py, pz, True, 0, null, 0):
                 n += 1
-        except Exception:  # noqa: BLE001
+            elif len(notes) < 2:
+                notes.append(f"({px * 1000:.1f}, {py * 1000:.1f}, {pz * 1000:.1f})mm 处没有选到边")
+        except Exception as e:  # noqa: BLE001
+            if len(notes) < 2:
+                notes.append(f"SelectByID2: {e}")
             continue
     if n == 0:
         ctx.clear_selection()
-    return n
+        notes.append(
+            f"包围盒 mm: x {x1 * 1000:.1f}~{x2 * 1000:.1f}, "
+            f"y {y1 * 1000:.1f}~{y2 * 1000:.1f}, z {z1 * 1000:.1f}~{z2 * 1000:.1f}"
+        )
+    return Picked(len(points), n, notes)
 
 
 # ===== 策略 3：用户已选 =====
@@ -279,9 +344,9 @@ def probe(ctx: Context) -> dict:
         counts = {}
         for which in ("vertical", "horizontal", "circular"):
             try:
-                counts[which] = fn(ctx, which)
+                counts[which] = fn(ctx, which).report()
             except Exception as e:  # noqa: BLE001
-                counts[which] = f"error: {e}"
+                counts[which] = {"error": str(e)}
             finally:
                 ctx.clear_selection()
         result[name] = counts
@@ -309,14 +374,18 @@ def select(ctx: Context, which: str) -> int:
     tried = []
     for name, fn in order:
         try:
-            n = fn(ctx, which)
+            got = fn(ctx, which)
         except Exception as e:  # noqa: BLE001
             tried.append(f"{name}: {e}")
             continue
-        if n:
+        if got:
             ctx.scratch["edge_strategy"] = name
-            return n
-        tried.append(f"{name}: 0 条")
+            return got.selected
+        # 找到了边却选不中，和一条边都没找到，是两个完全不同的问题 —— 说清楚是哪个
+        detail = "; ".join(got.notes[:2]) if got.notes else ""
+        tried.append(
+            f"{name}: 找到 {got.found} 条、选中 0 条" + (f"（{detail}）" if detail else "")
+        )
         ctx.clear_selection()
 
     raise SWError(

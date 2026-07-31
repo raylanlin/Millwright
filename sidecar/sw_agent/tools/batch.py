@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 import json
-import re
 
 from ..bridge import Context, SWError
 from ..registry import TOOLS, call, tool
@@ -36,35 +35,6 @@ _FORBIDDEN = {
 }
 
 
-def _steps_from_xml(text: str):
-    """P81: recover steps from an XML-ish payload.
-
-    MiniMax serialised the steps array as XML rather than JSON:
-
-        <item><tool>start_sketch</tool><params><plane>top</plane></params></item>
-
-    ...and prefixed it with a stray token, so json.loads failed and the model retried
-    twice before abandoning batching. The declared schema says array-of-objects; this is
-    the provider's own encoding of exactly that, so accepting it costs nothing and saves
-    the whole batch. Values arrive as text and are typed by _coerce_values downstream.
-    """
-    items = re.findall(r"<item>(.*?)</item>", text, re.DOTALL)
-    if not items:
-        return None
-    steps = []
-    for chunk in items:
-        m = re.search(r"<tool>(.*?)</tool>", chunk, re.DOTALL)
-        if not m:
-            continue
-        params: dict = {}
-        pm = re.search(r"<params>(.*?)</params>", chunk, re.DOTALL)
-        if pm:
-            for k, v in re.findall(r"<([A-Za-z_][\w]*)>(.*?)</\1>", pm.group(1), re.DOTALL):
-                params[k] = v.strip()
-        steps.append({"tool": m.group(1).strip(), "params": params})
-    return steps or None
-
-
 def _coerce_step(raw, index: int):
     """One step, from whatever shape the provider actually delivered.
 
@@ -78,8 +48,10 @@ def _coerce_step(raw, index: int):
         text = raw.strip()
         if not text:
             raise SWError(
-                f"step {index} arrived empty — the nested step objects were lost in transit. "
-                'Resubmit with each step as an object, e.g. {"tool":"extrude","params":{"depth":10}}'
+                f"step {index} arrived empty — your provider flattened the nested step objects in "
+                "transit, and resending the same shape will fail the same way. Use the steps_text "
+                'parameter instead, one step per line: "start_sketch plane=top" / '
+                '"sketch_rectangle x=-20 y=-15 width=40 height=30" / "extrude depth=10"'
             )
         try:
             raw = json.loads(text)
@@ -142,6 +114,14 @@ def _coerce_values(params: dict) -> dict:
     "why, so you can fix that one step and resubmit the remainder. All dimensions are "
     "in mm/degrees exactly as with the individual tools.",
     params={
+        "steps_text": {
+            "type": "string",
+            "desc": 'ALTERNATIVE to "steps", one step per line: "<tool> key=value key=value". '
+                    'e.g. "start_sketch plane=top | sketch_rectangle x=-20 y=-15 width=40 height=30 | '
+                    'extrude depth=10" (newline-separated). Use this if "steps" comes back empty — '
+                    'some providers flatten nested arrays in transit, and a plain string survives.',
+            "default": "",
+        },
         "steps": {
             "type": "array",
             # P78: the element schema MUST be declared. Without "items" the provider's
@@ -170,20 +150,52 @@ def _coerce_values(params: dict) -> dict:
     },
     category="feature", destructive=True,
 )
-def build_part(ctx: Context, steps, part: str = ""):
-    if isinstance(steps, str):   # the whole array may arrive as one string
-        text = steps.strip()
+def _steps_from_text(text: str):
+    """P87: parse the line-oriented form — "<tool> key=value key=value" per line.
+
+    Why this exists: MiniMax flattens the nested step objects to empty strings on the way
+    out, so a correct request arrives as ["", "", ""] however the schema declares itself.
+    Three rounds of schema work did not fix that, because the problem is not in the schema
+    — the provider simply does not serialise arrays-of-objects faithfully.
+
+    A scalar string does survive, so this is the escape hatch. Values are typed by
+    _coerce_values downstream, so "depth=10" arrives as a number.
+    """
+    steps = []
+    for raw in (text or "").replace("|", "\n").splitlines():
+        line = raw.strip().lstrip("-").strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        tool = parts[0].rstrip(":,")
+        params: dict = {}
+        for token in parts[1:]:
+            if "=" not in token:
+                continue
+            k, v = token.split("=", 1)
+            params[k.strip()] = v.strip().strip("\"'`,")
+        steps.append({"tool": tool, "params": params})
+    return steps
+
+
+def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
+    # P87: fall back to the line form when the array arrived empty or was never sent.
+    hollow = not steps or (
+        isinstance(steps, list)
+        and all(isinstance(s, str) and not s.strip() for s in steps)
+    )
+    if steps_text and hollow:
+        steps = _steps_from_text(steps_text)
+        if not steps:
+            raise SWError(
+                'steps_text 没有解析出任何步骤。每行一个："<工具名> 参数=值 参数=值"，'
+                '例如 "extrude depth=10"。'
+            )
+    if isinstance(steps, str):   # the whole array may arrive as one JSON string
         try:
-            steps = json.loads(text)
+            steps = json.loads(steps)
         except ValueError:
-            # P81: some providers emit XML for an array-of-objects parameter
-            recovered = _steps_from_xml(text)
-            if recovered is None:
-                raise SWError(
-                    "steps must be an array of objects, but arrived as unparseable text "
-                    f"(neither JSON nor <item> XML): {text[:120]}"
-                ) from None
-            steps = recovered
+            raise SWError(f"steps is not valid JSON: {steps[:120]}") from None
     if not isinstance(steps, list) or not steps:
         raise SWError("steps must be a non-empty array of {tool, params} objects.")
     if len(steps) > MAX_STEPS:
