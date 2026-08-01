@@ -80,6 +80,72 @@ def _select(entity, append: bool = True, errors: list | None = None) -> bool:
 
 # ===== 策略 1：面的归属 =====
 
+def _edge_fingerprint(edge):
+    """P94: 边的几何指纹，用于去重。
+
+    IsSame 在这台机器上静默失败，同一 COM 对象的两个引用 id() 也不同，
+    P90 的三级去重（IsSame / COM 指针 / 相邻面对）全部失效。但一条边的
+    包围盒坐标是几何量，与引用无关——从两个面拿到同一条边，box 一定
+    相同。用 GetCurveBox 排序后的 6 元组做 key；拿不到时回退 id()。
+    """
+    try:
+        box = sw_get(edge, "GetCurveBox")
+        if box and len(box) >= 6:
+            return ("box", tuple(round(float(v), 6) for v in box[:6]))
+    except Exception:  # noqa: BLE001
+        pass
+    return ("id", id(edge))
+
+
+def _feature_strategy(ctx: Context, which: str):
+    """P94: 最近特征创建的边（feature 策略回归，几何指纹去重）。
+
+    P90 删掉 feature 是因为「收集每个面的边再归类」让每条边进来两次，
+    而三级身份去重全部失效。这次换几何去重：边的包围盒坐标与引用无关，
+    从哪个面拿到都一样，所以同一条边只进一次。
+
+    范围最小最准：用户说「圆柱顶面边」时，只有最近特征的边会被选中，
+    不会像 circular 那样把整个文档 18 条圆边全捞进来。
+    """
+    notes: list = []
+    name = ctx.scratch.get("last_feature")
+    if not name:
+        return Picked(0, 0, ["没有 last_feature（先建一个特征，再按特征选边）"])
+    feat = None
+    for f in (ctx.all_features() or []):
+        try:
+            if sw_get(f, "Name") == name:
+                feat = f
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if feat is None:
+        return Picked(0, 0, [f"找不到特征 {name}（可能已被改名或删除）"])
+    try:
+        faces = list(sw_get(feat, "GetFaces") or [])
+    except Exception as ex:  # noqa: BLE001
+        return Picked(0, 0, [f"feature.GetFaces: {ex}"])
+    if not faces:
+        return Picked(0, 0, [f"特征 {name} 没有可读的面"])
+    seen: set = set()
+    edges: list = []
+    for face in faces:
+        for e in _edges_of_face(face):
+            fp = _edge_fingerprint(e)
+            if fp in seen:
+                continue
+            seen.add(fp)
+            edges.append(e)
+    buckets = _bucket_edges(edges, notes)
+    if which == "all":
+        picked = [e for group in buckets.values() for e in group]
+    else:
+        picked = buckets.get(which, [])
+    got = _select_all(ctx, picked)
+    got.notes.extend(notes[:2])
+    return got
+
+
 def _faces_strategy(ctx: Context, which: str):
     """靠"这条边属于哪两个面"来判断，不碰边自身的几何。
 
@@ -381,21 +447,59 @@ def _selected_strategy(ctx: Context, which: str) -> int:
         return 0
 
 
-# P91: the "feature" strategy is gone.
+# P94: the "feature" strategy is back.
 #
-# It scoped selection to the faces of the last feature, which sounded better than walking
-# the whole body — but it collected edges face by face, so every edge arrived twice, and
-# de-duplicating them proved impossible here: two references to one edge are distinct COM
-# wrappers with distinct pointers, and IsSame fails silently on this install. It reported
-# 8 vertical edges on a box that has 4, twice, across two rounds of fixes.
-#
-# A strategy that quietly answers wrong is worse than one that does not exist, and "faces"
-# already answers correctly by walking body.GetEdges() — each edge exactly once, nothing to
-# de-duplicate. Deleting beats a third attempt at fixing.
+# P91 deleted it because it collected edges face by face, so every edge arrived twice,
+# and identity-based de-duplication (IsSame, COM pointer, adjacent-face pair) all failed
+# on this install. P94 replaces identity with GEOMETRY: an edge's bounding-box coords are
+# reference-independent, so the same edge seen from two faces hashes to the same key.
+# With de-dup fixed, "feature" is the most precise strategy — it scopes to the edges the
+# LAST feature created, which is exactly what "the top edge of the cylinder" means, and
+# it avoids "circular" pulling in every round edge of the whole document.
 _STRATEGIES = (
-    ("faces", _faces_strategy),   # whole body, by the faces each edge separates
-    ("box", _box_strategy),       # geometric fallback, box-shaped parts only
+    ("feature", _feature_strategy),   # last feature's faces -> edges (P94, geometry de-dup)
+    ("faces", _faces_strategy),       # whole body, by the faces each edge separates
+    ("box", _box_strategy),           # geometric fallback, box-shaped parts only
 )
+
+
+def _probe_feature(ctx: Context) -> dict:
+    """P94: report what the feature strategy sees on the current model."""
+    notes: list = []
+    name = ctx.scratch.get("last_feature")
+    if not name:
+        return {"skipped": "没有 last_feature（还没有建特征）"}
+    feat = None
+    for f in (ctx.all_features() or []):
+        try:
+            if sw_get(f, "Name") == name:
+                feat = f
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if feat is None:
+        return {"skipped": f"找不到特征 {name}"}
+    try:
+        faces = list(sw_get(feat, "GetFaces") or [])
+    except Exception as ex:  # noqa: BLE001
+        return {"skipped": f"feature.GetFaces: {ex}"}
+    seen: set = set()
+    edges: list = []
+    for face in faces:
+        for e in _edges_of_face(face):
+            fp = _edge_fingerprint(e)
+            if fp in seen:
+                continue
+            seen.add(fp)
+            edges.append(e)
+    buckets = _bucket_edges(edges, notes)
+    report: dict = {}
+    for which in ("vertical", "horizontal", "circular"):
+        got = _select_all(ctx, buckets.get(which, []))
+        got.notes.extend(notes[:2])
+        report[which] = got.report()
+        ctx.clear_selection()
+    return report
 
 
 def probe(ctx: Context) -> dict:
@@ -406,6 +510,13 @@ def probe(ctx: Context) -> dict:
     三类边一起分出来；box 策略只在 faces 没结果时才试，因为它本来就是兜底。
     """
     result: dict = {}
+
+    # P94: feature strategy first — it scopes to the last feature, the most precise
+    # answer when the model asks about edges the most recent feature created.
+    try:
+        result["feature"] = _probe_feature(ctx)
+    except Exception as e:  # noqa: BLE001
+        result["feature"] = {"error": str(e)}
 
     notes: list = []
     buckets = _faces_buckets(ctx, notes)

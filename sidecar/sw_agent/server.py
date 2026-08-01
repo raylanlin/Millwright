@@ -106,6 +106,14 @@ def serve() -> None:
                 data = registry.list_tools()
             elif method == "call":
                 data = registry.call(ctx, params.get("name"), params.get("args") or {})
+                # P94: attach the lightweight document snapshot to every tool result so
+                # the model never has to burn a list_features/analyze_view turn just to
+                # locate itself. Failure to build the snapshot must not fail the tool.
+                if isinstance(data, dict):
+                    try:
+                        data["_state"] = ctx.doc_state()
+                    except Exception:  # noqa: BLE001 — state is a convenience
+                        pass
             elif method == "reconnect":
                 ctx.reconnect()
                 data = {"reconnected": True}

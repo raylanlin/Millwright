@@ -230,6 +230,16 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
         plan.append((name, params))
 
     done = []
+    # P94: no document open → create one first, then run the batch. Previously the
+    # model burned a round-trip: build_part failed with "No document is open", the
+    # model called new_part, then resubmitted the whole batch. (new_part stays in
+    # _FORBIDDEN for user-supplied steps — it switches the active document, which is
+    # exactly why a batch must not contain it — but auto-creating a fresh part when
+    # there is NO document at all is always the right thing for build_part.)
+    try:
+        ctx.model
+    except SWError:
+        call(ctx, "new_part", {})
     for i, (name, params) in enumerate(plan):
         try:
             result = call(ctx, name, params)

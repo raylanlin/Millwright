@@ -277,6 +277,42 @@ class Context:
         except Exception:  # noqa: BLE001
             return []
 
+    def doc_state(self) -> dict:
+        """P94: lightweight document state, appended to every tool result.
+
+        The model keeps burning turns on "where am I": no document? which part? how
+        many features? what is selected? Every tool result now carries a one-line
+        snapshot so it can stop asking list_features / analyze_view just to locate
+        itself. Failures degrade to partial fields rather than raising — state is a
+        convenience, never a reason to fail the tool.
+        """
+        state: dict = {"doc": None}
+        try:
+            m = self.sw.ActiveDoc
+            if m is None:
+                return state
+            state["doc"] = sw_get(m, "GetTitle")
+            state["type"] = doc_type_name(m)
+        except Exception:  # noqa: BLE001
+            return state
+        try:
+            feats = self.all_features()
+            state["features"] = len(feats)
+        except Exception:  # noqa: BLE001
+            pass
+        lf = self.scratch.get("last_feature")
+        if lf:
+            state["last_feature"] = lf
+        try:
+            edges, others = self.selected_edge_count()
+            if edges or others:
+                state["selected"] = {"edges": edges}
+                if others:
+                    state["selected"]["other_types"] = sorted(others)
+        except Exception:  # noqa: BLE001
+            pass
+        return state
+
     def geometry(self):
         """P49: return (faces, edges, trace) for the current part.
 

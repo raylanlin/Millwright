@@ -6,6 +6,52 @@
 
 ## [Unreleased]
 
+## [0.2.83] - 2026-08-01
+
+### Changed (P94 — 交互逻辑五项优化)
+
+#### ① build_part 无文档时自动新建零件
+
+之前: 模型先 build_part 报 "No document is open" → new_part → 整批重发,
+白烧一轮。现在 build_part 执行前检测到无文档,直接自动 new_part 再跑整批。
+
+#### ② feature 策略回归(几何指纹去重)
+
+P91 删掉 feature 是因为身份去重(IsSame / COM 指针 / 相邻面对)在这台
+机器上全部失效,每条边被数两次。P94 换成**几何去重**:一条边的包围盒
+坐标与引用无关,从哪个面拿到同一条边 hash 到同一个 key。
+
+feature 现在是最准的策略 —— 范围限定到最近特征创建的边:
+- 用户说「圆柱顶面边」= 最近特征(凸台-拉伸)的边,不再把整个文档
+  18 条圆边全捞进来(circular 的老问题)
+- 策略顺序: feature → faces → box(probe 也会报告 feature)
+
+#### ③ 每个工具结果附带 _state 文档快照
+
+模型反复用 list_features / analyze_view 确认"我在哪"。现在每个工具返回
+都带 \`_state\`:{文档名/类型, 特征数, last_feature, 当前选中}。定位自己
+用它,不再每轮查询。快照失败降级为部分字段,不会让工具失败。
+
+#### ④ 提示词: 能结构化确认的别截图
+
+- 收尾核对优先 list_features / 查询 / 包围盒,只有"形状像不像"才用
+  analyze_view 截图
+- 明确 circular 会选中全文档所有圆边,复杂零件想倒"某个特征自己的边"
+  直接说清特征;edges="selected" 会校验选中的确实是边(混面/特征拒绝)
+
+#### ⑤ 工具返回结构化统一(承 ③)
+
+build_part 失败已带机器可读 steps 清单;fillet 失败带 attempts;现在
+统一补上 _state 快照,模型不再需要猜"当前状态是什么"。
+
+### Changed
+
+- `sidecar/sw_agent/tools/batch.py` — build_part 无文档自动 new_part
+- `sidecar/sw_agent/edge_select.py` — feature 策略回归(几何指纹去重)+ probe 报告
+- `sidecar/sw_agent/bridge.py` — 新增 doc_state()
+- `sidecar/sw_agent/server.py` — call 结果附带 _state
+- `src/main/llm/prompts.ts` — 结构化确认优先 + circular/selected 语义
+
 ## [0.2.82] - 2026-08-01
 
 ### Fixed (P93 — edges="selected" 不再静默倒错边)
