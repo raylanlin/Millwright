@@ -167,6 +167,38 @@ class Context:
     def selected_count(self) -> int:
         return self.model.SelectionManager.GetSelectedObjectCount2(-1)
 
+    def selected_edge_count(self):
+        """P93: number of currently selected EDGES, plus what else is selected.
+
+        selected_count() counts ANY selected entity — a leftover selection from the
+        previous tool (e.g. the just-created extrusion feature) can satisfy a
+        "something is selected" check, and FeatureFillet3 then rounds every edge of the
+        picked face/feature. That is how edges="selected" with NO human picking
+        silently filleted both rims of a fresh cylinder.
+
+        Returns (edges, other_types) where other_types is a set of swSelXXXX codes
+        present in the selection but not edges (empty set when only edges are picked).
+        swSelEDGES = 2 in the SolidWorks API.
+        """
+        others: set = set()
+        try:
+            sel = sw_get(self.model, "SelectionManager")
+            total = int(sw_get(sel, "GetSelectedObjectCount2", -1))
+        except Exception:  # noqa: BLE001
+            return 0, others
+        edges = 0
+        for i in range(1, total + 1):
+            try:
+                obj = sw_get(sel, "GetSelectedObject6", i)
+                typ = int(sw_get(obj, "GetType")) if obj is not None else -1
+            except Exception:  # noqa: BLE001 — treat unreadable as "not an edge"
+                typ = -1
+            if typ == 2:  # swSelEDGES
+                edges += 1
+            else:
+                others.add(typ)
+        return edges, others
+
     def select_by_id(self, name, typ, x=0.0, y=0.0, z=0.0, append=False, mark=0) -> bool:
         # P26: under early binding the Callout param ([in] IDispatch*) must be a
         # VARIANT(VT_DISPATCH, None) — a bare None raises DISP_E_TYPEMISMATCH

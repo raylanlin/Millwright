@@ -449,9 +449,27 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical"):
     # P45: previously this REQUIRED a human to pre-select edges in SolidWorks, so from
     # chat it could only ever fail. Now it selects the described edge set itself.
     if edges == "selected":
-        if ctx.selected_count() < 1:
-            raise SWError("nothing is selected — pass edges=vertical/horizontal/circular/all instead.")
-        picked = ctx.selected_count()
+        # P93: selected_count() counts ANY entity — a leftover selection from the
+        # previous tool (e.g. the just-created extrusion) can satisfy the "something is
+        # selected" check, and FeatureFillet3 then rounds every edge of the picked
+        # face/feature. That silently filleted BOTH rims of a fresh cylinder with no
+        # human picking. Count only edges, and say what else is selected.
+        picked, others = ctx.selected_edge_count()
+        if picked < 1:
+            detail = f"（当前选中了非边实体 {sorted(others)}）" if others else "（当前没有任何选中）"
+            raise SWError(
+                f"edges=\"selected\" 需要你先在 SolidWorks 里选中要圆角的边（当前选中的不是边，"
+                f"或没有选中任何实体）。{detail} 也可以改用 edges=vertical/horizontal/circular/all。"
+            )
+        if others:
+            # P93: edges mixed with faces/features — FeatureFillet3 would round every edge
+            # of the picked face/feature too (that is exactly how a leftover extrusion
+            # selection silently filleted both rims of a fresh cylinder). Refuse rather
+            # than quietly doing more than asked.
+            raise SWError(
+                f"edges=\"selected\" 选中里混有非边实体 {sorted(others)}。"
+                "请只选中要圆角的边（可先 Ctrl+点击取消其它选中），或改用 edges=vertical/horizontal/circular/all。"
+            )
     else:
         # P45.1: clear first. A leftover selection from the previous tool is why one run
         # "succeeded" by rounding the four hole edges instead of the requested junction.

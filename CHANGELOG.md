@@ -6,6 +6,31 @@
 
 ## [Unreleased]
 
+## [0.2.82] - 2026-08-01
+
+### Fixed (P93 — edges="selected" 不再静默倒错边)
+
+装机验证圆柱题时抓到:新建零件后**没有任何人手动选边**,
+`fillet_edges(edges="selected")` 却报 count=1 成功,而且顶面+底面
+两条边都被圆角了。
+
+根因: `selected_count()` 数的是**任意选中实体**(边/面/特征/草图都算)。
+拉伸完后 SolidWorks 保留残留选中状态(拉伸特征或轮廓),count 到 1 →
+走 selected 分支 → FeatureFillet3 对那个面/特征作用 → 它的所有边全被
+圆角。这正是 P45.1 注释里记录过的同款坑,当时只在非 selected 分支堵了,
+selected 分支既不清残留也不校验类型。
+
+修:
+- `bridge.py` 新增 `selected_edge_count()` — 只数 `swSelEDGES`(2),
+  同时返回选中里的其它类型
+- `fillet_edges` selected 分支: 无边 → 报错(带当前选中类型详情);
+  边混面/特征 → 拒绝并提示只选边,而不是悄悄多做
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — 新增 `selected_edge_count()`
+- `sidecar/sw_agent/tools/feature.py` — selected 分支类型校验
+
 ## [0.2.81] - 2026-08-01
 
 ### Fixed (P92 — 木匠审代码发现的两个 bug)
