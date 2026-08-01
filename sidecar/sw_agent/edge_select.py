@@ -161,22 +161,60 @@ def _face_kind(face, notes: list | None = None) -> str:
     horizontal — and the caller then filed all twelve edges as horizontal. A failure now
     says so.
     """
+    # P90: GetSurface/IsPlane answers "member not found" on this install, so planarity is
+    # inferred from the normal instead: a planar face has one, a cylinder does not (or
+    # reports a degenerate one). Asking is still worth a try — it is exact when available —
+    # but its absence is no longer reported as a problem, because it is the normal case here
+    # and the noise buried the real findings.
     try:
         surf = sw_get(face, "GetSurface")
-        if surf is not None and not sw_get(surf, "IsPlane"):
-            return "cyl"
-    except Exception as ex:  # noqa: BLE001 — a non-planar surface is still worth reporting
-        if notes is not None and len(notes) < 3:
-            notes.append(f"face.GetSurface/IsPlane: {ex}")
+        if surf is not None:
+            planar = sw_get(surf, "IsPlane")
+            if planar is not None:
+                if not planar:
+                    return "cyl"
+    except Exception:  # noqa: BLE001 — expected on installs without ISurface access
+        pass
     for member in ("Normal", "GetNormal"):
         try:
             n = sw_get(face, member)
-            if n and len(n) >= 3:
-                return "side" if abs(float(n[1])) < _SIDE_FACE_TOL else "cap"
         except Exception as ex:  # noqa: BLE001
             if notes is not None and len(notes) < 3:
                 notes.append(f"face.{member}: {ex}")
+            continue
+        if not n or len(n) < 3:
+            continue
+        nx, ny, nz = (float(n[0]), float(n[1]), float(n[2]))
+        # A cylindrical face has no single normal; SolidWorks returns a zero-length or
+        # meaningless vector for one, which is how a curved face is told apart here.
+        if (nx * nx + ny * ny + nz * nz) ** 0.5 < 0.5:
+            return "cyl"
+        return "side" if abs(ny) < _SIDE_FACE_TOL else "cap"
     return "unknown"
+
+
+def _same_edge(a, b) -> bool:
+    """Whether these two references are the same edge.
+
+    P90: IsSame is the documented way and it silently failed here (P89's 24-edge count was
+    the evidence), so identity falls back to the COM pointer, then to the pair of adjacent
+    faces — two references naming the same two faces are the same edge on a solid.
+    """
+    if a is b:
+        return True
+    try:
+        if a.IsSame(b):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        pa = getattr(a, "_oleobj_", None)
+        pb = getattr(b, "_oleobj_", None)
+        if pa is not None and pb is not None and int(pa) == int(pb):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
 
 
 def _adjacent_faces(edge):
@@ -263,13 +301,23 @@ def _feature_strategy(ctx: Context, which: str) -> int:
         return Picked(0, 0, [f"feature.GetFaces: {e}"])
     if not faces:
         return Picked(0, 0, [f"特征 {name} 没有返回任何面"])
+    # P90: collect the feature's edges through a SET keyed by each face's own edge list,
+    # then bucket once. Collecting per-face and bucketing the concatenation counted every
+    # edge twice — the tell was found:8 for four vertical edges and found:16 for eight
+    # horizontal ones, exactly 2x, because an edge belongs to two faces.
     notes: list = []
-    edges = []
+    face_edges: list = []
     for f in faces:
-        edges.extend(_edges_of_face(f))
-    if not edges:
+        face_edges.extend(_edges_of_face(f))
+    if not face_edges:
         return Picked(0, 0, [f"特征 {name} 的面上取不到边"])
-    picked = _bucket_edges(edges, notes).get(which, [])
+
+    unique: list = []
+    for cand in face_edges:
+        if not any(_same_edge(cand, kept) for kept in unique):
+            unique.append(cand)
+
+    picked = _bucket_edges(unique, notes).get(which, [])
     got = _select_all(ctx, picked)
     got.notes.extend(notes[:2])
     return got
