@@ -193,30 +193,6 @@ def _face_kind(face, notes: list | None = None) -> str:
     return "unknown"
 
 
-def _same_edge(a, b) -> bool:
-    """Whether these two references are the same edge.
-
-    P90: IsSame is the documented way and it silently failed here (P89's 24-edge count was
-    the evidence), so identity falls back to the COM pointer, then to the pair of adjacent
-    faces — two references naming the same two faces are the same edge on a solid.
-    """
-    if a is b:
-        return True
-    try:
-        if a.IsSame(b):
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        pa = getattr(a, "_oleobj_", None)
-        pb = getattr(b, "_oleobj_", None)
-        if pa is not None and pb is not None and int(pa) == int(pb):
-            return True
-    except Exception:  # noqa: BLE001
-        pass
-    return False
-
-
 def _adjacent_faces(edge):
     """The two faces an edge separates."""
     for name in ("GetTwoAdjacentFaces2", "IGetTwoAdjacentFaces2"):
@@ -270,57 +246,6 @@ def _bucket_edges(edges, notes: list) -> dict:
     if kinds_seen and len(notes) < 3:
         notes.append(f"相邻面类型统计 {kinds_seen}")
     return buckets
-
-
-def _feature_strategy(ctx: Context, which: str) -> int:
-    """Only the faces the LAST feature created.
-
-    This is how a person writing a macro does it: right after creating a feature you
-    already hold it, and IFeature::GetFaces tells you exactly what it produced — no
-    global search, no guessing which of twelve edges was meant. Scoped, accurate, and
-    it degrades to nothing (rather than to something wrong) when there is no last
-    feature recorded.
-    """
-    name = ctx.scratch.get("last_feature")
-    if not name:
-        return Picked(0, 0, ["会话里没有记录最近创建的特征"])
-    try:
-        from .tools.feature import _find_feature
-        feat = _find_feature(ctx, name)
-    except Exception as e:  # noqa: BLE001
-        return Picked(0, 0, [f"查找特征 {name} 失败: {e}"])
-    if feat is None:
-        return Picked(0, 0, [f"特征树里找不到 {name}"])
-    try:
-        # P88: GetFaces resolves as a PROPERTY on this install, so calling it raised
-        # "'tuple' object is not callable". sw_get tolerates either binding — the same
-        # trap we已 hit with GetTypeName2 and EditSuppress2, and new code keeps walking
-        # into it, so every COM member reached from this module now goes through sw_get.
-        faces = list(sw_get(feat, "GetFaces") or [])
-    except Exception as e:  # noqa: BLE001
-        return Picked(0, 0, [f"feature.GetFaces: {e}"])
-    if not faces:
-        return Picked(0, 0, [f"特征 {name} 没有返回任何面"])
-    # P90: collect the feature's edges through a SET keyed by each face's own edge list,
-    # then bucket once. Collecting per-face and bucketing the concatenation counted every
-    # edge twice — the tell was found:8 for four vertical edges and found:16 for eight
-    # horizontal ones, exactly 2x, because an edge belongs to two faces.
-    notes: list = []
-    face_edges: list = []
-    for f in faces:
-        face_edges.extend(_edges_of_face(f))
-    if not face_edges:
-        return Picked(0, 0, [f"特征 {name} 的面上取不到边"])
-
-    unique: list = []
-    for cand in face_edges:
-        if not any(_same_edge(cand, kept) for kept in unique):
-            unique.append(cand)
-
-    picked = _bucket_edges(unique, notes).get(which, [])
-    got = _select_all(ctx, picked)
-    got.notes.extend(notes[:2])
-    return got
 
 
 def _faces_buckets(ctx: Context, notes: list) -> dict:
@@ -449,31 +374,57 @@ def _selected_strategy(ctx: Context, which: str) -> int:
         return 0
 
 
-# Order matters: narrowest and most trustworthy first.
+# P91: the "feature" strategy is gone.
+#
+# It scoped selection to the faces of the last feature, which sounded better than walking
+# the whole body — but it collected edges face by face, so every edge arrived twice, and
+# de-duplicating them proved impossible here: two references to one edge are distinct COM
+# wrappers with distinct pointers, and IsSame fails silently on this install. It reported
+# 8 vertical edges on a box that has 4, twice, across two rounds of fixes.
+#
+# A strategy that quietly answers wrong is worse than one that does not exist, and "faces"
+# already answers correctly by walking body.GetEdges() — each edge exactly once, nothing to
+# de-duplicate. Deleting beats a third attempt at fixing.
 _STRATEGIES = (
-    ("feature", _feature_strategy),   # only what the last feature made
-    ("faces", _faces_strategy),       # whole body, by face topology
-    ("box", _box_strategy),           # geometric, box-shaped parts only
+    ("faces", _faces_strategy),   # whole body, by the faces each edge separates
+    ("box", _box_strategy),       # geometric fallback, box-shaped parts only
 )
 
 
 def probe(ctx: Context) -> dict:
-    """在当前模型上实际跑一遍各策略，报告每个各选中几条边。
+    """报告每条策略在当前模型上能选到什么。
 
-    这就是诊断该回答的问题——不是"分类失败了吗"，而是"哪条策略在这台机器上真的能用"。
-    结果会被 `select()` 缓存复用。
+    P91: 原来对 3 条策略 × 3 类边各跑一次完整的选择流程 —— 9 次选中再清空，
+    其中 box 策略每次还要切换视图，诊断因此超时过一次。现在拓扑只遍历一遍，
+    三类边一起分出来；box 策略只在 faces 没结果时才试，因为它本来就是兜底。
     """
     result: dict = {}
-    for name, fn in _STRATEGIES:
-        counts = {}
+
+    notes: list = []
+    buckets = _faces_buckets(ctx, notes)
+    faces_report: dict = {}
+    for which in ("vertical", "horizontal", "circular"):
+        edges = buckets.get(which, [])
+        got = _select_all(ctx, edges) if edges else Picked(0, 0, ["没有找到符合描述的边"])
+        got.notes.extend(notes[:2])
+        faces_report[which] = got.report()
+        ctx.clear_selection()
+    result["faces"] = faces_report
+
+    # 只有 faces 一条都没选中时才值得试 box —— 它要切视图，代价明显更高
+    if any(r.get("selected") for r in faces_report.values()):
+        result["box"] = {"skipped": "faces 策略已可用，未测试坐标兜底"}
+    else:
+        box_report = {}
         for which in ("vertical", "horizontal", "circular"):
             try:
-                counts[which] = fn(ctx, which).report()
+                box_report[which] = _box_strategy(ctx, which).report()
             except Exception as e:  # noqa: BLE001
-                counts[which] = {"error": str(e)}
+                box_report[which] = {"error": str(e)}
             finally:
                 ctx.clear_selection()
-        result[name] = counts
+        result["box"] = box_report
+
     ctx.scratch["edge_probe"] = result
     return result
 
