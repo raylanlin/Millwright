@@ -6,6 +6,34 @@
 
 ## [Unreleased]
 
+## [0.2.81] - 2026-08-01
+
+### Fixed (P92 — 木匠审代码发现的两个 bug)
+
+#### ① `edges="all"` 绕过 faces,永远选不全
+
+`_faces_strategy` 用 `buckets.get(which, [])`,但 buckets 只有
+vertical/horizontal/circular 三个键 —— `"all"` 永远取到空 → faces
+返回 0 → 落到 box。而 box 的底面点在等轴测视角下不可见,
+`fillet_edges(edges="all")` 在箱体上最多选 8/12,非箱体直接失败,
+尽管 faces 明明能一次给出全部边。
+
+修: `which == "all"` 时合并三个桶。
+
+#### ② 部分成功被静默当作成功
+
+`select()` 只检查 `Picked.__bool__`（selected > 0）就缓存策略并返回,
+不校验 selected == found。找到 4 条只选中 3 条时会静默倒 3 个角、
+用户以为 4 个都圆了 —— 十轮前「只有两个角是真圆角」的精确复发路径。
+
+修: selected < found 时不缓存、清空选择、把差异记进错误继续试下一个
+策略,全部失败时错误信息里带上「找到 X 只选中 Y」。
+
+### Changed
+
+- `sidecar/sw_agent/edge_select.py` — `_faces_strategy` 支持 `all` 合并;
+  `select()` 部分成功不再静默
+
 ## [0.2.80] - 2026-08-01
 
 ### Removed (P91 — 删掉会说错的那条策略)

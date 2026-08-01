@@ -87,7 +87,14 @@ def _faces_strategy(ctx: Context, which: str):
     只用 GetFaces / face.Normal / face.GetEdges / IsSame。
     """
     notes: list = []
-    edges = _faces_buckets(ctx, notes).get(which, [])
+    buckets = _faces_buckets(ctx, notes)
+    if which == "all":
+        # P92: buckets 只有 vertical/horizontal/circular 三个键，"all" 取空会让
+        # faces 返回 0，然后落到 box —— 而 box 的底面点在等轴测视角下不可见，
+        # 于是 "all" 永远选不全。faces 明明能一次给出全部边，直接合并。
+        edges = [e for group in buckets.values() for e in group]
+    else:
+        edges = buckets.get(which, [])
     got = _select_all(ctx, edges)
     got.notes.extend(notes[:2])
     return got
@@ -454,6 +461,16 @@ def select(ctx: Context, which: str) -> int:
             tried.append(f"{name}: {e}")
             continue
         if got:
+            # P92: found/selected 分开就是为了分辨「没找到」和「选不中」。部分成功
+            # （找到 4 条只选中 3 条）不能静默 —— 那会倒 3 个角、用户以为 4 个都圆了，
+            # 正是十轮前「只有两个角是真圆角」的复发路径。少选时记进错误信息。
+            if got.selected < got.found:
+                ctx.clear_selection()
+                tried.append(
+                    f"{name}: 找到 {got.found} 条只选中 {got.selected} 条"
+                    + (f"（{'; '.join(got.notes[:2])}）" if got.notes else "")
+                )
+                continue
             ctx.scratch["edge_strategy"] = name
             return got.selected
         # 找到了边却选不中，和一条边都没找到，是两个完全不同的问题 —— 说清楚是哪个
