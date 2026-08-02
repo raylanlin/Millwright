@@ -240,6 +240,28 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
         ctx.model
     except SWError:
         call(ctx, "new_part", {})
+
+    # P95: static pre-check of the whole plan BEFORE touching the model — sequence
+    # dependencies (sketch tools need an active sketch, solid tools need a body) and
+    # numeric sanity (depth/count/radius must be > 0). A batch that dies halfway
+    # because of a bad step leaves a half-built part behind; a batch that never starts
+    # because of a bad step costs one round-trip. Refuse up front, tell the model which
+    # step and why.
+    from ..verify import precheck, snapshot, verify_step
+    issues = precheck(plan)
+    if issues:
+        return {
+            "part": part or None,
+            "status": "rejected",
+            "completed": 0,
+            "total": len(plan),
+            "steps": [],
+            "rejected": issues,
+            "hint": "计划在开跑前被预检拦下（见 rejected）。修好这些问题再整批重提 —— "
+                    "预检不通过说明计划本身有错，重发同样的内容还会被拦。",
+        }
+
+    before = snapshot(ctx)
     for i, (name, params) in enumerate(plan):
         try:
             result = call(ctx, name, params)
@@ -254,7 +276,32 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
                 "hint": "Fix this step, then resubmit build_part with the REMAINING steps only "
                         "— the steps listed in 'steps' are already applied to the model.",
             }
+        # P95: verify the step actually changed the model the way it claims. A tool that
+        # reports success while building nothing (silent failure) must be caught HERE,
+        # not discovered three steps later by a confused analyze_view.
+        after = snapshot(ctx)
+        check = verify_step(name, params, before, after)
+        if isinstance(result, dict):
+            result = dict(result)
+            result["_verified"] = check
         done.append({"index": i + 1, "tool": name, "result": result})
+        if not check.get("ok", True):
+            return {
+                "part": part or None,
+                "status": "verified_failed",
+                "completed": len(done),
+                "total": len(plan),
+                "steps": done,
+                "failed_step": {
+                    "index": i + 1, "tool": name, "params": params,
+                    "error": "; ".join(check.get("checks", [])),
+                    "note": "工具没有抛异常，但几何验证发现它没建成/没改对 —— "
+                            "这是静默失败，继续后面的步骤只会建立在错误假设上。",
+                },
+                "hint": "这一步报告成功但验证不通过。修好这一步再重提剩余步骤；"
+                        "如果反复出现，换一种建模方式（例如 sketch_fillet 代替 fillet_edges）。",
+            }
+        before = after
 
     return {
         "part": part or None,

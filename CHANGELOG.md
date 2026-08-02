@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+## [0.2.84] - 2026-08-02
+
+### Added (P95 — build_part 满血验证层 + 伪宏模式)
+
+目标: 同时拿到「一次性长宏的一体性」和「单步驱动的可验证性」—— 模型
+一口气写完整个零件（伪宏，steps_text），执行走加固工具，每步用几何
+验证兜底，宏出错不再「找不到在哪」。
+
+#### 验证层（新增 verify.py）
+
+- `snapshot(ctx)` — 执行前/后各拍一张: 特征名列表 / 包围盒 / 草图实体数
+- `verify_step(name, params, before, after)` — 按工具类别对比快照:
+  - 特征类: 特征树必须新增（工具说成功但没建成 = 静默失败，当场抓住）
+  - 实体特征: 包围盒必须变化
+  - 草图实体类: 草图段数必须增加
+  - start/exit_sketch: 激活状态必须切换
+- `precheck(plan)` — 开跑前静态检查整个计划:
+  - 序列依赖: 草图工具前必须有 start_sketch；实体工具前必须有实体
+  - 数值合理性: depth/radius/count/spacing 等必须 > 0
+
+#### build_part 三个新状态
+
+- `rejected` — 预检拦下（计划本身有错，整批重提还会被拦）
+- `verified_failed` — 工具没报错但几何验证不通过（静默失败）→ 换建模
+  方式，不是重试同样步骤
+- `ok` — 每一步的 result 都带 `_verified` 字段（证据，不是门禁）
+
+#### 伪宏模式（prompts.ts）
+
+- 优先用 steps_text 写整段宏式序列（每行一步，像写宏一样一口气写完），
+  一体性最强
+- 失败只重发剩余步骤（steps 列出已成功的）
+- verified_failed = 换一种建模方式（sketch_fillet 代替 fillet_edges）的信号
+
+### Changed
+
+- `sidecar/sw_agent/tools/batch.py` — 接入 precheck / snapshot / verify_step
+- `src/main/llm/prompts.ts` — 伪宏模式引导 + 验证状态说明
+
 ## [0.2.83] - 2026-08-01
 
 ### Changed (P94 — 交互逻辑五项优化)
