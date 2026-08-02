@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+## [0.2.86] - 2026-08-02
+
+### Fixed (hotfix — CI lint)
+
+prompts.ts 模板字符串里 `status="verified_failed"` 的双引号被转义成
+`\"`,在反引号模板里是不必要转义 —— eslint no-useless-escape 报错,
+v0.2.84/v0.2.85 的 Build 都挂在这。去掉多余转义。
+
 ## [0.2.85] - 2026-08-02
 
 ### Fixed (P96 — 审 P92–P95 的实现: 五个真 bug)
