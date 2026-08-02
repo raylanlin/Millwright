@@ -187,9 +187,14 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
 _REQUIRES_SKETCH = {"extrude", "cut_extrude", "revolve"} | _SKETCH_ADDERS | _SKETCH_OPS
 # 这些特征把草图用掉了（SolidWorks 会自动退出），之后草图不再活跃
 _CONSUMES_SKETCH = {"extrude", "cut_extrude", "revolve", "exit_sketch"}
-_REQUIRES_BODY = {"extrude", "cut_extrude", "revolve", "fillet_edges", "fillet_all",
+# P97: extrude 和 revolve 不在这里 —— 它们创建的正是第一个实体。把它们列为
+# 「需要已有实体」，等于拒绝掉 SolidWorks 里最基本的那条序列（start_sketch →
+# 画轮廓 → extrude），而这恰恰是每个零件的第一步。实测中 build_part 因此连拒
+# 两次完全正确的计划，模型只能退回单步调用 —— build_part 的意义被这一行抵消掉了。
+# cut_extrude 留着是对的：没有实体就无从切除。
+_REQUIRES_BODY = {"cut_extrude", "fillet_edges", "fillet_all",
                   "chamfer", "shell", "linear_pattern", "circular_pattern",
-                  "mirror_feature"}   # P96: start_sketch 走上面的专门分支，不在这里判
+                  "mirror_feature"}
 
 # 数值合理性：参数名 → 必须 > 0（except: 允许 0/负 的少数字段）
 _POSITIVE_PARAMS = {

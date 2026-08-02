@@ -263,7 +263,13 @@ def _bucket_edges(edges, notes: list) -> dict:
     once, and it names its own two faces, so there is nothing to de-duplicate and nothing
     to compare for identity.
     """
-    buckets: dict = {"vertical": [], "horizontal": [], "circular": []}
+    # P97: "top"/"bottom" exist because "circular" was the only way to reach a cylinder's
+    # rim, and it means EVERY circular edge — asked for "顶面边倒 R3" on a cylinder, the
+    # tool rounded the bottom rim too, and reported 4 edges (a full cylinder is split into
+    # two half-faces, so each rim is two arcs — the count was right, the scope was not).
+    # A cap face's outward normal points along +Y or -Y, which is all it takes to tell
+    # them apart.
+    buckets: dict = {"vertical": [], "horizontal": [], "circular": [], "top": [], "bottom": []}
     kinds_seen: dict = {}
     for edge in edges:
         faces = _adjacent_faces(edge)
@@ -272,10 +278,24 @@ def _bucket_edges(edges, notes: list) -> dict:
                 notes.append("GetTwoAdjacentFaces2 没有返回相邻面")
             continue
         kinds = set()
+        cap_dir = 0     # +1 這條邊挨著上盖面, -1 下底面
         for f in faces:
             k = _face_kind(f, notes)
             kinds.add(k)
             kinds_seen[k] = kinds_seen.get(k, 0) + 1
+            if k == "cap":
+                try:
+                    ny = sw_get(f, "Normal")[1]
+                    if ny > 0.9:
+                        cap_dir = 1
+                    elif ny < -0.9:
+                        cap_dir = -1
+                except Exception:  # noqa: BLE001 — 读不到就不分上下，仍归入原有桶
+                    pass
+        if cap_dir > 0:
+            buckets["top"].append(edge)
+        elif cap_dir < 0:
+            buckets["bottom"].append(edge)
         if "cyl" in kinds:
             buckets["circular"].append(edge)
         elif kinds == {"side"}:
@@ -498,7 +518,7 @@ def _probe_feature(ctx: Context) -> dict:
     notes: list = []
     buckets = _bucket_edges(edges, notes)
     report: dict = {}
-    for which in ("vertical", "horizontal", "circular"):
+    for which in ("vertical", "horizontal", "circular", "top", "bottom"):
         got = _select_all(ctx, buckets.get(which, []))
         got.notes.extend(notes[:2])
         report[which] = got.report()
@@ -525,7 +545,7 @@ def probe(ctx: Context) -> dict:
     notes: list = []
     buckets = _faces_buckets(ctx, notes)
     faces_report: dict = {}
-    for which in ("vertical", "horizontal", "circular"):
+    for which in ("vertical", "horizontal", "circular", "top", "bottom"):
         edges = buckets.get(which, [])
         got = _select_all(ctx, edges) if edges else Picked(0, 0, ["没有找到符合描述的边"])
         got.notes.extend(notes[:2])
@@ -538,7 +558,7 @@ def probe(ctx: Context) -> dict:
         result["box"] = {"skipped": "faces 策略已可用，未测试坐标兜底"}
     else:
         box_report = {}
-        for which in ("vertical", "horizontal", "circular"):
+        for which in ("vertical", "horizontal", "circular", "top", "bottom"):
             try:
                 box_report[which] = _box_strategy(ctx, which).report()
             except Exception as e:  # noqa: BLE001
@@ -557,6 +577,18 @@ def select(ctx: Context, which: str) -> int:
     先用上次验证过有效的策略；没有缓存就按顺序试，第一个选中东西的胜出并被记下。
     全都不行时报错，并把每条策略的实际结果一并说出来——不留"未知原因"。
     """
+    if which in ("top", "bottom"):
+        # 上下盖边只能由面法向判定，坐标兜底给不出这个信息
+        notes: list = []
+        got = _select_all(ctx, _faces_buckets(ctx, notes).get(which, []))
+        if got:
+            return got.selected
+        raise SWError(
+            f'找不到{"顶面" if which == "top" else "底面"}的边'
+            + (f"（{'; '.join(got.notes[:2])}）" if got.notes else "")
+            + '。也可以在 SolidWorks 里手动选中后用 edges="selected"。'
+        )
+
     if which == "selected":
         got = _selected_strategy(ctx, which)
         if not got:

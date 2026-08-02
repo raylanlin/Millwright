@@ -273,6 +273,79 @@ def sketch_circle(ctx: Context, radius: float, x: float = 0, y: float = 0):
 
 
 @tool(
+    "sketch_rounded_rectangle",
+    "Draw a rectangle with all four corners rounded to the same radius — one call, exact "
+    "outer size (= 边角矩形 + 草图圆角). Use this for plates and blocks with rounded corners "
+    "instead of working out arc tangent points by hand",
+    params={
+        "x": {"type": "number", "desc": "Lower-left X (mm) of the OVERALL rectangle", "default": 0},
+        "y": {"type": "number", "desc": "Lower-left Y (mm) of the OVERALL rectangle", "default": 0},
+        "width": {"type": "number", "desc": "Overall width (mm) — the finished part measures exactly this"},
+        "height": {"type": "number", "desc": "Overall height (mm)"},
+        "radius": {"type": "number", "desc": "Corner radius (mm); must be less than half the shorter side"},
+    },
+    category="sketch",
+)
+def sketch_rounded_rectangle(ctx: Context, width: float, height: float, radius: float,
+                             x: float = 0, y: float = 0):
+    """P97: a rounded rectangle whose outer dimensions are exactly what was asked for.
+
+    Doing this through sketch_polyline means working out where each arc is TANGENT to the
+    straight edges — eight coordinates that all have to agree. Getting them wrong does not
+    fail loudly: the arcs simply bulge past the corner and the part comes out 80.196 wide
+    where 80 was intended. That happened on a plate here and survived unnoticed, because
+    the extrude succeeded and only a bounding-box reading caught the 0.196mm.
+
+    Tangent points are arithmetic, so the tool should do the arithmetic.
+    """
+    _require_sketch(ctx)
+    if width <= 0 or height <= 0:
+        raise SWError("width 和 height 必须大于 0。")
+    r = float(radius)
+    if r <= 0:
+        raise SWError("radius 必须大于 0；不需要圆角请用 sketch_rectangle。")
+    if r >= min(width, height) / 2:
+        raise SWError(
+            f"radius {r} 太大：四个 R{r} 圆角要求短边大于 {2 * r}，"
+            f"而当前短边是 {min(width, height)}。"
+        )
+
+    x2, y2 = x + width, y + height
+    before = _segment_ids(ctx)
+    try:
+        with _direct_geometry(ctx.sketch_mgr) as sk:
+            # 四条直边各在两端让出一个 r，再用四段真圆弧接上；端点共用同一组坐标，
+            # 所以轮廓精确闭合，外形尺寸就是 width × height
+            for p1, p2 in (
+                ((x + r, y), (x2 - r, y)),
+                ((x2, y + r), (x2, y2 - r)),
+                ((x2 - r, y2), (x + r, y2)),
+                ((x, y2 - r), (x, y + r)),
+            ):
+                if sk.CreateLine(units.mm(p1[0]), units.mm(p1[1]), 0.0,
+                                 units.mm(p2[0]), units.mm(p2[1]), 0.0) is None:
+                    raise SWError("直边绘制失败。")
+            for start, end, centre in (
+                ((x2 - r, y), (x2, y + r), (x2 - r, y + r)),
+                ((x2, y2 - r), (x2 - r, y2), (x2 - r, y2 - r)),
+                ((x + r, y2), (x, y2 - r), (x + r, y2 - r)),
+                ((x, y + r), (x + r, y), (x + r, y + r)),
+            ):
+                if sk.CreateArc(units.mm(centre[0]), units.mm(centre[1]), 0.0,
+                                units.mm(start[0]), units.mm(start[1]), 0.0,
+                                units.mm(end[0]), units.mm(end[1]), 0.0, 1) is None:
+                    raise SWError("圆角圆弧绘制失败。")
+    except SWError:
+        cleaned = _delete_new_segments(ctx, before)
+        raise SWError(f"圆角矩形绘制失败，已清理 {cleaned} 段残留。请检查尺寸。") from None
+
+    return {
+        "rounded_rectangle": {"x": x, "y": y, "width": width, "height": height, "radius": r},
+        "segments": 8, "closed": True, "extent_mm": [width, height],
+    }
+
+
+@tool(
     "sketch_polyline",
     "Draw a CLOSED contour (triangle, trapezoid, any polygon) in one call — use this instead "
     "of several sketch_line calls, which leave the profile open and make extrude fail",

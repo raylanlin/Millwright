@@ -28,6 +28,19 @@ _PREF = {DOC_PART: 8, DOC_ASSEMBLY: 10, DOC_DRAWING: 11}
 _EXT_TO_TYPE = {".sldprt": DOC_PART, ".sldasm": DOC_ASSEMBLY, ".slddrw": DOC_DRAWING}
 
 
+def _reset_scratch(ctx: Context):
+    """P97: 换文档时清掉会话暂存。
+
+    `last_sketch` / `last_feature` 记的是「当前文档里最近建的那个」，可它们从来
+    没被清过 —— 新建零件后 `_state` 仍报 `last_feature: 凸台-拉伸1`，那是上一个
+    文档的特征。后果不止是显示错：`extrude` 缺省会去选 `last_sketch`，
+    `fillet_edges` 的 feature 策略会去找 `last_feature`，两者在新文档里都指向一个
+    不存在的名字 —— 实测里 fillet 的报错正是「找不到特征 凸台-拉伸1」。
+    """
+    for key in ("last_sketch", "last_feature", "edge_strategy", "edge_probe"):
+        ctx.scratch.pop(key, None)
+
+
 def _new(ctx: Context, doc_type: int, label: str):
     app = ctx.sw
     template = app.GetUserPreferenceStringValue(_PREF[doc_type])
@@ -36,6 +49,7 @@ def _new(ctx: Context, doc_type: int, label: str):
     model = app.NewDocument(template, 0, 0, 0)
     if model is None:
         raise SWError(f"failed to create {label}.")
+    _reset_scratch(ctx)
     # P26: GetTitle/GetPathName are propget under early binding — bare () raised "'str' object is not callable"
     return {"created": label, "title": sw_get(model, "GetTitle")}
 
@@ -73,6 +87,8 @@ def _empty_part(ctx: Context):
 def new_part(ctx: Context):
     reuse = _empty_part(ctx)
     if reuse is not None:
+        # 复用的空零件同样是「重新开始」，暂存也得清 —— 否则它比新建更容易踩坑
+        _reset_scratch(ctx)
         return {
             "created": "part",
             "title": sw_get(reuse, "GetTitle"),
@@ -108,6 +124,7 @@ def open_document(ctx: Context, path: str):
     model = r[0] if isinstance(r, tuple) else r
     if model is None:
         raise SWError(f"open failed: {path}")
+    _reset_scratch(ctx)
     return {"opened": sw_get(model, "GetTitle"), "type": doc_type_name(model)}
 
 

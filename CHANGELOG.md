@@ -6,6 +6,49 @@
 
 ## [Unreleased]
 
+## [0.2.87] - 2026-08-02
+
+### Fixed (P97 — 一个把 build_part 废掉的预检 bug,以及三处真问题)
+
+#### ① 预检拒绝了每个零件的第一步(最要紧)
+
+`extrude` 被列进 `_REQUIRES_BODY` —— 可拉伸创建的正是第一个实体,
+这条规则等于拒绝掉最基本的序列 `start_sketch → 画轮廓 → extrude`。
+实测 build_part 连拒两次完全正确的计划,模型只能退回单步。
+`extrude` / `revolve` 移出;`cut_extrude` 留着(没有实体确实无从切除)。
+
+#### ② 会话暂存跨文档泄漏
+
+新建零件后 `_state` 仍报上一个文档的 `last_feature`。`ctx.scratch`
+从没在换文档时清过 —— extrude 缺省会去选 `last_sketch`,fillet 的
+feature 策略会去找 `last_feature`,在新文档里都指向不存在的名字。
+`new_part` / `new_assembly` / `new_drawing` / `open_document` 以及
+复用空零件那条路,统一清 `last_sketch` / `last_feature` /
+`edge_strategy` / `edge_probe`。
+
+#### ③ 圆柱只想倒顶面,却把底面一起倒了
+
+`count: 4` 不是重复计数 —— SolidWorks 把整圆柱面拆成两个半圆柱面,
+顶圈底圈各是两段圆弧边。问题在语义:`circular` = 所有圆形边,没法
+说"只要顶面那圈"。新增 `edges="top"` / `edges="bottom"`:盖面外法向
+指向 +Y / -Y,据此分上下。fillet_edges 描述写清圆柱倒角用 `top`。
+
+#### ④ 80×50 的板做出来是 80.196×52.794
+
+模型用 sketch_polyline 的 r10: 语法但切点算错(角点用 25 而非 30),
+圆弧不与直边相切、鼓出角外。工具忠实地画了它要的东西 —— 这类错误
+不会响亮失败,只有量包围盒才看得出来。新增
+`sketch_rounded_rectangle(width, height, radius)`:四条直边各让出一个
+r,四段真圆弧接上,端点共用同一组坐标。切点是算术题,该由工具算。
+
+### Changed
+
+- `sidecar/sw_agent/verify.py` — extrude/revolve 移出 _REQUIRES_BODY
+- `sidecar/sw_agent/tools/document.py` — 换文档清 scratch
+- `sidecar/sw_agent/edge_select.py` — 新增 top / bottom 边
+- `sidecar/sw_agent/tools/sketch.py` — 新增 sketch_rounded_rectangle
+- `sidecar/sw_agent/tools/feature.py` — fillet_edges 暴露 top/bottom
+
 ## [0.2.86] - 2026-08-02
 
 ### Fixed (hotfix — CI lint)

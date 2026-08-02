@@ -438,7 +438,7 @@ def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = "
     params={
         "radius": {"type": "number", "desc": "Fillet radius (mm)"},
         "edges": {
-            "type": "string", "enum": ["vertical", "horizontal", "circular", "all", "selected"],
+            "type": "string", "enum": ["vertical", "horizontal", "circular", "top", "bottom", "all", "selected"],
             "desc": "vertical = the upright edges (e.g. the four corners of a plate) · horizontal = edges lying flat · circular = round edges · all = every edge · selected = whatever is already selected in SolidWorks",
             "default": "vertical",
         },
