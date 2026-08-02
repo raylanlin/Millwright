@@ -32,6 +32,11 @@ _FORBIDDEN = {
     "build_part",
     "new_part", "new_assembly", "new_drawing", "open_document",
     "save_as",
+    # P99: assembly tools need an assembly document + interactive selection —
+    # build_part auto-creates a PART document (P94), so these would fail on the
+    # wrong document type or on an empty selection. Keep batches part-only.
+    "insert_component", "add_mate", "suppress_component", "unsuppress_component",
+    "list_components",
 }
 
 

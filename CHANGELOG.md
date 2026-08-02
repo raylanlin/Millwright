@@ -6,6 +6,47 @@
 
 ## [Unreleased]
 
+## [0.2.89] - 2026-08-03
+
+### Added (P99 — feature_map + 按需规则段 + 装配体约束)
+
+#### ① feature_map: 创建时记录特征拓扑
+
+「倒这个特征的哪条边」一直靠事后 GetFaces 实时枚举 —— 后续特征可能
+重塑或隐藏那些面,事后读不到就退化。现在 extrude/cut_extrude/revolve
+创建成功时立即快照该特征的 faces/edges 指纹(包围盒坐标,与引用无关),
+存进 scratch["feature_map"][feature_name]。edge_select 的 feature 策略
+优先读快照,快照缺失才回落实时枚举。
+
+这也是对 Mecagent 差距的正面回应之一:复杂模型死于模型手算几何,生成器
++ 创建时拓扑记录是把几何算术从模型手里拿走的第一步。
+
+指纹函数统一移到 bridge.py(edge_fingerprint),feature 记录与 edge_select
+匹配用同一个实现 —— 修掉 P96 之前那个"同一件事两个实现分叉"的隐患。
+
+#### ② 按需规则段: read_guidance(section)
+
+长段静态规则(工具用法/建模要点/宏细则/工程图/生成器/装配体)从
+AGENT_SYSTEM_PROMPT 移出,每轮不再必付这几百 token。模型需要时调
+read_guidance 按段读取,提示词只留一行索引。和 SolidPilot 把近静态
+规则放 resource 侧是同一思路:工具描述每轮必付,规则正文用到才读。
+
+#### ③ 装配体工具移出 build_part
+
+build_part 自动创建的是零件文档(P94),insert_component/add_mate/
+suppress/unsuppress/list_components 放进去必然失败。现在进 _FORBIDDEN,
+装配体只能走独立调用序列。
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — record_feature_map + edge_fingerprint
+- `sidecar/sw_agent/tools/feature.py` — 四个创建点挂 feature_map
+- `sidecar/sw_agent/edge_select.py` — feature 策略优先读快照;指纹统一
+- `sidecar/sw_agent/guidance.py` + `tools/guidance.py` — 新增 read_guidance
+- `sidecar/sw_agent/server.py` — 注册 guidance 模块
+- `sidecar/sw_agent/tools/batch.py` — 装配体工具进 _FORBIDDEN
+- `src/main/llm/prompts.ts` — 长段规则换成 read_guidance 索引
+
 ## [0.2.88] - 2026-08-02
 
 ### Fixed (P98 — 装机验证抓出的四个真问题)

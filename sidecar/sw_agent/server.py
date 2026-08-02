@@ -38,6 +38,7 @@ from .tools import (  # noqa: F401
     drawing,
     export,
     feature,
+    guidance,
     machine,
     query,
     reference,

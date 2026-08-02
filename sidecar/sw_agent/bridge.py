@@ -313,6 +313,41 @@ class Context:
             pass
         return state
 
+    def record_feature_map(self, feat):
+        """P99: snapshot the topology a feature just created, keyed by feature name.
+
+        The "top edge of the cylinder" problem keeps coming back because edges are
+        read AFTER the fact, from whatever faces happen to be reachable then. Recording
+        at creation time — the moment the feature's faces/edges actually exist — gives
+        a stable answer even if later features reshape or hide them. This mirrors what
+        SolidPilot's feature_map does (per-feature consumed/created topology).
+
+        Stored as geometry fingerprints (box coords), not COM objects: references die
+        across calls on this install, geometry does not.
+        """
+        try:
+            name = sw_get(feat, "Name")
+        except Exception:  # noqa: BLE001
+            return
+        try:
+            faces = list(sw_get(feat, "GetFaces") or [])
+        except Exception:  # noqa: BLE001
+            faces = []
+        edges = []
+        seen: set = set()
+        for f in faces:
+            for loop in (sw_get(f, "GetLoops") or []):
+                for e in (sw_get(loop, "GetEdges") or []):
+                    fp = edge_fingerprint(e)
+                    if fp and fp not in seen:
+                        seen.add(fp)
+                        edges.append(e)
+        self.scratch.setdefault("feature_map", {})[name] = {
+            "faces": len(faces),
+            "edges": len(edges),
+            "fingerprints": sorted(seen),
+        }
+
     def geometry(self):
         """P49: return (faces, edges, trace) for the current part.
 
@@ -517,3 +552,17 @@ class Context:
 
 def doc_type_name(model) -> str:
     return DOC_TYPE_NAME.get(sw_get(model, "GetType"), "unknown")
+
+
+def edge_fingerprint(edge):
+    """P99: geometry fingerprint for an edge — the de-dup key shared by bridge and
+    edge_select. Box coords are reference-independent, so the same edge seen from two
+    faces hashes identically even when IsSame fails and COM wrappers differ.
+    """
+    try:
+        box = sw_get(edge, "GetCurveBox")
+        if box and len(box) >= 6:
+            return ("box", tuple(round(float(v), 6) for v in box[:6]))
+    except Exception:  # noqa: BLE001
+        pass
+    return ("id", id(edge))

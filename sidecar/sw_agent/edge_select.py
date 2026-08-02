@@ -27,7 +27,7 @@
 """
 from __future__ import annotations
 
-from .bridge import Context, SWError, sw_get
+from .bridge import Context, SWError, edge_fingerprint, sw_get
 
 # 面法向的 Y 分量小于这个值就认为是"侧面"（SolidWorks 是 Y-UP）
 _SIDE_FACE_TOL = 0.1
@@ -80,21 +80,10 @@ def _select(entity, append: bool = True, errors: list | None = None) -> bool:
 
 # ===== 策略 1：面的归属 =====
 
-def _edge_fingerprint(edge):
-    """P94: 边的几何指纹，用于去重。
-
-    IsSame 在这台机器上静默失败，同一 COM 对象的两个引用 id() 也不同，
-    P90 的三级去重（IsSame / COM 指针 / 相邻面对）全部失效。但一条边的
-    包围盒坐标是几何量，与引用无关——从两个面拿到同一条边，box 一定
-    相同。用 GetCurveBox 排序后的 6 元组做 key；拿不到时回退 id()。
-    """
-    try:
-        box = sw_get(edge, "GetCurveBox")
-        if box and len(box) >= 6:
-            return ("box", tuple(round(float(v), 6) for v in box[:6]))
-    except Exception:  # noqa: BLE001
-        pass
-    return ("id", id(edge))
+# P99: edge fingerprint lives in bridge.py (edge_fingerprint) — the SAME function
+# feature.py's record_feature_map uses, so the creation-time snapshot and the live
+# walk hash identically. A local copy here would be a second implementation, and that
+# is exactly how the 8-vs-4 double count survived a round (P96).
 
 
 def _feature_strategy(ctx: Context, which: str):
@@ -485,6 +474,30 @@ def _feature_edges(ctx: Context):
     name = ctx.scratch.get("last_feature")
     if not name:
         return [], "没有 last_feature（先建一个特征，再按特征选边）"
+
+    # P99: prefer the creation-time snapshot. feature_map records the topology the
+    # moment the feature was made, so "the top edge of the cylinder" stays answerable
+    # even if later features reshape or hide those faces (the case where a live
+    # GetFaces walk comes back empty). Fall back to the live walk when no snapshot
+    # exists (old session, feature created before this build).
+    fmap = ctx.scratch.get("feature_map") or {}
+    snap = fmap.get(name)
+    if snap and snap.get("fingerprints"):
+        wanted = set(snap["fingerprints"])
+        matched = []
+        for body in ctx.solid_bodies():
+            try:
+                edges = list(sw_get(body, "GetEdges") or [])
+            except Exception:  # noqa: BLE001
+                continue
+            for e in edges:
+                if edge_fingerprint(e) in wanted:
+                    matched.append(e)
+        if matched:
+            return matched, None
+        # snapshot exists but none of its edges survive on the body — the feature was
+        # consumed or reshaped; fall through to the live walk for a best effort.
+
     feat = None
     for f in (ctx.all_features() or []):
         try:
@@ -506,7 +519,7 @@ def _feature_edges(ctx: Context):
     edges: list = []
     for face in faces:
         for edge in _edges_of_face(face):
-            fp = _edge_fingerprint(edge)
+            fp = edge_fingerprint(edge)
             if fp in seen:
                 continue
             seen.add(fp)
