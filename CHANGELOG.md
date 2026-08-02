@@ -6,6 +6,50 @@
 
 ## [Unreleased]
 
+## [0.2.88] - 2026-08-02
+
+### Fixed (P98 — 装机验证抓出的四个真问题)
+
+#### ① edges="top"/"bottom" 永远找不到边（最严重）
+
+P97 在 `_bucket_edges` 里加了 top/bottom 桶,但 `_faces_buckets` 的
+buckets 字典只建了三个键 —— `for k, value in buckets.items()` 只复制
+存在的键,top/bottom 的边在合并时被悄悄丢掉。圆柱上 `edges="top"`
+永远报「找不到顶面的边」,`circular` 又把顶底两圈一起倒。
+
+修: `_faces_buckets` 的键与 `_bucket_edges` 完全对齐(加 top/bottom)。
+
+#### ② cut_extrude 被验证层误报 verified_failed
+
+通孔/内腔切除不改变外包围盒 —— 这是正常行为,不是静默失败。
+验证层对 cut_extrude 也要求包围盒变化,验④ 的圆角板中心孔因此
+被误报 verified_failed(实际几何完全正确)。
+
+修: cut_extrude 豁免包围盒检查,只验特征树新增。
+
+#### ③ extrude depth 负值报错信息误导
+
+depth=-10 落到 FeatureExtrusion3 里失败,报的却是「make sure there
+is a closed sketch」—— 预检只在 build_part 里拦,单步调用没拦。
+
+修: extrude 工具自身拒绝 depth<=0,报「extrude depth 必须 > 0」。
+
+#### ④ steps_text-only 调用被必填校验拦截
+
+build_part 的 steps 参数没有 default,registry 的 required-parameter
+门禁在只传 steps_text 时直接拒绝 —— 模型日志里出现过
+「missing required parameter: steps」,模型以为是自己的错,其实
+是 schema 的 bug。
+
+修: steps 加 default []。
+
+### Changed
+
+- `sidecar/sw_agent/edge_select.py` — _faces_buckets 键对齐 _bucket_edges
+- `sidecar/sw_agent/verify.py` — cut_extrude 豁免包围盒检查
+- `sidecar/sw_agent/tools/feature.py` — extrude 拒绝 depth<=0
+- `sidecar/sw_agent/tools/batch.py` — steps 加 default
+
 ## [0.2.87] - 2026-08-02
 
 ### Fixed (P97 — 一个把 build_part 废掉的预检 bug,以及三处真问题)

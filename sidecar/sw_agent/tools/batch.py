@@ -155,11 +155,11 @@ def _steps_from_text(text: str):
         },
         "steps": {
             "type": "array",
-            # P78: the element schema MUST be declared. Without "items" the provider's
-            # function-calling layer does not know the array holds objects, and some of them
-            # flatten each element to an empty string — every submission arrived as
-            # ["", "", ""] and failed with "step 1 is not an object", repeatedly, until the
-            # model abandoned batching and fell back to one call per feature.
+            # P98: steps_text-only calls were being rejected by the required-parameter
+            # gate — "steps" has no default, so the registry demanded it even when
+            # steps_text fully specified the batch. Default [] keeps the gate open;
+            # build_part's hollow check then routes to steps_text exactly as designed.
+            "default": [],
             "items": {
                 "type": "object",
                 "properties": {

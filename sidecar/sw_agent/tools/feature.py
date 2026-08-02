@@ -182,6 +182,13 @@ def _find_feature(ctx: Context, name: str):
 )
 def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = False, sketch: str = ""):
     ctx.require(DOC_PART, "part")  # P27: solid features are part-only — fail early inside assemblies
+    # P98: reject non-positive depth with a clear reason. The old behaviour let a
+    # negative depth fall into FeatureExtrusion3, which failed with the generic
+    # "make sure there is a closed sketch" — misleading (验④ 回归日志: depth=-10
+    # 报了 closed-sketch 错误，实际是深度非法). Precheck catches this inside
+    # build_part, but single-step extrude calls need it here too.
+    if not isinstance(depth, (int, float)) or depth <= 0:
+        raise SWError(f"extrude depth 必须 > 0，收到 {depth!r}")
     # P32: manual-modeling order — with an ACTIVE sketch, extrude directly (SW uses it
     # and auto-exits, like the UI). Only when no sketch is active do we select one.
     if ctx.sketch_mgr.ActiveSketch is None:

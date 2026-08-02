@@ -314,7 +314,11 @@ def _bucket_edges(edges, notes: list) -> dict:
 
 def _faces_buckets(ctx: Context, notes: list) -> dict:
     """All of the body's edges, grouped by the faces they separate."""
-    buckets: dict = {"vertical": [], "horizontal": [], "circular": []}
+    # P98: must mirror _bucket_edges' keys exactly — _bucket_edges now also produces
+    # "top"/"bottom" (P97), and this loop only copies the keys that EXIST here.
+    # A 3-key dict silently dropped the cylinder-rim edges, which is why edges="top"
+    # could never find anything even though _bucket_edges had bucketed them.
+    buckets: dict = {"vertical": [], "horizontal": [], "circular": [], "top": [], "bottom": []}
     try:
         bodies = ctx.solid_bodies()
     except SWError as ex:

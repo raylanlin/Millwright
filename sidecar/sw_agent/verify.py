@@ -131,7 +131,13 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
         else:
             checks.append("特征树没有新增特征 —— 工具报告成功但什么都没建成")
         # 包围盒：实体类特征应改变 box（fillet_all 在角上可能不动 box，宽容）
-        if name != "fillet_all" and before["box"] and after["box"] and not _box_changed(before, after):
+        # P98: cut_extrude 豁免 —— 通孔/内腔切除不改变外包围盒，这是正常行为，
+        # 不是静默失败（验④ 日志里 cut_extrude 被误报 verified_failed 就是这个）。
+        if (
+            name != "fillet_all"
+            and name != "cut_extrude"
+            and before["box"] and after["box"] and not _box_changed(before, after)
+        ):
             checks.append("包围盒未变化 —— 实体特征没有实际改变几何")
             ok = False
         return {"ok": ok, "checked": True, "checks": checks}
