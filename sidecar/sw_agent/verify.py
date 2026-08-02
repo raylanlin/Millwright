@@ -25,6 +25,8 @@ _FEATURE_CREATORS = {
     "extrude", "cut_extrude", "revolve", "fillet_edges", "fillet_all",
     "chamfer", "shell", "linear_pattern", "circular_pattern", "mirror_feature",
 }
+# 零件生成器：自建草图 + 拉伸，按实体特征验（P96：原本在 _SKIP 里，而它们最需要验）
+_PART_GENERATORS = {"create_spur_gear", "create_stepped_shaft"}
 # 参考几何：创建特征但不改变实体包围盒（box 验证跳过，特征名验证保留）
 _REF_GEOMETRY = {"create_plane", "create_axis", "create_reference_point"}
 # 草图实体：执行后草图段数应增加
@@ -54,9 +56,11 @@ _SKIP = {
     "insert_model_dimensions", "add_mate", "export_file", "export_stl",
     "create_drawing_of", "suppress_feature", "unsuppress_feature",
     "delete_feature", "rename_feature", "suppress_component",
-    "unsuppress_component", "create_configuration", "create_spur_gear",
-    "create_stepped_shaft", "start_sketch", "exit_sketch",
+    "unsuppress_component", "create_configuration",
 }
+# P96: 从 _SKIP 里搬走了四个 —— start_sketch / exit_sketch 的专门分支原本永远走不到
+# （开头那个「命中 _SKIP 就跳过」的 return 先拦下了），而这两个检查（草图到底开没开）
+# 恰恰是本模块最该抓的静默失败；两个零件生成器同理，见 _PART_GENERATORS。
 
 # ---- 快照 ----
 
@@ -104,6 +108,20 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
 
     if name in _QUERY_ONLY or name in _DOC_OPS or name in _SKIP or name in _REF_GEOMETRY:
         return {"ok": True, "checked": False, "checks": ["只读/文档/显示类操作，跳过几何验证"]}
+
+    if name in _PART_GENERATORS:
+        # P96: 这两个生成器原来被跳过，可它们恰恰最该验 —— 齿轮「报告成功但零件
+        # 没成型」我们追过好几轮。它们自建草图并拉伸，所以按实体特征验。
+        grew = len(after["features"]) > len(before["features"])
+        checks.append(
+            f"特征树新增 {len(after['features']) - len(before['features'])} 个特征"
+            if grew else "特征树没有新增特征 —— 生成器报告成功但零件没成型"
+        )
+        ok = grew
+        if before["box"] and after["box"] and not _box_changed(before, after):
+            checks.append("包围盒未变化 —— 没有实际生成几何")
+            ok = False
+        return {"ok": ok, "checked": True, "checks": checks}
 
     if name in _FEATURE_CREATORS:
         # 特征类：执行后特征树必须多出这个名字（工具返回了 feature 名）
@@ -167,9 +185,11 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
 
 # 每个工具需要的前置状态（None = 不要求）
 _REQUIRES_SKETCH = {"extrude", "cut_extrude", "revolve"} | _SKETCH_ADDERS | _SKETCH_OPS
+# 这些特征把草图用掉了（SolidWorks 会自动退出），之后草图不再活跃
+_CONSUMES_SKETCH = {"extrude", "cut_extrude", "revolve", "exit_sketch"}
 _REQUIRES_BODY = {"extrude", "cut_extrude", "revolve", "fillet_edges", "fillet_all",
                   "chamfer", "shell", "linear_pattern", "circular_pattern",
-                  "mirror_feature", "start_sketch"}
+                  "mirror_feature"}   # P96: start_sketch 走上面的专门分支，不在这里判
 
 # 数值合理性：参数名 → 必须 > 0（except: 允许 0/负 的少数字段）
 _POSITIVE_PARAMS = {
@@ -192,6 +212,9 @@ _NON_POSITIVE_OK = {
     "cut_extrude": {"through_all"},
     "revolve": {"cut"},
     "linear_pattern": {"direction"},
+    # P96: 视图旋转角度天然可正可负（往回转），当成「必须 > 0」会拒掉正确的计划
+    "rotate_view": {"angle", "x", "y", "z"},
+    "chamfer": {"angle"},
 }
 
 
@@ -230,6 +253,13 @@ def precheck(plan: list) -> list:
         # 状态推进
         if name in _FEATURE_CREATORS or name in _REF_GEOMETRY:
             has_body = True
+        if name in _PART_GENERATORS:
+            has_body = True
+        # P96: 拉伸/切除/旋转会消耗掉草图，has_sketch 必须清掉。原来一直留 True，
+        # 于是「extrude 之后忘了 start_sketch 又画圆」这种计划能通过预检、到运行时
+        # 才炸 —— 而预检存在的意义正是不让它白跑一遍。
+        if name in _CONSUMES_SKETCH:
+            has_sketch = False
         if name in _SKETCH_ADDERS or name in _SKETCH_OPS:
             has_sketch = True
 

@@ -6,6 +6,56 @@
 
 ## [Unreleased]
 
+## [0.2.85] - 2026-08-02
+
+### Fixed (P96 — 审 P92–P95 的实现: 五个真 bug)
+
+#### ① 验证层的草图检查是死代码(最要紧)
+
+`_SKIP` 里放了 start_sketch / exit_sketch,而 verify_step 开头第一句就把
+_SKIP 全return 了 —— 下面两个专门为它们写的分支永远走不到。
+「草图到底开没开」恰恰是最该抓的静默失败。两个都已移出 _SKIP。
+
+#### ② 两个零件生成器也被跳过
+
+create_spur_gear / create_stepped_shaft 在 _SKIP 里 —— 可「齿轮报告成功
+但零件没成型」是追过好几轮的问题。新增 _PART_GENERATORS 分支,按实体
+特征验: 特征树必须增长、包围盒必须变化。
+
+#### ③ 预检不知道拉伸会消耗草图
+
+has_sketch 置 True 后永不清。extrude/cut_extrude/revolve 后 SolidWorks
+自动退出草图,所以「start_sketch → sketch_rectangle → extrude →
+sketch_circle」能过预检、到运行时才炸。新增 _CONSUMES_SKETCH,三个
+特征执行后清掉 has_sketch。(顺带注掉 _REQUIRES_BODY 里的死条目
+start_sketch。)
+
+#### ④ 视图旋转角度不能为负
+
+angle 在 _POSITIVE_PARAMS 里,rotate_view 没进豁免表 —— 「往回转 30 度」
+这种正确计划被预检拒掉。已加豁免(连同 chamfer 的角度)。
+
+#### ⑤ P93 只堵了一个入口
+
+selected_count() 数任意选中实体这个坑,P93 在 feature.py 的 fillet_edges
+堵了,但 edge_select.select() 的 selected 分支还开着 —— 拉伸后的残留
+选中会让它返回 1。选择只在 edge_select 一个模块做,校验也在这里:
+现在也走 selected_edge_count(),没有边就明说当前选中了什么;混有
+面/特征则拒绝,不悄悄多做。
+
+#### 顺带: _probe_feature 是 _feature_strategy 的复制粘贴
+
+两份各自走「找特征 → 取面 → 取边 → 去重」约 30 行重复,已分叉过一次
+(8 对 4 双重计数两条路径分别修)。抽成 _feature_edges(),诊断和真实
+选择从此同一个答案。
+
+### Changed
+
+- `sidecar/sw_agent/verify.py` — _SKIP 移出四项 + _PART_GENERATORS +
+  _CONSUMES_SKETCH + 角度豁免
+- `sidecar/sw_agent/edge_select.py` — selected 分支走 selected_edge_count
+  + 抽出 _feature_edges
+
 ## [0.2.84] - 2026-08-02
 
 ### Added (P95 — build_part 满血验证层 + 伪宏模式)

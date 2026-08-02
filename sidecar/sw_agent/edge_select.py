@@ -98,47 +98,18 @@ def _edge_fingerprint(edge):
 
 
 def _feature_strategy(ctx: Context, which: str):
-    """P94: 最近特征创建的边（feature 策略回归，几何指纹去重）。
-
-    P90 删掉 feature 是因为「收集每个面的边再归类」让每条边进来两次，
-    而三级身份去重全部失效。这次换几何去重：边的包围盒坐标与引用无关，
-    从哪个面拿到都一样，所以同一条边只进一次。
+    """P94: 最近特征创建的边（几何指纹去重，见 _feature_edges）。
 
     范围最小最准：用户说「圆柱顶面边」时，只有最近特征的边会被选中，
-    不会像 circular 那样把整个文档 18 条圆边全捞进来。
+    不会像 circular 那样把整个文档的圆边全捞进来。
     """
+    edges, why = _feature_edges(ctx)
+    if why:
+        return Picked(0, 0, [why])
     notes: list = []
-    name = ctx.scratch.get("last_feature")
-    if not name:
-        return Picked(0, 0, ["没有 last_feature（先建一个特征，再按特征选边）"])
-    feat = None
-    for f in (ctx.all_features() or []):
-        try:
-            if sw_get(f, "Name") == name:
-                feat = f
-                break
-        except Exception:  # noqa: BLE001
-            continue
-    if feat is None:
-        return Picked(0, 0, [f"找不到特征 {name}（可能已被改名或删除）"])
-    try:
-        faces = list(sw_get(feat, "GetFaces") or [])
-    except Exception as ex:  # noqa: BLE001
-        return Picked(0, 0, [f"feature.GetFaces: {ex}"])
-    if not faces:
-        return Picked(0, 0, [f"特征 {name} 没有可读的面"])
-    seen: set = set()
-    edges: list = []
-    for face in faces:
-        for e in _edges_of_face(face):
-            fp = _edge_fingerprint(e)
-            if fp in seen:
-                continue
-            seen.add(fp)
-            edges.append(e)
     buckets = _bucket_edges(edges, notes)
     if which == "all":
-        picked = [e for group in buckets.values() for e in group]
+        picked = [edge for group in buckets.values() for edge in group]
     else:
         picked = buckets.get(which, [])
     got = _select_all(ctx, picked)
@@ -439,12 +410,26 @@ def _box_strategy(ctx: Context, which: str) -> Picked:
 
 # ===== 策略 3：用户已选 =====
 
-def _selected_strategy(ctx: Context, which: str) -> int:
-    """用户在 SolidWorks 里选好的边，原样使用。诚实的兜底，永远可用。"""
+def _selected_strategy(ctx: Context, which: str):
+    """用户在 SolidWorks 里选好的边，原样使用。诚实的兜底，永远可用。
+
+    P96: 这里原本数的是 selected_count()（任意选中实体）。P93 已经查明那会出事 ——
+    拉伸完 SolidWorks 会留下残留选中（特征或轮廓），count 到 1 就走 selected 分支，
+    FeatureFillet3 对那个面/特征作用，它的所有边全被圆角，而且报告成功。P93 在
+    feature.py 的调用处堵了，共享模块这条路没堵 —— 同一个 bug 修在了一个入口，
+    另一个入口还开着。选择这件事只在这个模块做，所以校验也该在这里。
+    """
     try:
-        return int(ctx.selected_count())
-    except Exception:  # noqa: BLE001
-        return 0
+        n, others = ctx.selected_edge_count()
+    except Exception as ex:  # noqa: BLE001
+        return Picked(0, 0, [f"读取选中状态失败: {ex}"])
+    if n == 0:
+        detail = f"（当前选中: {others}）" if others else "（当前没有选中任何实体）"
+        return Picked(0, 0, [f"没有选中任何边{detail}"])
+    if others:
+        # 混着面/特征时不能悄悄多做 —— 那正是 P93 抓到的静默倒错边
+        return Picked(n, 0, [f"选中里混有非边实体 {others}，请只选边后重试"])
+    return Picked(n, n, [])
 
 
 # P94: the "feature" strategy is back.
@@ -463,12 +448,19 @@ _STRATEGIES = (
 )
 
 
-def _probe_feature(ctx: Context) -> dict:
-    """P94: report what the feature strategy sees on the current model."""
-    notes: list = []
+def _feature_edges(ctx: Context):
+    """P96: the last feature's edges, de-duplicated — the ONE place this is worked out.
+
+    _feature_strategy and _probe_feature each carried their own copy of this walk, so
+    diagnostics and the real selection could drift apart. They already did once: the
+    8-versus-4 double count survived a round because the two paths were fixed
+    independently. Extracted so there is a single answer.
+
+    Returns (edges, note) — note is None on success, otherwise why there are no edges.
+    """
     name = ctx.scratch.get("last_feature")
     if not name:
-        return {"skipped": "没有 last_feature（还没有建特征）"}
+        return [], "没有 last_feature（先建一个特征，再按特征选边）"
     feat = None
     for f in (ctx.all_features() or []):
         try:
@@ -478,20 +470,32 @@ def _probe_feature(ctx: Context) -> dict:
         except Exception:  # noqa: BLE001
             continue
     if feat is None:
-        return {"skipped": f"找不到特征 {name}"}
+        return [], f"找不到特征 {name}（可能已被改名或删除）"
     try:
         faces = list(sw_get(feat, "GetFaces") or [])
     except Exception as ex:  # noqa: BLE001
-        return {"skipped": f"feature.GetFaces: {ex}"}
+        return [], f"feature.GetFaces: {ex}"
+    if not faces:
+        return [], f"特征 {name} 没有可读的面"
+
     seen: set = set()
     edges: list = []
     for face in faces:
-        for e in _edges_of_face(face):
-            fp = _edge_fingerprint(e)
+        for edge in _edges_of_face(face):
+            fp = _edge_fingerprint(edge)
             if fp in seen:
                 continue
             seen.add(fp)
-            edges.append(e)
+            edges.append(edge)
+    return edges, None
+
+
+def _probe_feature(ctx: Context) -> dict:
+    """P94: report what the feature strategy sees on the current model."""
+    edges, why = _feature_edges(ctx)
+    if why:
+        return {"skipped": why}
+    notes: list = []
     buckets = _bucket_edges(edges, notes)
     report: dict = {}
     for which in ("vertical", "horizontal", "circular"):
@@ -554,12 +558,13 @@ def select(ctx: Context, which: str) -> int:
     全都不行时报错，并把每条策略的实际结果一并说出来——不留"未知原因"。
     """
     if which == "selected":
-        n = _selected_strategy(ctx, which)
-        if n == 0:
+        got = _selected_strategy(ctx, which)
+        if not got:
             raise SWError(
-                'edges="selected" 需要你先在 SolidWorks 里选中要加工的边，当前没有选中任何实体。'
+                'edges="selected" 需要你先在 SolidWorks 里手动选中要加工的边。'
+                + ("；".join(got.notes) if got.notes else "")
             )
-        return n
+        return got.selected
 
     cached = ctx.scratch.get("edge_strategy")
     order = [s for s in _STRATEGIES if s[0] == cached] + [s for s in _STRATEGIES if s[0] != cached]
