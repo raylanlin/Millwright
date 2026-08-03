@@ -6,6 +6,61 @@
 
 ## [Unreleased]
 
+## [0.2.90] - 2026-08-03
+
+### Fixed (P100 — Benchmark #1 电机支架抓出的问题)
+
+#### ① build_part 批量静默失败的根因：验证只看特征树，被草图骗了
+
+Benchmark 里 build_part 报 10 步 ok、实际零几何。根因：start_sketch
+每步都会在特征树加「草图N」，特征数一直涨，verify 只看特征树增长
+就判 ok —— 而 extrude 没建成时没有任何信号。
+
+修：snapshot 加实体数（bodies），实体特征必须让实体数增长
+（切除豁免，只验特征树）；包围盒退居次位当兜底。
+
+#### ② sketch_rounded_rectangle 不在验证表里
+
+P97 加了工具但 verify 的 _SKETCH_ADDERS 没同步 → 批量里画没画进去
+无人验证。已加入。
+
+#### ③ precheck 不查必填参数
+
+benchmark 里 create_plane plane=front（缺 base）过了预检、执行到
+第 11 步才炸，前 10 步白跑。precheck 现在用 registry schema 检查
+整个计划的必填参数，开跑前拦截。
+
+#### ④ create_plane 返回值不传递 → 模型猜「基准面1」
+
+create_plane 现在把平面名写进 scratch["last_plane"]，start_sketch
+支持 plane="last"，后续步骤不用猜名字。
+
+#### ⑤ fillet_edges 加 feature 参数（horizontal 命中过宽）
+
+多特征零件上 horizontal 会命中所有水平边（底板顶边+侧板交线同类）。
+fillet_edges(feature="凸台-拉伸2") 把范围限定到指定特征；新增
+edge_select.select_feature_edges 按特征取边（优先创建时快照）。
+
+#### ⑥ save_document 的 Save3 类型不匹配
+
+Save3 在不同版本签名不同（tuple vs int），benchmark 里报类型不匹配。
+改走 com_call 防御路径。
+
+#### ⑦ 提示词：拉伸前显式 exit_sketch
+
+批量模式下 ActiveSketch 可能没接续上（实测「每步 ok 但零几何」），
+引导模型在草图工具后、extrude 前显式 exit_sketch。
+
+### Changed
+
+- `sidecar/sw_agent/verify.py` — bodies 计数 + _SKETCH_ADDERS + precheck 必填参数
+- `sidecar/sw_agent/edge_select.py` — 新增 select_feature_edges
+- `sidecar/sw_agent/tools/feature.py` — fillet_edges 加 feature 参数
+- `sidecar/sw_agent/tools/reference.py` — create_plane 存 last_plane
+- `sidecar/sw_agent/tools/sketch.py` — start_sketch 支持 plane="last"
+- `sidecar/sw_agent/tools/document.py` — save_document 走 com_call
+- `src/main/llm/prompts.ts` — exit_sketch 引导
+
 ## [0.2.89] - 2026-08-03
 
 ### Added (P99 — feature_map + 按需规则段 + 装配体约束)

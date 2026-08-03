@@ -588,6 +588,74 @@ def probe(ctx: Context) -> dict:
     return result
 
 
+def select_feature_edges(ctx: Context, feature: str, which: str) -> int:
+    """P100: select edges belonging to ONE named feature (fillet_edges feature=...).
+
+    Multi-feature parts make a plain "horizontal" match every flat-lying edge in the
+    part (top-face rim + side-plate seam are all "horizontal"). When the model names
+    a feature, only that feature's edges are candidates. Uses _feature_edges' walk
+    but pinned to the named feature instead of scratch["last_feature"].
+    """
+    if feature == "last":
+        feature = ctx.scratch.get("last_feature", "")
+    if not feature:
+        raise SWError('feature="last" 需要先建一个特征（当前没有 last_feature）')
+
+    feat = None
+    for f in (ctx.all_features() or []):
+        try:
+            if sw_get(f, "Name") == feature:
+                feat = f
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if feat is None:
+        raise SWError(f"找不到特征 {feature}（用 list_features 查真实名字）")
+
+    # Snapshot first (creation-time topology), live walk as fallback — same as
+    # _feature_edges, but for the named feature.
+    fmap = ctx.scratch.get("feature_map") or {}
+    snap = fmap.get(feature)
+    if snap and snap.get("fingerprints"):
+        wanted = set(snap["fingerprints"])
+        matched = []
+        for body in ctx.solid_bodies():
+            try:
+                edges = list(sw_get(body, "GetEdges") or [])
+            except Exception:  # noqa: BLE001
+                continue
+            for e in edges:
+                if edge_fingerprint(e) in wanted:
+                    matched.append(e)
+        if matched:
+            return _select_all(ctx, matched).selected
+
+    try:
+        faces = list(sw_get(feat, "GetFaces") or [])
+    except Exception as ex:  # noqa: BLE001
+        raise SWError(f"feature.GetFaces: {ex}") from None
+    seen: set = set()
+    edges: list = []
+    for face in faces:
+        for e in _edges_of_face(face):
+            fp = edge_fingerprint(e)
+            if fp in seen:
+                continue
+            seen.add(fp)
+            edges.append(e)
+    if not edges:
+        raise SWError(f"特征 {feature} 没有可读的边")
+    notes: list = []
+    buckets = _bucket_edges(edges, notes)
+    if which == "all":
+        picked = [e for group in buckets.values() for e in group]
+    else:
+        picked = buckets.get(which, [])
+    if not picked:
+        raise SWError(f"特征 {feature} 没有符合 {which} 描述的边（{'; '.join(notes[:2])}）")
+    return _select_all(ctx, picked).selected
+
+
 def select(ctx: Context, which: str) -> int:
     """选中 `which` 描述的那些边，返回选中的数量。
 

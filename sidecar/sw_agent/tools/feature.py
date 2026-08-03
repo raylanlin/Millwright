@@ -450,13 +450,21 @@ def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = "
         "radius": {"type": "number", "desc": "Fillet radius (mm)"},
         "edges": {
             "type": "string", "enum": ["vertical", "horizontal", "circular", "top", "bottom", "all", "selected"],
-            "desc": "vertical = the upright edges (e.g. the four corners of a plate) · horizontal = edges lying flat · circular = round edges · all = every edge · selected = whatever is already selected in SolidWorks",
+            "desc": "vertical = the upright edges (e.g. the four corners of a plate) · horizontal = edges lying flat · circular = round edges · top/bottom = the rim of the top/bottom cap face (cylinder rims) · all = every edge · selected = whatever is already selected in SolidWorks",
             "default": "vertical",
+        },
+        "feature": {
+            "type": "string",
+            "desc": 'Scope the edge search to ONE feature (P100) — multi-feature parts make '
+                    '"horizontal" match edges of every feature (top-face rim + side-plate '
+                    'seam are both "horizontal"). Pass the feature name to round only its '
+                    'edges, e.g. feature="凸台-拉伸2". Default = the most recent feature.',
+            "default": "",
         },
     },
     category="feature",
 )
-def fillet_edges(ctx: Context, radius: float, edges: str = "vertical"):
+def fillet_edges(ctx: Context, radius: float, edges: str = "vertical", feature: str = ""):
     # P45: previously this REQUIRED a human to pre-select edges in SolidWorks, so from
     # chat it could only ever fail. Now it selects the described edge set itself.
     if edges == "selected":
@@ -485,9 +493,14 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical"):
         # P45.1: clear first. A leftover selection from the previous tool is why one run
         # "succeeded" by rounding the four hole edges instead of the requested junction.
         ctx.clear_selection()
-        # P46: select_edges now raises with a real reason when the bodies can't be read,
-        # so a zero here genuinely means "no edge matched that description".
-        picked = ctx.select_edges(edges)
+        # P100: explicit feature scope — multi-feature parts make a plain "horizontal"
+        # match every flat-lying edge in the part. When the model names a feature, only
+        # that feature's edges are candidates; the fallback stays the whole part.
+        if feature:
+            from ..edge_select import select_feature_edges
+            picked = select_feature_edges(ctx, feature, edges)
+        else:
+            picked = ctx.select_edges(edges)
         if picked == 0:
             raise SWError(
                 f"no {edges} edges matched. vertical = along the part's up axis, "

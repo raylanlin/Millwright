@@ -131,11 +131,22 @@ def open_document(ctx: Context, path: str):
 @tool("save_document", "Save the current document (= 保存; Save3)", params={}, category="document")
 def save_document(ctx: Context):
     model = ctx.model
-    # Save3's err/warn are [out] — unpack defensively
-    r = model.Save3(1, 0, 0)  # 1 = swSaveAsOptions_Silent
-    ok = r[0] if isinstance(r, tuple) else r
-    if not ok and sw_get(model, "GetPathName") == "":
-        raise SWError("document has never been saved; use save_as with a target path.")
+    # P100: Save3's signature varies across releases (returns tuple vs int, arg count
+    # differs) — the benchmark's save_document died with "类型不匹配". Route through
+    # the same defensive com_call used everywhere else; fall back to SaveAs when the
+    # document was never saved. Model.Save3(Silent) then GetPathName check is the
+    # intent; the arity/typing dance is transport noise.
+    from .feature import com_call
+    errors: list = []
+    r = com_call(model, ("Save3", "Save2"), (1, 0, 0), errors, min_args=1)
+    ok = bool(r)
+    if not ok:
+        try:
+            ok = bool(sw_get(model, "GetPathName"))
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            raise SWError("document has never been saved; use save_as with a target path.")
     return {"saved": sw_get(model, "GetTitle")}
 
 

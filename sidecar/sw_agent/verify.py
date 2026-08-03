@@ -33,6 +33,7 @@ _REF_GEOMETRY = {"create_plane", "create_axis", "create_reference_point"}
 _SKETCH_ADDERS = {
     "sketch_rectangle", "sketch_circle", "sketch_line", "sketch_polyline",
     "sketch_polygon", "sketch_arc_center", "sketch_centerline", "sketch_fillet",
+    "sketch_rounded_rectangle",  # P100: P97 加了工具但这里漏了 → 批量里画没画进去无人验证
 }
 # 草图操作：不增加段数（关系/标注），但要求草图活跃
 _SKETCH_OPS = {"add_sketch_relation", "add_dimension", "modify_dimension"}
@@ -66,11 +67,21 @@ _SKIP = {
 
 def snapshot(ctx: Context) -> dict:
     """执行前/后各拍一张。失败降级为 None 字段 —— 快照是证据，不是门禁。"""
-    s: dict = {"features": [], "box": None, "sketch_active": None, "sketch_segments": None}
+    s: dict = {"features": [], "box": None, "sketch_active": None, "sketch_segments": None, "bodies": None}
     try:
         s["features"] = [sw_get(f, "Name") for f in (ctx.all_features() or [])]
     except Exception:  # noqa: BLE001
         pass
+    # P100: body count is the REAL "did geometry appear" signal. Feature count lies
+    # here — every start_sketch adds a 草图N entry to the tree, so "feature tree
+    # grew" is true even when an extrude silently built nothing. That is exactly how
+    # the benchmark's build_part batch reported 10 steps ok with zero geometry on
+    # screen. A solid feature must change the body count (or the box) too.
+    try:
+        bodies = ctx.solid_bodies()
+        s["bodies"] = len(bodies)
+    except Exception:  # noqa: BLE001
+        s["bodies"] = None
     try:
         box = ctx.model.GetPartBox(True)  # x1,y1,z1,x2,y2,z2，单位米
         if box and len(box) >= 6:
@@ -130,10 +141,23 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
             checks.append(f"特征树新增 {len(after['features']) - len(before['features'])} 个特征")
         else:
             checks.append("特征树没有新增特征 —— 工具报告成功但什么都没建成")
-        # 包围盒：实体类特征应改变 box（fillet_all 在角上可能不动 box，宽容）
-        # P98: cut_extrude 豁免 —— 通孔/内腔切除不改变外包围盒，这是正常行为，
-        # 不是静默失败（验④ 日志里 cut_extrude 被误报 verified_failed 就是这个）。
-        if (
+        # P100: body count is the honest "geometry appeared" test. Feature count lies
+        # (start_sketch adds 草图N to the tree), so a batch can report 10 ok steps with
+        # zero solid on screen. A solid feature must create/change a body. box is a
+        # fallback when body enumeration is unavailable on this install.
+        b_before, b_after = before.get("bodies"), after.get("bodies")
+        if b_before is not None and b_after is not None:
+            if b_after > b_before:
+                checks.append(f"实体数 {b_before} → {b_after}")
+            elif name == "cut_extrude":
+                # cut keeps body count the same — box change is the only geometric signal,
+                # and even that is exempt for interior cuts (P98). Feature-added already
+                # passed; nothing more to verify here.
+                checks.append("实体数不变（切除不增实体，特征树已确认新增）")
+            else:
+                checks.append(f"实体数未增长（{b_before} → {b_after}）—— 报告成功但没生成实体")
+                ok = False
+        elif (
             name != "fillet_all"
             and name != "cut_extrude"
             and before["box"] and after["box"] and not _box_changed(before, after)
@@ -242,6 +266,19 @@ def precheck(plan: list) -> list:
     issues: list = []
     has_sketch = False   # 上一步是 start_sketch 或草图工具 → 活跃草图
     has_body = False     # 已创建过实体特征
+    # P100: required-parameter check up front. The benchmark batch ran 10 steps, then
+    # died at step 11 with "create_plane: missing required parameter 'base'" — ten
+    # steps of real geometry work wasted because the plan itself was wrong. Registry
+    # validation only fires at CALL time, per step; precheck should catch the same
+    # thing for the WHOLE plan before the first tool runs.
+    from ..registry import TOOLS
+    for i, (name, params) in enumerate(plan):
+        spec = TOOLS.get(name)
+        if spec is None:
+            continue
+        for pname, p in spec.params.items():
+            if p.get("required", True) and "default" not in p and pname not in (params or {}):
+                issues.append(f"step {i + 1} ({name}): missing required parameter '{pname}'")
     for i, (name, params) in enumerate(plan):
         step = i + 1
 

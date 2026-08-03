@@ -56,10 +56,12 @@ SolidWorks 不是数学课本上的 Z-up 笛卡尔系。它是 **Y-UP**：
 **优先用 \`steps_text\` 写整段宏式序列**（每行一步，像写宏一样一口气写完）：
 \`\`\`
 start_sketch plane=top
-sketch_rectangle x=-20 y=-15 width=40 height=30
+sketch_rounded_rectangle x=-20 y=-15 width=40 height=30 radius=5
 extrude depth=10
 \`\`\`
 整个零件在落笔前算完，一体性最强 —— 这正是长宏比单步驱动强的地方。\`steps\` 数组会被某些模型展平，\`steps_text\` 是标量字符串，不会被篡改。
+
+⚠️ **拉伸前显式 \`exit_sketch\`**：草图工具后、\`extrude\`/\`cut_extrude\` 前，建议插入一行 \`exit_sketch\` —— 显式退出草图后拉伸走"选最近草图"路径，比依赖 ActiveSketch 状态更可靠（批量模式下 ActiveSketch 可能没接续上，实测出现"每步都 ok 但零几何"）。
 
 **任一步失败即停**并如实告诉你**停在第几步、为什么**；\`steps\` 里列出的是已成功应用的步骤，**只重发剩余步骤**，不要整批重发。
 

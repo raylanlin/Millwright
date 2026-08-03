@@ -195,6 +195,12 @@ def start_sketch(ctx: Context, plane: str = "", face: str = ""):
     if not plane:
         raise SWError("give either plane= (front/top/right or a datum plane name) or face= (top/bottom/front/back/left/right).")
     key = (plane or "").strip()
+    # P100: "last" resolves to the plane the most recent create_plane returned —
+    # the name goes through scratch, so the next step never has to guess "基准面1".
+    if key.lower() == "last":
+        key = ctx.scratch.get("last_plane", "")
+        if not key:
+            raise SWError('plane="last" 需要先 create_plane（当前没有最近创建的基准面）')
     ok = ctx.select_plane(key) if key.lower() in ("front", "top", "right") else False
     if not ok:
         # P37: sketch on ANY reference plane in the tree. Previously only the three

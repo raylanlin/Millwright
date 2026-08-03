@@ -24,7 +24,12 @@ def create_plane(ctx: Context, base: str, offset: float):
     feat = ctx.feat_mgr.InsertRefPlane(8, units.mm(offset), 0, 0, 0, 0)
     if feat is None:
         raise SWError("failed to create reference plane.")
-    return {"plane": sw_get(feat, "Name"), "base": base, "offset_mm": offset}
+    name = sw_get(feat, "Name")
+    # P100: pass the created plane's NAME through scratch so the next step can use
+    # start_sketch(plane="last") instead of guessing "基准面1". The benchmark model
+    # burned a list_features call precisely because it had to guess the name.
+    ctx.scratch["last_plane"] = name
+    return {"plane": name, "base": base, "offset_mm": offset}
 
 
 @tool(
