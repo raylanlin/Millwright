@@ -71,6 +71,20 @@ export function toLLMError(err: unknown, context?: string): LLMErrorInfo {
         raw: e.message,
       };
     }
+
+    // P103: undici kills the stream with "TypeError: terminated" when the SERVER
+    // closes the connection mid-stream — most often because the reasoning model's
+    // thinking blew past the max_tokens budget (a 61k-char think ≈ 30-40k tokens
+    // exceeds a 32k cap). Say that instead of the bare undici message.
+    const msg = (e.message || '').toLowerCase();
+    if (msg.includes('terminated') || code === 'UND_ERR_SOCKET' || code === 'UND_ERR_HEADERS_TIMEOUT') {
+      return {
+        code: 'LLM_NETWORK_ERROR',
+        message: '连接被服务器中断 —— 推理模型思考可能超出了单次输出上限（maxTokens）。'
+          + '可以在设置里把「单次最大输出 token」调大（如 131072），或降低思考级别。',
+        raw: e.message,
+      };
+    }
   }
 
   const message =

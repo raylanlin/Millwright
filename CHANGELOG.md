@@ -6,6 +6,35 @@
 
 ## [Unreleased]
 
+## [0.2.93] - 2026-08-03
+
+### Fixed (P103 — 思考吃光 maxTokens → 流被服务器掐断 terminated)
+
+症状：首次回答思考 61807 chars 后「流式工具调用失败: terminated」。
+
+根因：`terminated` 是服务器端掐断连接——推理模型的思考与回答共用一个
+max_tokens 预算（P54 注释早就警告过），61k 字符思考 ≈ 30-40k tokens，
+撞上默认 32768 上限后服务器直接断开。P102 修好后思考能跑更久，于是
+撞上下一堵墙。
+
+修法：
+
+- `openai.ts` maxTokens()：按 provider 给合理默认——
+  - minimax → 131072（M3 推荐输出上限，硬上限 524288）
+  - deepseek → 65536
+  - 其他 → 32768（安全兜底）
+  用户仍可在设置里覆盖。
+- `env-fallback.ts`：4096 → 65536（4096 是前推理时代的默认，思考模型
+  第一段 scratchpad 就烧完）
+- `errors.ts`：识别 undici 的 `terminated` / UND_ERR_SOCKET，报错明确
+  指向「思考可能超出 maxTokens，去设置里调大」，不再是裸 terminated
+
+### Changed
+
+- `src/main/llm/openai.ts` — maxTokens 按 dialect 提高默认
+- `src/main/store/env-fallback.ts` — 默认 4096 → 65536
+- `src/main/llm/errors.ts` — terminated 识别 + 明确提示
+
 ## [0.2.92] - 2026-08-03
 
 ### Fixed (P102 — 流式工具调用 timeout：思考到一半被固定总超时杀掉)

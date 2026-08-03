@@ -62,10 +62,19 @@ export class OpenAIAdapter extends BaseLLMAdapter {
   }
 
   // P54: 8192 truncated answers on reasoning models — the scratchpad is spent from the
-  // SAME budget, so a 15k-character think left nothing for the reply. MiniMax M3 allows
-  // up to 512k output; 32k is a safe, generous default for every provider we target.
+  // SAME budget, so a 15k-character think left nothing for the reply.
+  // P103: a 61k-character think (~30-40k tokens) blew past the 32768 default and the
+  // server killed the stream with "terminated". MiniMax's own docs: M3 recommended
+  // output 131072 tokens (hard max 524288), M2.7 recommended 65536 (hard 204800).
+  // Pick the default by provider so long thinking has room; the user can still
+  // override in Settings.
   private maxTokens(): number {
-    return this.config.maxTokens ?? 32768;
+    const explicit = this.config.maxTokens;
+    if (explicit && explicit > 0) return explicit;
+    const d = detectDialect(this.config.baseURL);
+    if (d === 'minimax') return 131_072;   // M3 recommended output cap
+    if (d === 'deepseek') return 65_536;   // deepseek-v4 family tolerates long output
+    return 32_768;                         // safe for every other gateway
   }
 
   /**

@@ -125,7 +125,9 @@ export function envToConfig(env: Record<string, string>): LLMConfig | null {
       model,
       stream: true,
       temperature: 0.3,
-      maxTokens: 4096,
+      // P103: 4096 was a pre-reasoning default — a thinking model burns that in the
+      // first paragraph of its scratchpad and the stream dies with "terminated".
+      maxTokens: 65_536,
       timeoutMs: 120_000,
     };
   }
