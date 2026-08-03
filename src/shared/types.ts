@@ -66,6 +66,11 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
   /** P5: for role:'tool' — the id of the assistant tool call this message answers */
   toolCallId?: string;
+  /** P101: the model's reasoning/thinking text for this assistant message.
+   *  Kept SEPARATE from content so the UI can collapse it, but retained on the
+   *  message so providers that require reasoning in history (DeepSeek tool calls,
+   *  MiniMax M3 interleaved thinking) get it back on the next turn. */
+  reasoning?: string;
   code?: string;
   codeLanguage?: 'vba' | 'python';
   /** Optional: unique message id, used as the React `key` in the renderer */

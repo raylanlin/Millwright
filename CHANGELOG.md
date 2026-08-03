@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+## [0.2.91] - 2026-08-03
+
+### Fixed (P101 — thinking 回传：DeepSeek/MiniMax 要求历史里带推理)
+
+之前的策略是「reasoning 永不回传」（thinking.ts 注释：resending thousands of
+"let me reconsider" tokens eats the context window）。查证官方文档后发现这
+与两家主用提供商的 API 要求相反：
+
+- DeepSeek（thinking_mode 指南）：两个 user 消息之间如果有工具调用，中间
+  assistant 的 reasoning_content **必须**参与上下文拼接并回传给 API
+- MiniMax M3（工具使用 & 交错思维链）：核心最佳实践是回传每次 Response 的
+  全部信息，尤其是 thinking/reasoning_details；OpenAI 兼容模式下 content
+  会包含 <think> 标签，需完整保留
+- OpenAI 风格（reasoning_effort）：不暴露 reasoning，无需回传
+
+修法（按 dialect 区分）：
+
+- `ChatMessage` 新增 `reasoning?: string` 字段，与 content 分开存
+- agent-loop 主循环 + P46 nudge 分支：assistant 消息带 reasoning 入历史
+- `openai.ts` 请求构造：assistant 消息按 dialect 回传——
+  - deepseek → `reasoning_content: <推理文本>`
+  - minimax/qwen/zhipu → 把推理重新包回 `<think>…</think>` 拼进 content
+  - 其他 → 不回传（未知网关乱猜字段是硬 400）
+- `context-window.ts`：msgTokens 把 reasoning 计入估算（否则裁剪会低估占用）
+- anthropic 路径保持现状：thinking blocks 需要签名才能回传，纯文本塞回
+  content 会被当普通文本，不如不回传（不带不报错，带了签名无效才报错）
+
+### Changed
+
+- `src/shared/types.ts` — ChatMessage 加 reasoning 字段
+- `src/main/agent/agent-loop-sidecar.ts` — 两处 history.push 带 reasoning
+- `src/main/llm/openai.ts` — reasoningHistory() 按 dialect 回传
+- `src/main/llm/context-window.ts` — msgTokens 计入 reasoning
+
 ## [0.2.90] - 2026-08-03
 
 ### Fixed (P100 — Benchmark #1 电机支架抓出的问题)

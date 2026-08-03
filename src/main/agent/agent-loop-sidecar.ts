@@ -302,7 +302,11 @@ export async function runSidecarAgent(
       // once, so a genuine "I have a question for you" answer still ends the turn.
       if (round === 0 && !nudged && (resp.content ?? '').length > 80) {
         nudged = true;
-        history.push({ role: 'assistant', content: resp.content ?? '' });
+        history.push({
+          role: 'assistant',
+          content: resp.content ?? '',
+          reasoning: resp.reasoning,  // P101: keep continuity for DeepSeek/MiniMax
+        });
         history.push({
           role: 'user',
           content: '按上述方案继续执行，现在开始调用工具。不需要我批准，遇到需要确认的破坏性操作时系统会自动询问我。',
@@ -320,7 +324,16 @@ export async function runSidecarAgent(
       if (!c.id) c.id = `${c.name}-r${round}-${i}-${Date.now().toString(36)}`;
     });
 
-    history.push({ role: 'assistant', content: resp.content ?? '', toolCalls: resp.toolCalls });
+    // P101: retain the reasoning on the assistant message — DeepSeek (tool-call turns)
+    // and MiniMax M3 (interleaved thinking) require it back in history for continuity.
+    // content is already stripped of <think>; reasoning rides along separately and the
+    // request builder re-attaches it in the provider's dialect.
+    history.push({
+      role: 'assistant',
+      content: resp.content ?? '',
+      reasoning: resp.reasoning,
+      toolCalls: resp.toolCalls,
+    });
 
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');

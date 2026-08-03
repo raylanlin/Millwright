@@ -19,7 +19,7 @@ import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
 import { parseSSE } from './sse';
 import { buildOpenAITools } from './tools-schema';
-import { ThinkSplitter, reasoningParams, isReasoningParamError, splitThinking, dropsTemperature } from './thinking';
+import { ThinkSplitter, reasoningParams, isReasoningParamError, splitThinking, dropsTemperature, detectDialect } from './thinking';
 import type {
   ChatMessage,
   LLMResponse,
@@ -287,6 +287,15 @@ export class OpenAIAdapter extends BaseLLMAdapter {
             type: 'function',
             function: { name: tc.name, arguments: JSON.stringify(tc.parameters ?? {}) },
           })),
+          ...this.reasoningHistory(m),
+        });
+        continue;
+      }
+      if (m.role === 'assistant') {
+        out.push({
+          role: 'assistant',
+          content: m.content || null,
+          ...this.reasoningHistory(m),
         });
         continue;
       }
@@ -297,6 +306,29 @@ export class OpenAIAdapter extends BaseLLMAdapter {
   }
 
   /** User messages carrying `images` → OpenAI multimodal content (text + image_url list) */
+  /**
+   * P101: re-attach a retained assistant reasoning in the provider's dialect.
+   *
+   * DeepSeek (tool-call turns) and MiniMax M3 (interleaved thinking) both require the
+   * previous turn's thinking to come back in the request — DeepSeek as
+   * `reasoning_content`, MiniMax as an inline <think> block in content. OpenAI-style
+   * reasoning_effort models don't accept either field; unknown gateways get nothing
+   * (a wrong guess is a hard 400).
+   */
+  private reasoningHistory(m: ChatMessage): Record<string, any> {
+    const reasoning = m.reasoning?.trim();
+    if (!reasoning) return {};
+    const d = detectDialect(this.config.baseURL);
+    if (d === 'deepseek') return { reasoning_content: reasoning };
+    if (d === 'minimax' || d === 'qwen' || d === 'zhipu') {
+      // These providers accept <think> inline (MiniMax explicitly says to keep it);
+      // Qwen/Zhipu tolerate it as well. Re-wrap so the model sees its own prior
+      // scratchpad, not just the answer.
+      return { content: (m.content ? `<think>${reasoning}</think>\n${m.content}` : `<think>${reasoning}</think>`) };
+    }
+    return {};
+  }
+
   private contentOf(m: ChatMessage): any {
     if (!m.images?.length) return m.content;
     return [

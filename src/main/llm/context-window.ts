@@ -62,6 +62,7 @@ function msgTokens(m: ChatMessage): number {
   // images are budgeted flat — vision endpoints charge ~1-2k tokens per image
   return (
     estimateTokens(m.content) +
+    estimateTokens(m.reasoning || '') +   // P101: reasoning rides in history now — count it
     estimateTokens(m.code || '') +
     (m.images?.length ?? 0) * 1_500 +
     (m.toolCalls ? estimateTokens(JSON.stringify(m.toolCalls)) : 0)
