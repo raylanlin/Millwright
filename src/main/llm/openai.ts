@@ -14,6 +14,7 @@
 //      that drops them if the gateway rejects them (better than a hard 400).
 
 import { BaseLLMAdapter, type ToolStreamChunk } from './adapter';
+import { llmFetch } from './net';
 import { resolveSystemPrompt } from './prompts';
 import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
@@ -231,7 +232,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
   async test(signal?: AbortSignal): Promise<boolean> {
     const { signal: s, cleanup } = this.withTimeout(signal);
     try {
-      const res = await fetch(`${this.getBaseURL()}/chat/completions`, {
+      const res = await llmFetch(`${this.getBaseURL()}/chat/completions`, {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify({
@@ -355,7 +356,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
    */
   private async postWithReasoningFallback(body: any, signal: AbortSignal): Promise<Response> {
     const url = `${this.getBaseURL()}/chat/completions`;
-    const send = (b: any) => fetch(url, {
+    const send = (b: any) => llmFetch(url, {
       method: 'POST', headers: this.buildHeaders(), body: JSON.stringify(b), signal,
     });
 

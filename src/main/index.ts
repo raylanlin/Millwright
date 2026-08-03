@@ -3,6 +3,7 @@
 // Electron main-process entry point.
 
 import './crash-log'; // ⚠️ MUST come before any business import, so the crash handler is registered first
+import { initNetStack } from './llm/net'; // P106: IPv4-first DNS ordering for the undici fallback path
 
 import { app, BrowserWindow, shell, Menu } from 'electron';
 import * as path from 'path';
@@ -78,6 +79,7 @@ function startHealthMonitor(): void {
 }
 
 app.whenReady().then(async () => {
+    initNetStack();  // P106: prefer IPv4 answers — broken IPv6 routes surface as EAI_AGAIN
   crashLog(`app ready, electron ${process.versions.electron}`);
 
   try {

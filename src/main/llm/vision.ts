@@ -3,6 +3,7 @@
 
 import type { VisionConfig, LocaleName } from '../../shared/types';
 import { toLLMError } from './errors';
+import { llmFetch } from './net';
 
 export interface AnalyzeImageInput {
   question: string;        // Question drafted by the main model = image-to-text prompt
@@ -46,7 +47,7 @@ export async function analyzeImage(input: AnalyzeImageInput): Promise<string> {
   };
   let res: Response;
   try {
-    res = await fetch(`${base}/chat/completions`, {
+    res = await llmFetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

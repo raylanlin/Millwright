@@ -6,6 +6,37 @@
 
 ## [Unreleased]
 
+## [0.2.96] - 2026-08-03
+
+### Fixed (P106 — 网络连接失败 EAI_AGAIN：应用不走系统代理)
+
+症状：升级后报「⚠️ 网络连接失败 (EAI_AGAIN)」，重新配置也不行。
+浏览器正常，只有应用连不上。
+
+根因：所有 LLM 请求走全局 `fetch`（undici），**不走系统代理**。
+机器上开 Clash/VPN（系统代理模式）时，应用绕过代理直连 DNS，
+解析失败就报 EAI_AGAIN（DNS 临时故障）——浏览器走系统代理所以
+正常。另外 Node 18+ 默认 DNS 按 verbatim 顺序解析，IPv6 路由
+损坏也会表现成 EAI_AGAIN。
+
+修法（新增 `src/main/llm/net.ts` 统一网络层）：
+
+- **llmFetch()**：优先用 Electron `net.fetch`（Chromium 网络栈，
+  自动遵循系统代理 / PAC / Windows 注册表代理配置），非 Electron
+  环境（测试）回退全局 fetch。
+- **重试**：EAI_AGAIN / ENOTFOUND / ECONNREFUSED / ECONNRESET /
+  ETIMEDOUT 等瞬时错误自动重试 2 次（400ms 退避）——DNS 抖动
+  一次重试通常就过了。
+- **initNetStack()**：启动时 `dns.setDefaultResultOrder('ipv4first')`，
+  避免 IPv6 优先解析触发 EAI_AGAIN。
+- openai.ts / anthropic.ts / vision.ts 共 5 处 fetch 全部换成 llmFetch。
+
+### Changed
+
+- `src/main/llm/net.ts`（新增）— llmFetch + initNetStack
+- `src/main/llm/openai.ts` / `anthropic.ts` / `vision.ts` — 换 llmFetch
+- `src/main/index.ts` — 启动时 initNetStack()
+
 ## [0.2.95] - 2026-08-03
 
 ### Fixed (P105 — 电机支架测试抓出的三个真问题)

@@ -18,6 +18,7 @@
 // Docs: https://docs.claude.com/en/api/messages
 
 import { BaseLLMAdapter, type ToolStreamChunk } from './adapter';
+import { llmFetch } from './net';
 import { resolveSystemPrompt } from './prompts';
 import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
@@ -122,7 +123,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
    */
   private async post(body: any, signal: AbortSignal): Promise<Response> {
     const url = `${this.getBaseURL()}/v1/messages`;
-    const send = (b: any) => fetch(url, {
+    const send = (b: any) => llmFetch(url, {
       method: 'POST', headers: this.buildHeaders(), body: JSON.stringify(b), signal,
     });
     const res = await send(body);
@@ -507,7 +508,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   async test(signal?: AbortSignal): Promise<boolean> {
     const { signal: s, cleanup } = this.withTimeout(signal);
     try {
-      const res = await fetch(`${this.getBaseURL()}/v1/messages`, {
+      const res = await llmFetch(`${this.getBaseURL()}/v1/messages`, {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify({
