@@ -21,6 +21,13 @@ from __future__ import annotations
 
 import json
 
+# P105: absolute import at MODULE level — a function-level "from ..verify import"
+# died with "attempted relative import beyond top-level package" on the bundled
+# interpreter (runpy.run_module("sw_agent", run_name="__main__") leaves __package__
+# broken for deeper relative hops). Loading at import time also surfaces any verify
+# problem at startup instead of at the first build_part call.
+from sw_agent.verify import precheck, snapshot, verify_step
+
 from ..bridge import Context, SWError
 from ..registry import TOOLS, call, tool
 
@@ -251,8 +258,7 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
     # numeric sanity (depth/count/radius must be > 0). A batch that dies halfway
     # because of a bad step leaves a half-built part behind; a batch that never starts
     # because of a bad step costs one round-trip. Refuse up front, tell the model which
-    # step and why.
-    from ..verify import precheck, snapshot, verify_step
+    # step and why. (precheck/snapshot/verify_step are imported at module top, P105.)
     issues = precheck(plan)
     if issues:
         return {

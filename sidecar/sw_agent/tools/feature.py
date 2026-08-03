@@ -770,8 +770,30 @@ def unsuppress_feature(ctx: Context, name: str):
       params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature", destructive=True)
 def delete_feature(ctx: Context, name: str):
+    # P105: the benchmark deleted ten features with every call reporting success while
+    # ZERO actually went away — SolidWorks popped "非当前激活特征无法删除". Two causes:
+    #  1. an ACTIVE SKETCH blocks deleting other features — exit it first;
+    #  2. EditDelete()'s result was never checked, so refusal was reported as success.
+    # Delete must verify the feature actually left the tree before claiming success.
+    try:
+        if ctx.sketch_mgr.ActiveSketch is not None:
+            ctx.sketch_mgr.InsertSketch(True)  # toggle: exit the active sketch
+    except Exception:  # noqa: BLE001
+        pass
     _select_feature(ctx, name)
-    ctx.model.EditDelete()
+    before = _feature_names(ctx)
+    if name not in before:
+        raise SWError(f"feature not found: {name}")
+    try:
+        ctx.model.EditDelete()
+    except Exception as e:  # noqa: BLE001
+        raise SWError(f"SolidWorks refused to delete {name}: {e}") from None
+    after = _feature_names(ctx)
+    if name in after:
+        raise SWError(
+            f"SolidWorks refused to delete {name} — the feature is still in the tree. "
+            "常见原因：该特征被其他特征引用（父子关系），或当前处于激活状态。"
+        )
     return {"deleted": name}
 
 

@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+## [0.2.95] - 2026-08-03
+
+### Fixed (P105 — 电机支架测试抓出的三个真问题)
+
+#### ① build_part 报「attempted relative import beyond top-level package」
+
+打包解释器用 runpy.run_module("sw_agent", run_name="__main__") 启动，
+函数体内的 `from ..verify import` 相对导入在深层相对跳转时 __package__
+损坏，build_part 直接报废（模型只能退回单步）。
+
+修：改为模块级绝对导入 `from sw_agent.verify import ...`——启动时加载，
+任何问题在启动暴露而不是第一次 build_part 调用才炸。
+
+#### ② create_plane 负偏移失效（基准面2 建在了 front 面上）
+
+offset=-45 的 InsertRefPlane(8, -0.045, ...) 在这台机器上负号被丢弃，
+基准面2 落在 Z=0（front 面），不是 Z=-45。不管 MiniMax 还是 DeepSeek
+都踩同一个坑——工具问题，不是模型问题。
+
+修：负偏移改用「正值 + Flip 约束」——InsertRefPlane(8, abs(offset),
+15, 0, 0, 0)，15 = swRefPlaneReferenceConstraint_Flip，这是文档化的
+距离约束反向方式。
+
+#### ③ delete_feature 静默撒谎（报告成功但一个都没删）
+
+模型连续删十个特征全报 `{"deleted": name}`，实际零删除——SolidWorks
+弹「非当前激活特征无法删除」。两个原因：
+  1. 激活草图阻止删除其他特征——删除前没退出；
+  2. EditDelete() 的拒绝被当成成功返回。
+
+修：删除前退出激活草图；删除后验证特征树——名字还在就报错（含常见
+原因提示），绝不再假装成功。
+
+### Changed
+
+- `sidecar/sw_agent/tools/batch.py` — verify 改为模块级绝对导入
+- `sidecar/sw_agent/tools/reference.py` — 负偏移用 Flip 约束
+- `sidecar/sw_agent/tools/feature.py` — delete_feature 退出草图 + 删除后验证
+
 ## [0.2.94] - 2026-08-03
 
 ### Fixed (P104 — thinking 被截断报错后，思考图标一直转)
