@@ -251,6 +251,9 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           break;
         case 'error':
           setThinkingRound(null);
+          settleReasoning();  // P104: clear the reasoning step's streaming flag too —
+                              // without it the ThinkingBlock spinner spins forever after
+                              // a mid-think error (P102/P103 kills). done had this, error didn't.
           clearPending();
           setError({ code: 'AGENT_ERROR', message: ev.error } as LLMErrorInfo);
           pushNote(`⚠️ ${ev.error}`);

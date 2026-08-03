@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [0.2.94] - 2026-08-03
+
+### Fixed (P104 — thinking 被截断报错后，思考图标一直转)
+
+症状：流式调用中途报错（P102/P103 那种 terminated/timeout），
+ThinkingBlock 旁边的「工作中」图标永远在转。
+
+根因：agent 事件流里 `done` 分支会调 `settleReasoning()` 清掉
+reasoning step 的 streaming 标记（停掉图标），但 `error` 分支漏了
+——它只清了全局思考指示器（setThinkingRound(null)）和 pending，
+reasoning step 的 `streaming: true` 保留，ThinkingBlock 就一直转。
+
+修：error 分支补 `settleReasoning()`，与 done 对齐。
+
+### Changed
+
+- `src/renderer/hooks/useLLM.ts` — error 分支 settleReasoning
+
 ## [0.2.93] - 2026-08-03
 
 ### Fixed (P103 — 思考吃光 maxTokens → 流被服务器掐断 terminated)
