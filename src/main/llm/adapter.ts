@@ -71,9 +71,33 @@ export abstract class BaseLLMAdapter implements LLMAdapter {
     signal: AbortSignal;
     cleanup: () => void;
   } {
+    const { signal, cleanup, reset } = this.withIdleTimeout(external);
+    void reset;  // total-timeout semantics: no reset used
+    return { signal, cleanup };
+  }
+
+  /**
+   * Idle timeout for STREAMING: abort only when NO data has arrived for `idleMs`.
+   *
+   * P102: the old withTimeout was a fixed 120s TOTAL timeout — a reasoning model
+   * (MiniMax M3, DeepSeek) that thinks for 130s before emitting its first token got
+   * killed mid-thought with "流式工具调用失败: timeout". Streaming has a natural
+   * heartbeat (every SSE chunk), so the correct semantics are: abort only when the
+   * stream goes silent for idleMs. Call `reset()` on every received event.
+   */
+  protected withIdleTimeout(external?: AbortSignal, idleMs?: number): {
+    signal: AbortSignal;
+    cleanup: () => void;
+    reset: () => void;
+  } {
     const controller = new AbortController();
-    const timeoutMs = this.config.timeoutMs ?? 120_000;
-    const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
+    const ms = idleMs ?? this.config.timeoutMs ?? 120_000;
+    let timer: NodeJS.Timeout;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(new Error('timeout')), ms);
+    };
+    arm();
 
     const onAbort = () => controller.abort(external?.reason);
     if (external) {
@@ -87,6 +111,7 @@ export abstract class BaseLLMAdapter implements LLMAdapter {
         clearTimeout(timer);
         external?.removeEventListener('abort', onAbort);
       },
+      reset: arm,
     };
   }
 

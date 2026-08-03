@@ -6,6 +6,32 @@
 
 ## [Unreleased]
 
+## [0.2.92] - 2026-08-03
+
+### Fixed (P102 — 流式工具调用 timeout：思考到一半被固定总超时杀掉)
+
+症状：长任务里「流式工具调用失败: timeout」，发生在模型思考期间。
+
+根因：withTimeout 是**固定 120 秒总超时**——不管流里有没有输出，到点就
+abort。推理模型（MiniMax M3 / DeepSeek）思考可能超过 120 秒，第一个
+token 还没出来就被杀。
+
+修法：流式路径改用 **idle timeout**——每个 SSE 事件都 reset 计时器，
+只有流长时间完全静默（默认仍 120s）才算超时。思考中的 reasoning_delta
+本身就是流量，天然续命。
+
+- adapter.ts：新增 withIdleTimeout（idle 语义 + reset()），withTimeout
+  改为其包装（非流式路径语义不变）
+- openai.ts：chatStream / chatWithToolsStream 改用 idle timeout，
+  循环内每个事件 reset()
+- anthropic.ts：chatStream / chatWithToolsStream 同样处理
+
+### Changed
+
+- `src/main/llm/adapter.ts` — withIdleTimeout + reset
+- `src/main/llm/openai.ts` — 两个流式循环 reset
+- `src/main/llm/anthropic.ts` — 两个流式循环 reset
+
 ## [0.2.91] - 2026-08-03
 
 ### Fixed (P101 — thinking 回传：DeepSeek/MiniMax 要求历史里带推理)

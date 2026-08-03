@@ -162,7 +162,8 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     requestId: string,
     signal?: AbortSignal,
   ): AsyncIterable<LLMStreamEvent> {
-    const { signal: s, cleanup } = this.withTimeout(signal);
+    // P102: idle timeout — abort only when the stream goes silent, never mid-thought.
+    const { signal: s, cleanup, reset } = this.withIdleTimeout(signal);
     let acc = '';
     let finishReason: LLMResponse['finishReason'];
     let usage: LLMUsage | undefined;
@@ -180,6 +181,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       if (!res.body) throw new Error('流式响应缺少 body');
 
       for await (const ev of parseSSE(res.body)) {
+        reset();  // P102: any SSE traffic is life — a reasoning model streaming <think>
         if (!ev.data || ev.data === '[DONE]') {
           if (ev.data === '[DONE]') break;
           continue;
@@ -415,7 +417,9 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     signal?: AbortSignal,
     tools?: any[],
   ): AsyncIterable<ToolStreamChunk> {
-    const { signal: s, cleanup } = this.withTimeout(signal);
+    // P102: idle timeout — a reasoning model thinking for 130s before its first token
+    // must not be killed by a fixed 120s total timeout. Reset on every SSE event.
+    const { signal: s, cleanup, reset } = this.withIdleTimeout(signal);
     const splitter = new ThinkSplitter();
     const partial = new Map<number, PartialCall>();
     let content = '';
@@ -435,6 +439,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       if (!res.body) throw new Error('流式响应缺少 body');
 
       for await (const ev of parseSSE(res.body)) {
+        reset();  // P102: any SSE traffic is life — thinking deltas count
         if (!ev.data) continue;
         if (ev.data === '[DONE]') break;
         let payload: any;

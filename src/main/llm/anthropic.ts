@@ -174,7 +174,8 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     requestId: string,
     signal?: AbortSignal,
   ): AsyncIterable<LLMStreamEvent> {
-    const { signal: s, cleanup } = this.withTimeout(signal);
+    // P102: idle timeout — abort only when the stream goes silent, never mid-thought.
+    const { signal: s, cleanup, reset } = this.withIdleTimeout(signal);
     let acc = '';
     const usage: { input_tokens?: number; output_tokens?: number } = {};
     let stopReason: string | null = null;
@@ -195,6 +196,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       if (!res.body) throw new Error('Anthropic 流式响应缺少 body');
 
       for await (const ev of parseSSE(res.body)) {
+        reset();  // P102: any SSE traffic is life — thinking deltas count
         if (!ev.data || ev.data === '[DONE]') continue;
         let payload: any;
         try {
@@ -391,7 +393,8 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     signal?: AbortSignal,
     tools?: any[],
   ): AsyncIterable<ToolStreamChunk> {
-    const { signal: s, cleanup } = this.withTimeout(signal);
+    // P102: idle timeout — extended thinking can run long before the first content.
+    const { signal: s, cleanup, reset } = this.withIdleTimeout(signal);
     const blocks = new Map<number, StreamBlock>();
     const toolCalls: ToolCall[] = [];
     let content = '';
@@ -409,6 +412,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       if (!res.body) throw new Error('Anthropic 流式响应缺少 body');
 
       for await (const ev of parseSSE(res.body)) {
+        reset();  // P102: any SSE traffic is life — thinking deltas count
         if (!ev.data || ev.data === '[DONE]') continue;
         let payload: any;
         try { payload = JSON.parse(ev.data); } catch { continue; }
