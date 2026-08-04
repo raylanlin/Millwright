@@ -6,6 +6,28 @@
 
 ## [Unreleased]
 
+## [0.2.106] - 2026-08-04
+
+### Fixed (P110 v5 — undici first, Chromium fallback)
+
+curl confirmed DNS + TCP + TLS to the API are all healthy, but net.fetch
+(Chromium) kept failing. On campus/corporate networks a misconfigured
+proxy (PAC / WPAD) is the #1 cause: net.fetch respects system proxy and
+gets stuck when proxy routing breaks.
+
+Reverted the stack order: undici (no proxy, direct) goes first; net.fetch
+(system-proxy) is now the fallback. When DNS works the fast path succeeds
+immediately; when a proxy is genuinely needed, undici fails transiently
+and net.fetch kicks in.
+
+Also: fetchWithConnectTimeout no longer removes the idle-timeout signal
+listener from its finally block — the idle timeout stays connected so
+silent streams still time out after 120s.
+
+### Changed
+
+- `src/main/llm/net.ts` — undici first, Chromium second; idle signal fix
+
 ## [0.2.104] - 2026-08-04
 
 ### Fixed (P110 — idle timeout signal chain broken by P109)

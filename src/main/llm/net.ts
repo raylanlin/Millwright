@@ -107,12 +107,26 @@ export async function llmFetch(
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    // Try BOTH stacks every attempt: Chromium (system-proxy aware) first, then
-    // undici. P108: the two behave differently — one may resolve where the other
-    // fails (proxy config broken vs DNS broken). Never `break`/`continue` past
-    // undici: even a transient Chromium failure gets the undici shot this attempt.
-    // P109: each stack gets a 20s connect-stage cap so failures fail fast.
-    let electronFailed = false;
+    // P110: try undici FIRST — it bypasses the system proxy and goes direct.
+    // On campus/corporate networks a misconfigured proxy (PAC / WPAD) is the
+    // #1 cause of net.fetch failures when DNS itself is fine (confirmed with
+    // curl). undici was the original problem when DNS was broken; now DNS is
+    // healthy, so undici should be the fast path. net.fetch still gets a turn
+    // as a fallback for users who genuinely need system-proxy routing.
+
+    // 1) Undici path — no proxy, direct DNS.
+    try {
+      return await fetchWithConnectTimeout(fetch, url, init, init.signal ?? undefined);
+    } catch (err) {
+      lastErr = err;
+      if (!isTransient(err)) {
+        // Non-transient (cert / abort / 4xx): don't bother with net.fetch.
+        throw err;
+      }
+      // Transient — try the Chromium stack (system-proxy) below this attempt.
+    }
+
+    // 2) Electron path — Chromium network stack honors system proxy.
     if (typeof net !== 'undefined' && typeof net.fetch === 'function') {
       try {
         return await fetchWithConnectTimeout(
@@ -120,24 +134,15 @@ export async function llmFetch(
         );
       } catch (err) {
         lastErr = err;
-        electronFailed = true;
-        // No continue here — fall through so undici still gets a try this attempt.
       }
     }
 
-    // Fallback path — global fetch (also the only path outside Electron).
-    try {
-      return await fetchWithConnectTimeout(fetch, url, init, init.signal ?? undefined);
-    } catch (err) {
-      lastErr = err;
-      if (isTransient(err) || electronFailed) {
-        // Either stack reported a transient failure (or Electron died and undici
-        // inherited a transient) → back off and retry the round.
-        if (attempt < retries) await sleep(400 * (attempt + 1));
-        continue;
-      }
-      throw err;
+    // Both stacks failed — retry if transient.
+    if (isTransient(lastErr)) {
+      if (attempt < retries) await sleep(400 * (attempt + 1));
+      continue;
     }
+    throw lastErr;
   }
 
   throw lastErr;
