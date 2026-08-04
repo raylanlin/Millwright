@@ -397,7 +397,11 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
         detail = " | ".join(errors) if errors else "no COM error reported"
         raise SWError(
             "cut failed — the sketch profile may not overlap the solid "
-            f"(sketch: {target or 'unknown'}). attempts: {detail}"
+            f"(sketch: {target or 'unknown'}). attempts: {detail} "
+            "\n\nP110 提示：这个错误最常见的原因是某个轮廓画在了实体范围之外"
+            "（例如底板 120mm 居中时 X 范围是 -60~+60，把孔画在 x=105 就超界了）——"
+            "SolidWorks 会因为一个越界轮廓拒绝整个切除。请用 list_features/analyze_view "
+            "检查草图，确认所有圆的坐标都相对草图中心、且落在实体轮廓内，再重试切除。"
         )
     return {
         "feature": sw_get(made, "Name"),

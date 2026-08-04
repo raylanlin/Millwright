@@ -6,6 +6,44 @@
 
 ## [Unreleased]
 
+## [0.2.109] - 2026-08-04
+
+### Fixed (P110 — issue-1 test failures: build_part relative import + out-of-bounds holes)
+
+Two independent failures surfaced in the L-bracket test session:
+
+#### ① build_part: "attempted relative import beyond top-level package"
+
+Still reproducible on the user's install even though P105 switched batch.py to
+absolute imports. Root cause: verify.py kept RELATIVE imports
+(`from .bridge import …`, `from ..registry import TOOLS`) — the bundled
+interpreter (embeddable Python + runpy.run_module("sw_agent",
+run_name="__main__")) is brittle about deeper relative hops.
+
+Fix: verify.py now uses absolute imports (`sw_agent.bridge`, `sw_agent.registry`)
+— identical in every environment. Verified with a full runpy simulation.
+
+#### ② Holes cut failed: "the sketch profile may not overlap the solid"
+
+The model placed mounting holes at x=15 and x=105 on a 120mm plate centred at
+the origin (X range -60..+60). x=105 is OUTSIDE the plate; SolidWorks rejects
+the WHOLE cut when one contour is out of bounds — all three holes silently
+failed. Only the sketch circles were visible, which is what the screenshot
+showed as a misplaced hole.
+
+Fixes:
+- `sketch_circle`: bounds warning when the requested circle is far outside the
+  existing sketch extent (visible at draw time, not cut time).
+- `cut_extrude`: failure message now explains the likely cause (a contour
+  outside the solid, e.g. x=105 on a ±60 plate) and how to check.
+
+### Changed
+
+- `sidecar/sw_agent/verify.py` — absolute imports (P110)
+- `sidecar/sw_agent/tools/sketch.py` — out-of-bounds circle warning
+- `sidecar/sw_agent/tools/feature.py` — cut failure hint
+- `package.json` — 0.2.109
+
 ## [0.2.106] - 2026-08-04
 
 ### Fixed (P110 v5 — undici first, Chromium fallback)

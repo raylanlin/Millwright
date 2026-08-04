@@ -16,7 +16,12 @@ analyze_view 去猜。这个模块让每一步都带可验证的证据：
 """
 from __future__ import annotations
 
-from .bridge import Context, sw_get
+# P110: absolute imports everywhere — the bundled interpreter (embeddable Python +
+# runpy.run_module("sw_agent", run_name="__main__")) is brittle about deeper
+# relative hops; build_part died with "attempted relative import beyond top-level
+# package" on some installs even though the module imports fine under a system
+# Python. Absolute form resolves identically in every environment.
+from sw_agent.bridge import Context, sw_get
 
 # ---- 工具分组（按对模型状态的影响） ----
 
@@ -270,8 +275,8 @@ def precheck(plan: list) -> list:
     # died at step 11 with "create_plane: missing required parameter 'base'" — ten
     # steps of real geometry work wasted because the plan itself was wrong. Registry
     # validation only fires at CALL time, per step; precheck should catch the same
-    # thing for the WHOLE plan before the first tool runs.
-    from ..registry import TOOLS
+    # thing for the WHOLE plan before the first tool runs. (absolute import, P110)
+    from sw_agent.registry import TOOLS
     for i, (name, params) in enumerate(plan):
         spec = TOOLS.get(name)
         if spec is None:
