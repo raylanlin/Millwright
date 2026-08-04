@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+## [0.2.103] - 2026-08-04
+
+### Changed (P110 v3 — zip distribution instead of portable exe)
+
+The portable single-file .exe hung on startup (several seconds with no window),
+so releases now ship an extract-and-run .zip — same content as the old
+win-unpacked directory users preferred.
+
+- `electron-builder.yml`: win.target `portable` → `zip`; artifactName back to
+  plain `Millwright-<ver>-x64.zip`.
+- `.github/workflows/build.yml`: upload artifact + Create Release now ship
+  `release/*.zip`; the Verify step inspects the zip name instead of the exe.
+
+### Changed
+
+- `electron-builder.yml` — zip target
+- `.github/workflows/build.yml` — zip artifacts + release
+- `package.json` — 0.2.103
+
 ## [0.2.102] - 2026-08-04
 
 ### Changed (P110 — retire the NSIS setup installer, ship portable only)

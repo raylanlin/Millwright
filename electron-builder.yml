@@ -36,13 +36,14 @@ extraResources:
     to: 'python'
 
 win:
-  # P110: NSIS setup was retired (2026-08-04) — users reported the installer
-  # repeatedly unusable, so releases now ship ONLY the portable single-file build.
+  # P110: NSIS setup retired (2026-08-04). Portable single-file .exe (P110 v2)
+  # also retired — slow startup, and users prefer the extract-and-run directory.
+  # Releases now ship a plain .zip containing the full win-unpacked tree.
   target:
-    - target: portable
+    - target: zip
       arch: [x64]
   icon: assets/icon.ico
-  artifactName: '${productName}-Portable-${version}-${arch}.${ext}'
+  artifactName: '${productName}-${version}-${arch}.${ext}'
 
 # NSIS installer config removed with the setup build (P110).
 

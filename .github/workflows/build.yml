@@ -133,30 +133,32 @@ jobs:
           }
           Write-Host "packaged sidecar matches the repo ($($repoPy.Count) modules): OK"
 
-          # the installer must be named for the version we just built
-          $exe = Get-ChildItem release/*.exe | Select-Object -First 1
-          Write-Host "installer: $($exe.Name)"
-          if ($exe.Name -notmatch [regex]::Escape($version)) {
-            Write-Host "::error::Installer name lacks version ${version} — stale electron-builder cache?"
+          # the archive must be named for the version we just built
+          $zip = Get-ChildItem release/*.zip | Select-Object -First 1
+          Write-Host "archive: $($zip.Name)"
+          if ($zip.Name -notmatch [regex]::Escape($version)) {
+            Write-Host "::error::Archive name lacks version ${version} — stale electron-builder cache?"
             exit 1
           }
-          Write-Host "installer name carries ${version}: OK"
+          Write-Host "archive name carries ${version}: OK"
 
-      # P110: NSIS installer artifact removed with the setup build.
+      # P110 v3: extract-and-run zip (nsis + portable exe both retired).
+      # npm run dist with the zip target produces release/*.zip containing the
+      # full win-unpacked tree — download, extract, run Millwright.exe.
 
-      - name: Upload portable artifact
+      - name: Upload build artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
         with:
-          name: Millwright-Portable
-          path: release/*.exe
+          name: Millwright
+          path: release/*.zip
           retention-days: 30
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
-          files: release/*.exe
+          files: release/*.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
