@@ -146,12 +146,12 @@ jobs:
       # npm run dist with the zip target produces release/*.zip containing the
       # full win-unpacked tree — download, extract, run Millwright.exe.
 
-      - name: Upload build artifact
+      - name: Upload artifact (portable directory)
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
         with:
           name: Millwright
-          path: release/*.zip
+          path: release/win-unpacked/**
           retention-days: 30
 
       - name: Create Release
