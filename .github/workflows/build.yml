@@ -77,15 +77,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Package (NSIS installer)
-        if: startsWith(github.ref, 'refs/tags/')
-        run: npm run dist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+      # P110: NSIS setup retired (2026-08-04) — users found the installer repeatedly
+      # unusable, so tag builds now ship ONLY the portable single-file exe.
+      # npm run dist = prepare-python + build + electron-builder (target: portable
+      # from electron-builder.yml) → release/Millwright-Portable-<ver>-x64.exe
       - name: Package (portable / 免安装版)
         if: startsWith(github.ref, 'refs/tags/')
-        run: npm run pack
+        run: npm run dist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -144,20 +142,14 @@ jobs:
           }
           Write-Host "installer name carries ${version}: OK"
 
-      - name: Upload installer artifact
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v7
-        with:
-          name: Millwright-Setup
-          path: release/*.exe
-          retention-days: 30
+      # P110: NSIS installer artifact removed with the setup build.
 
       - name: Upload portable artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
         with:
           name: Millwright-Portable
-          path: release/win-unpacked/**
+          path: release/*.exe
           retention-days: 30
 
       - name: Create Release

@@ -36,23 +36,15 @@ extraResources:
     to: 'python'
 
 win:
-  # NSIS only. Squirrel was removed — it auto-launches the app in the background
-  # after install, which then makes the NSIS installer unable to close the running
-  # process, popping "cannot close, please close manually" in a retry loop.
+  # P110: NSIS setup was retired (2026-08-04) — users reported the installer
+  # repeatedly unusable, so releases now ship ONLY the portable single-file build.
   target:
-    - target: nsis
+    - target: portable
       arch: [x64]
   icon: assets/icon.ico
-  artifactName: '${productName}-Setup-${version}-${arch}.${ext}'
+  artifactName: '${productName}-Portable-${version}-${arch}.${ext}'
 
-nsis:
-  oneClick: true
-  perMachine: false
-  allowToChangeInstallationDirectory: false
-  deleteAppDataOnUninstall: false
-  # Force-terminate any running instance before install to avoid file locks /
-  # the unclosable-retry loop (electron-builder handles this with
-  # perMachine:false + single-instance; defaults kept).
+# NSIS installer config removed with the setup build (P110).
 
 squirrelWindows: null
 

@@ -6,6 +6,29 @@
 
 ## [Unreleased]
 
+## [0.2.102] - 2026-08-04
+
+### Changed (P110 — retire the NSIS setup installer, ship portable only)
+
+The Windows setup installer (Millwright-Setup-*.exe) was repeatedly reported
+unusable, so tag builds now ship ONLY the portable single-file build.
+
+- `electron-builder.yml`: win.target `nsis` → `portable`; artifactName now
+  `Millwright-Portable-<ver>-x64.exe`; the nsis config block was removed.
+- `.github/workflows/build.yml`: dropped the `Package (NSIS installer)` step
+  and the `Millwright-Setup` artifact upload; the remaining package step runs
+  `npm run dist` which now produces the portable exe; the release uploads
+  `release/*.exe` (the portable build).
+- The verify step still checks `release/win-unpacked/resources` + a version-
+  carrying exe name — both are produced by the portable target, so the gate
+  stays intact.
+
+### Changed
+
+- `electron-builder.yml` — portable target only
+- `.github/workflows/build.yml` — drop NSIS steps, upload portable exe
+- `package.json` — 0.2.102
+
 ## [0.2.101] - 2026-08-04
 
 ### Fixed (P109 — 重试提示等很久才出现，重试后仍失败)
