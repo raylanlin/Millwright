@@ -32,14 +32,29 @@ export function Chat({
 }: Props) {
   const tr = useT();
   const containerRef = useRef<HTMLDivElement>(null);
+  // P107: don't yank the scroll position away from the user. If they scrolled UP
+  // to read something while a stream is running, auto-scroll would fight them on
+  // every token. Only follow when the user is already at (or near) the bottom.
+  const stickBottom = useRef(true);
 
-  // When the message list changes, auto-scroll to the bottom: directly set
-  // `container.scrollTop = scrollHeight` to avoid whole-page scroll jank caused
-  // by per-token scrolling during streaming.
   useEffect(() => {
     const el = containerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, messages[messages.length - 1]?.content]);
+    if (!el) return;
+    const onScroll = () => {
+      // Within 48px of the bottom → keep following; otherwise let the user read.
+      stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // When the message list changes, auto-scroll to the bottom ONLY if the user is
+  // already there — never interrupt an upward read. (scrollTop assignment avoids
+  // whole-page scroll jank caused by per-token scrolling during streaming.)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el && stickBottom.current) el.scrollTop = el.scrollHeight;
+  }, [messages.length, messages[messages.length - 1]?.content, isGenerating]);
 
   return (
     <div ref={containerRef} style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>

@@ -19,7 +19,7 @@ import { ScriptEngine } from '../scripts/engine';
 import { validateScript } from '../scripts/sanitizer';
 import { generateScript } from '../scripts/generators';
 import { backupActiveDocument, removeBackup } from '../scripts/backup';
-import { loadConfig, saveConfig, loadTheme, saveTheme, loadLocale, saveLocale } from '../store/config';
+import { loadConfig, saveConfig, loadTheme, saveTheme, loadLocale, saveLocale, getCachedApprovalMode } from '../store/config';
 import { listSessions, getSession, saveSession, deleteSession, createSession } from '../store/chat-store';
 import { toLLMError } from '../llm/errors';
 import { runAgentLoop } from '../agent/agent-loop';
@@ -310,6 +310,9 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           requestId,
           maxRounds: payload.config.maxRounds ?? 24,
           approvalMode: payload.config.approvalMode ?? 'normal',
+          // P107: settings hot-reload — read the live saved mode so a change made
+          // while this session is running applies on the next tool call.
+          getApprovalMode: () => getCachedApprovalMode(),
           contextWindow: payload.config.contextWindow,
           disabledTools: payload.config.disabledTools ?? [],
           signal: controller.signal,

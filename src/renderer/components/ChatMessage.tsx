@@ -144,6 +144,25 @@ export function ChatMessage({
 
         {/* P22: prose interleaved with collapsible tool-call groups */}
         {hasSteps ? renderSteps(msg.steps!, t) : msg.content}
+
+        {/* P107: user-attached screenshots were never rendered in the stream — the
+            input had a preview, the message flow showed nothing. Render them as
+            inline images above the text. */}
+        {msg.images && msg.images.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: msg.content ? 9 : 0 }}>
+            {msg.images.map((src, idx) => (
+              <img
+                key={idx}
+                src={src}
+                alt={`附件 ${idx + 1}`}
+                style={{
+                  maxWidth: 220, maxHeight: 160, borderRadius: 8,
+                  border: `1px solid ${t.cardBorder}`, objectFit: 'contain',
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
       {!isUser && (
         <CopyButton t={t} visible={hover} copied={copied} onCopy={async () => {

@@ -6,6 +6,87 @@
 
 ## [Unreleased]
 
+## [0.2.97] - 2026-08-04
+
+### Fixed (P107 — GitHub issue #1：liaozhi0520 反馈的 9 个问题，8 个已修)
+
+#### ⑨ 达到最大轮数后继续执行报错（tool_calls 没有响应消息）
+
+症状：会话达到最大轮数（24）停止后，点继续时报
+`assistant message with 'tool_calls' must be followed by tool messages
+responding to each 'tool_call_id'`（如 list_features:1）。
+
+根因：工具执行循环里单个调用抛异常（RPC 超时 / SW 卡顿）会直接跳出
+循环，剩余 tool_calls 没得到响应，history 残留不完整的协议——下一次
+请求被 API 拒绝。
+
+修：
+- 每个工具调用包 try-catch——失败也 push toolMsg（错误结果），循环继续
+- 收尾 summary 前扫描 history，孤儿 tool_calls 自动补「未执行」响应
+
+#### ⑦ API timeout 后 agent loop 不重试直接退出
+
+根因：runTurn 抛错无 catch，一次瞬态网络错误（timeout/DNS/reset）就
+杀死整个会话。
+
+修：runTurnWithRetry——LLM_TIMEOUT / LLM_NETWORK_ERROR 等瞬态错误
+自动重试 2 次（800ms 退避），期间发「网络波动，自动重试」提示；
+持久失败才传播。
+
+#### ① new_part 在无默认零件模板时失败
+
+根因：`GetUserPreferenceStringValue` 返回空就 raise，没尝试安装目录的
+标准模板。
+
+修：_fallback_template——扫描常见模板位置（ProgramData / ProgramFiles，
+含中英文模板名），找到就用；找不到才报错。
+
+#### ⑤ 信息流中输入图片没有渲染
+
+根因：ChatMessage.tsx 全文没有 images 引用——用户带图消息在消息流里
+根本不显示图片（输入框有预览，发送后消失）。
+
+修：user 消息渲染 images 数组（内联缩略图）。
+
+#### ⑧ SSE 返回时始终滑到底部，上滑被中断
+
+根因：Chat.tsx 每次消息变化强制 scrollTop = scrollHeight。
+
+修：检测用户是否在底部（48px 内）——在底部才自动跟随，上滑阅读时
+不打扰。
+
+#### ③ 设置窗口保存按钮不在 Footer
+
+修：Actions 行 sticky 定位到窗口底部，滚动设置内容时按钮始终可见。
+
+#### ④ 确认操作没有铃声提醒
+
+修：ConfirmCard 出现时播放两音提示（Web Audio 合成，无需音频文件）。
+
+#### ⑥ 权限模式改动不能应用到 running 会话
+
+根因：approvalMode 是会话启动快照，运行中改设置不生效。
+
+修：saveConfig 缓存最新模式，wantsConfirm 每次调用动态读取
+（getApprovalMode）——设置保存后下个工具调用立即生效。
+
+#### ② shell 工具（未做）
+
+安全敏感：给 agent 任意 shell 能力风险大。已用①的模板 fallback 覆盖
+「找不到模板」场景；如需真 shell 工具需确认范围（只读搜索 vs 完整
+执行）。
+
+### Changed
+
+- `src/main/agent/agent-loop-sidecar.ts` — ⑨⑦⑥
+- `src/main/ipc/handlers.ts` — ⑥ 传 getApprovalMode
+- `src/main/store/config.ts` — ⑥ approvalMode 缓存
+- `src/renderer/components/Chat.tsx` — ⑧ 智能滚动
+- `src/renderer/components/ChatMessage.tsx` — ⑤ 图片渲染
+- `src/renderer/components/ConfirmCard.tsx` — ④ 确认铃声
+- `src/renderer/components/SettingsModal.tsx` — ③ Footer 按钮
+- `sidecar/sw_agent/tools/document.py` — ① 模板 fallback
+
 ## [0.2.96] - 2026-08-03
 
 ### Fixed (P106 — 网络连接失败 EAI_AGAIN：应用不走系统代理)

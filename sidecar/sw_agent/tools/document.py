@@ -45,13 +45,63 @@ def _new(ctx: Context, doc_type: int, label: str):
     app = ctx.sw
     template = app.GetUserPreferenceStringValue(_PREF[doc_type])
     if not template:
-        raise SWError(f"no default {label} template found; set a document template in SolidWorks options.")
+        # P107: issue #1 — "no default template" killed new_part on machines where
+        # SolidWorks options never had a default set. Fall back to the stock
+        # templates shipped in the install dir before giving up.
+        template = _fallback_template(ctx, doc_type, label)
     model = app.NewDocument(template, 0, 0, 0)
     if model is None:
         raise SWError(f"failed to create {label}.")
     _reset_scratch(ctx)
     # P26: GetTitle/GetPathName are propget under early binding — bare () raised "'str' object is not callable"
     return {"created": label, "title": sw_get(model, "GetTitle")}
+
+
+_FALLBACK_DIRS = (
+    # ProgramData stock templates (SolidWorks 2019+ keeps them here)
+    r"%PROGRAMDATA%\SOLIDWORKS\SOLIDWORKS 20XX\templates",
+    r"%PROGRAMDATA%\SOLIDWORKS\SOLIDWORKS 20XX\lang\chinese-simplified\Tutorial",
+    # Program Files fallbacks for older layouts
+    r"%ProgramFiles%\SOLIDWORKS Corp\SOLIDWORKS\lang\chinese-simplified\Tutorial",
+    r"%ProgramFiles%\SOLIDWORKS Corp\SOLIDWORKS\data\templates",
+    r"%ProgramFiles%\SOLIDWORKS Corp\SOLIDWORKS\templates",
+)
+
+
+# P107: stock template file names per document type — the classic names every
+# install ships, in both the Chinese and English template sets.
+_FALLBACK_NAMES = {
+    DOC_PART: ("零件.prtdot", "Part.prtdot", "gb_part.prtdot"),
+    DOC_ASSEMBLY: ("装配体.asmdot", "Assembly.asmdot", "gb_assembly.asmdot"),
+    DOC_DRAWING: ("工程图.drwdot", "Drawing.drwdot", "gb_assembly_drawing.drwdot"),
+}
+
+
+def _fallback_template(ctx: Context, doc_type: int, label: str) -> str:
+    """P107: locate a stock SolidWorks template when no default is configured.
+
+    Scans the usual install locations for the classic template file names. Returns
+    the first hit; raises the original "no default template" error otherwise.
+    """
+    import glob
+    import os
+
+    candidates = []
+    for d in _FALLBACK_DIRS:
+        d = os.path.expandvars(d).replace("20XX", "2024")  # probe recent years too
+        candidates.append(d)
+        # The "20XX" wildcard is literal — expand it to a small range
+        base = os.path.expandvars(d)
+        if "20XX" in base:
+            for year in ("2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018"):
+                candidates.append(base.replace("20XX", year))
+    names = _FALLBACK_NAMES[doc_type]
+    for d in candidates:
+        for pat in names:
+            hits = glob.glob(os.path.join(d, pat))
+            if hits:
+                return hits[0]
+    raise SWError(f"no default {label} template found; set a document template in SolidWorks options.")
 
 
 def _empty_part(ctx: Context):

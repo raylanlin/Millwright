@@ -4,7 +4,10 @@
 // window.confirm dialog (unstyled, main-thread blocking). Shows the friendly tool
 // name + full params; Approve / Reject resolve via a window event that useLLM
 // forwards to the main process (which still applies its 120s default-deny timeout).
+// P107: plays a short chime when the card appears so the user notices a
+// confirmation is waiting (issue #1).
 
+import { useEffect } from 'react';
 import type { AgentStep } from '../../shared/types';
 import type { ThemeTokens } from '../themes';
 import { useLocale } from '../i18n/LocaleContext';
@@ -15,12 +18,44 @@ const L = {
   en: { title: 'Confirmation needed: this may modify the model', approve: 'Approve', reject: 'Reject', approved: '✓ Approved', rejected: '⛔ Rejected' },
 } as const;
 
+/** P107: two-note attention chime — synthesized, no audio asset needed. */
+function playChime() {
+  try {
+    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const notes = [660, 880]; // A5 → A6
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.14, ctx.currentTime + i * 0.18 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.18 + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.18);
+      osc.stop(ctx.currentTime + i * 0.18 + 0.32);
+    });
+    setTimeout(() => ctx.close().catch(() => {}), 900);
+  } catch {
+    /* audio is best-effort — never break the card on a mute/blocked context */
+  }
+}
+
 export function ConfirmCard({ step, t }: { step: AgentStep; t: ThemeTokens }) {
   const { locale } = useLocale();
   const lc = locale === 'zh' ? 'zh' : 'en';
   const tr = L[lc];
   const pending = step.status === 'running';
   const paramStr = step.params && Object.keys(step.params).length ? JSON.stringify(step.params, null, 2) : '';
+
+  // P107: chime once when a fresh confirmation appears (still pending).
+  // Runs once on mount — the card is keyed per step, so each new confirm remounts.
+  useEffect(() => {
+    if (pending) playChime();
+  }, []);
 
   const reply = (approved: boolean) => {
     window.dispatchEvent(new CustomEvent('swcp-confirm', {

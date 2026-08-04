@@ -565,8 +565,21 @@ export function SettingsModal({
           </div>
         )}
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: 10 }}>
+        {/* Actions — P107: pinned to the window footer so the save button is always
+            visible no matter how far the settings scrolled. The modal body scrolls;
+            this row stays put with a backdrop matching the panel. */}
+        <div
+          style={{
+            display: 'flex', gap: 10,
+            position: 'sticky', bottom: -28,  // negate the modal's bottom padding
+            margin: '0 -32px -28px',          // full-bleed to the panel edges
+            padding: '12px 32px 16px',
+            background: t.modalBg,
+            borderTop: `1px solid ${t.cardBorder}`,
+            borderRadius: '0 0 14px 14px',
+            zIndex: 1,
+          }}
+        >
           <button
             onClick={handleTest}
             disabled={testStatus.kind === 'testing'}

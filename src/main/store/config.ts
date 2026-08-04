@@ -25,6 +25,16 @@ export interface StoredConfig {
 
 const SCHEMA_VERSION = 1;
 
+// P107: live approval-mode cache — updated on every saveConfig so an in-flight agent
+// session can re-read it per tool call (issue #1: settings changes should apply to
+// the running conversation immediately).
+let cachedApprovalMode: LLMConfig['approvalMode'];
+
+/** P107: latest saved approval mode, or undefined if never saved this process. */
+export function getCachedApprovalMode(): LLMConfig['approvalMode'] {
+  return cachedApprovalMode;
+}
+
 // Strip `apiKey` out of DEFAULT_CONFIG — StoredConfig.llm is `Omit<LLMConfig, 'apiKey'>`
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const { apiKey: _unusedDefaultKey, ...DEFAULT_LLM_WITHOUT_KEY } = DEFAULT_CONFIG;
@@ -100,6 +110,11 @@ export async function loadConfig(): Promise<LLMConfig> {
  * Save an `LLMConfig`. The API key is encrypted; all other fields are persisted as-is.
  */
 export async function saveConfig(config: LLMConfig): Promise<void> {
+  // P107: keep a live copy of the approval mode so an already-running agent session
+  // can honor a settings change immediately (issue #1: “调节权限模式后 running 会话
+  // 不能马上应用”). The agent loop reads this on every tool call instead of the
+  // session-start snapshot.
+  cachedApprovalMode = config.approvalMode;
   const store = await getStore();
   const { apiKey, ...rest } = config;
 

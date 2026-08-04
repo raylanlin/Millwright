@@ -58,6 +58,8 @@ export interface SidecarAgentOptions {
   /** P43: approval strictness — 'strict' asks for every tool · 'normal' destructive only
    *  (previous behaviour) · 'permissive' irreversible only · 'auto' never asks. */
   approvalMode?: 'strict' | 'normal' | 'permissive' | 'auto';
+  /** P107: live reader for the LATEST saved approval mode (settings hot-reload). */
+  getApprovalMode?: () => 'strict' | 'normal' | 'permissive' | 'auto' | undefined;
   /** P5: lazy session backup — called once, right before the first destructive tool runs */
   backup?: () => Promise<string | null>;
   /** P18: main model can read images directly (preferred, lossless). */
@@ -215,12 +217,17 @@ export async function runSidecarAgent(
   // P43: which calls stop for approval. 'auto' runs unattended — the lazy session backup
   // below is what makes that safe (the whole run stays rollback-able). 'permissive' still
   // gates operations a feature-tree rollback cannot undo (file writes, deletions).
-  const mode = opts.approvalMode ?? 'normal';
+  // P107: the mode itself is read LIVE per call (opts.getApprovalMode) so a settings
+  // change applies to this running session immediately — no session-start snapshot.
   const IRREVERSIBLE = new Set([
     'delete_feature', 'save_as', 'save_document', 'export_file', 'export_stl',
   ]);
   const wantsConfirm = (name: string): boolean => {
     if (!opts.confirmTool) return false;
+    // P107: read the LATEST saved approval mode on every call — a settings change
+    // made while this session is running applies immediately (issue #1). Falls back
+    // to the session-start snapshot when no live cache exists.
+    const mode = opts.getApprovalMode?.() ?? opts.approvalMode ?? 'normal';
     if (mode === 'auto') return false;
     if (mode === 'strict') return true;
     // P58: a raw macro bypasses every runtime guard the tools provide, so it asks for
@@ -272,7 +279,11 @@ export async function runSidecarAgent(
 
     // own channel so it can be collapsed and kept out of the history.
 
-    const resp = await runTurn(adapter, history, tools, opts);
+    // P107: a transient network failure (timeout / DNS / connect reset) is NOT a
+    // reason to abandon the whole session — the issue reporter watched the loop die
+    // on one timeout instead of retrying. Retry the model turn up to 2× with backoff;
+    // only a persistent failure propagates.
+    const resp = await runTurnWithRetry(adapter, history, tools, opts);
 
     lastHadReasoning = !!(resp.reasoning ?? '').trim();
 
@@ -338,76 +349,108 @@ export async function runSidecarAgent(
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
 
-      if (off.has(call.name)) {
-        // Not advertised, so this is the model recalling a name from elsewhere. Say so
-        // plainly instead of executing it.
-        const resultText = `⛔ ${call.name} 已被用户在「工具」页关闭，本次会话不可用。请改用其他工具完成，或告知用户需要开启它。`;
-        call.result = resultText;
-        opts.onEvent?.({ type: 'tool_result', toolCall: call });
-        history.push(toolMsg(call, resultText));
-        continue;
-      }
-
-      // P58: macro escape hatch — lint, confirm, back up, then run through the VBS engine
-
-      if (call.name === 'run_macro') {
-
-        const resultText = await handleRunMacro(call, opts, ensureBackup);
-
-        call.result = resultText;
-
-        opts.onEvent?.({ type: 'tool_result', toolCall: call });
-
-        history.push(toolMsg(call, resultText));
-
-        continue;
-
-      }
-
-
-      // Vision tool on its own path
-      if (call.name === 'analyze_view') {
-        const { resultText, imageMessage, capture } = await handleAnalyzeView(call, sidecar, opts, lastCapture);
-        if (capture) lastCapture = capture;
-        call.result = resultText;
-        opts.onEvent?.({ type: 'tool_result', toolCall: call });
-        // Tool result must immediately follow assistant.tool_calls; the image goes after as its own user message
-        history.push(toolMsg(call, resultText));
-        if (imageMessage) history.push(imageMessage);
-        continue;
-      }
-
-      // Confirmation gate (P43: scope depends on the configured approval mode).
-      // P44: the ONLY place confirm_request is emitted — handlers.ts emitted it a SECOND
-      // time inside requestUserConfirm, which is why one call produced two identical cards.
-      if (wantsConfirm(call.name)) {
-        opts.onEvent?.({ type: 'confirm_request', toolCall: call });
-        // wantsConfirm() guarantees opts.confirmTool is defined when it returns true
-        const ok = await opts.confirmTool!(call);
-        if (!ok) {
-          const r = `⛔ 用户拒绝执行 ${call.name}`;
-          call.result = r;
-          history.push(toolMsg(call, r));
+      // P107: guard EVERY call — an exception here (RPC timeout, SW hiccup) used to
+      // abort the whole loop, leaving the remaining tool_calls WITHOUT tool responses
+      // in history. The next "继续" then died with "assistant message with 'tool_calls'
+      // must be followed by tool messages". A failed tool is an outcome, not a crash:
+      // record it and move on so the protocol stays valid.
+      try {
+        if (off.has(call.name)) {
+          // Not advertised, so this is the model recalling a name from elsewhere. Say so
+          // plainly instead of executing it.
+          const resultText = `⛔ ${call.name} 已被用户在「工具」页关闭，本次会话不可用。请改用其他工具完成，或告知用户需要开启它。`;
+          call.result = resultText;
           opts.onEvent?.({ type: 'tool_result', toolCall: call });
+          history.push(toolMsg(call, resultText));
           continue;
         }
+
+        // P58: macro escape hatch — lint, confirm, back up, then run through the VBS engine
+
+        if (call.name === 'run_macro') {
+
+          const resultText = await handleRunMacro(call, opts, ensureBackup);
+
+          call.result = resultText;
+
+          opts.onEvent?.({ type: 'tool_result', toolCall: call });
+
+          history.push(toolMsg(call, resultText));
+
+          continue;
+
+        }
+
+
+        // Vision tool on its own path
+        if (call.name === 'analyze_view') {
+          const { resultText, imageMessage, capture } = await handleAnalyzeView(call, sidecar, opts, lastCapture);
+          if (capture) lastCapture = capture;
+          call.result = resultText;
+          opts.onEvent?.({ type: 'tool_result', toolCall: call });
+          // Tool result must immediately follow assistant.tool_calls; the image goes after as its own user message
+          history.push(toolMsg(call, resultText));
+          if (imageMessage) history.push(imageMessage);
+          continue;
+        }
+
+        // Confirmation gate (P43: scope depends on the configured approval mode).
+        // P44: the ONLY place confirm_request is emitted — handlers.ts emitted it a SECOND
+        // time inside requestUserConfirm, which is why one call produced two identical cards.
+        if (wantsConfirm(call.name)) {
+          opts.onEvent?.({ type: 'confirm_request', toolCall: call });
+          // wantsConfirm() guarantees opts.confirmTool is defined when it returns true
+          const ok = await opts.confirmTool!(call);
+          if (!ok) {
+            const r = `⛔ 用户拒绝执行 ${call.name}`;
+            call.result = r;
+            history.push(toolMsg(call, r));
+            opts.onEvent?.({ type: 'tool_result', toolCall: call });
+            continue;
+          }
+        }
+
+        // P5: rollback point before the first destructive execution
+        if (destructive.has(call.name)) await ensureBackup();
+
+        opts.onEvent?.({ type: 'tool_start', toolCall: call });
+        const r = await sidecar.call(call.name, call.parameters);
+        const resultText = fmtResult(call.name, r);
+        call.result = resultText;
+        opts.onEvent?.({ type: 'tool_result', toolCall: call });
+        history.push(toolMsg(call, resultText));
+      } catch (e) {
+        // P107: never let a tool exception break the tool_calls→tool protocol.
+        const resultText = `❌ ${call.name} failed: ${errText(e)}`;
+        call.result = resultText;
+        opts.onEvent?.({ type: 'tool_result', toolCall: call });
+        history.push(toolMsg(call, resultText));
       }
-
-      // P5: rollback point before the first destructive execution
-      if (destructive.has(call.name)) await ensureBackup();
-
-      opts.onEvent?.({ type: 'tool_start', toolCall: call });
-      const r = await sidecar.call(call.name, call.parameters);
-      const resultText = fmtResult(call.name, r);
-      call.result = resultText;
-      opts.onEvent?.({ type: 'tool_result', toolCall: call });
-      history.push(toolMsg(call, resultText));
     }
   }
 
   // Out of rounds — force a final no-tools summary turn so the user learns what actually changed
   try {
+    // P107: repair the protocol before the summary turn — if the loop exited with an
+    // assistant turn whose tool_calls never got responses (mid-round abort, a throw
+    // from a path not covered by the per-call guard above), the API rejects the next
+    // request with "assistant message with 'tool_calls' must be followed by tool
+    // messages". Scan backwards from the tail and answer any orphaned call_ids.
     history = truncateMessages(history, '', '', opts.contextWindow);
+    for (let i = history.length - 1; i >= 0; i--) {
+      const m = history[i];
+      if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
+      const answered = new Set(
+        history.slice(i + 1).filter((t) => t.role === 'tool').map((t) => t.toolCallId),
+      );
+      const orphans = m.toolCalls.filter((c) => !answered.has(c.id ?? c.name));
+      if (!orphans.length) break; // this assistant turn is fully answered; nothing older can be orphaned past it
+      for (const c of orphans) {
+        const resultText = `⚠️ ${c.name} 未执行（会话在工具调用中途结束）——如有需要请重新发起。`;
+        history.push(toolMsg(c, resultText));
+      }
+      break;
+    }
     history.push({
       role: 'system',
       content: '(已达到最大工具调用轮数。请不要再调用工具：总结你已完成的操作、当前模型的状态、以及未完成的部分。)',
@@ -580,3 +623,33 @@ async function runTurn(
   if (!final) throw new Error('流式响应未返回结果');
   return { ...final, streamed: true };
 }
+
+/**
+ * P107: one model turn with transient-failure retry. The issue reporter watched the
+ * whole session die when a single API call timed out — a transient network error
+ * (timeout / DNS / reset / 5xx) should not abandon the session. Retry up to
+ * `retries` times with backoff; only a persistent failure propagates.
+ */
+async function runTurnWithRetry(
+  adapter: any,
+  history: ChatMessage[],
+  tools: any[],
+  opts: SidecarAgentOptions,
+  retries = 2,
+): Promise<LLMResponse & { streamed?: boolean }> {
+  const TRANSIENT = new Set(['LLM_TIMEOUT', 'LLM_NETWORK_ERROR']);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await runTurn(adapter, history, tools, opts);
+    } catch (e) {
+      const code = (e as any)?.code;
+      const msg = errText(e).toLowerCase();
+      const transient = TRANSIENT.has(code)
+        || /timeout|eai_again|enotfound|econnreset|econnrefused|etimedout|temporarily/.test(msg);
+      if (!transient || attempt >= retries || opts.signal?.aborted) throw e;
+      opts.onEvent?.({ type: 'text', text: `（网络波动，自动重试 ${attempt + 1}/${retries}…）` });
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
+  }
+}
+
