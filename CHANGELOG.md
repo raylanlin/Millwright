@@ -6,6 +6,34 @@
 
 ## [Unreleased]
 
+## [0.2.98] - 2026-08-04
+
+### Added (P107 · issue #1 ② — search_files 只读搜索工具)
+
+需求：agent 需要找到本机 SolidWorks 模板文件（.prtdot/.asmdot/.drwdot），
+但没有搜索手段。
+
+设计决策（安全第一）：**不做通用 shell 工具**。命令黑名单防不住绕过
+（cmd /c、powershell -enc、for 循环、环境变量展开都是口子），且工具
+输出/文件名/文档描述都是提示注入面——通用 shell 等于把整台机器交给
+可能被注入的模型。真正的需求是「找模板文件」，一个只读搜索就够。
+
+`search_files` 安全边界（硬规则）：
+- **只读**：只做 glob 匹配 + 目录遍历，不执行命令、不写、不删，
+  永远不改系统状态
+- **根目录白名单**：root 参数只能是 templates / programdata /
+  programfiles / user 四个枚举，不接受任意路径
+- **模式白名单**：pattern 只允许文件名 glob 字符（* ? [] 字母数字
+  _-.() 空格），拒绝路径分隔符、盘符、..、绝对路径——不可能越出根目录
+- **深度限制**：遍历最多 6 层，防止意外扫全盘
+- **结果截断**：默认 20 条、上限 50 条，防刷爆上下文
+- **权限错误静默跳过**：用户目录下常有不可读子目录，不能因此整体失败
+
+### Changed
+
+- `sidecar/sw_agent/tools/search.py`（新增）— search_files 只读搜索
+- `sidecar/sw_agent/server.py` — 注册 search 模块
+
 ## [0.2.97] - 2026-08-04
 
 ### Fixed (P107 — GitHub issue #1：liaozhi0520 反馈的 9 个问题，8 个已修)

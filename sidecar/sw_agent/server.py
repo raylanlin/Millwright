@@ -42,6 +42,7 @@ from .tools import (  # noqa: F401
     machine,
     query,
     reference,
+    search,
     sketch,
     status,
     view,
