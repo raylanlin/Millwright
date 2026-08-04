@@ -6,6 +6,29 @@
 
 ## [Unreleased]
 
+## [0.2.101] - 2026-08-04
+
+### Fixed (P109 — 重试提示等很久才出现，重试后仍失败)
+
+症状：v0.2.100 开始出现「（网络波动，自动重试 1/2…）」提示，但每条
+提示之间要等很久，重试完仍失败。
+
+根因：llmFetch 的两个栈（net.fetch / undici）都受外层 120s idle timeout
+保护——DNS 解析失败 / 连接拒绝时，每次尝试要挂 120s 才放弃。两个栈
+× 三轮重试 = 好几分钟，用户看到的就是「等很久才出第一条重试提示」。
+
+修法（net.ts）：
+- 新增 fetchWithConnectTimeout：**连接阶段 20s 短超时**——fetch()
+  resolve 意味着响应头已到，之后才是 SSE body（那是外层 idle timeout
+  的职责，长思考不受影响）；连接阶段 20s 内失败立即放弃切栈。
+- isTransient 识别自有 'connect timeout' 错误，纳入重试。
+- 效果：DNS/连接失败从「挂 120s」变成「20s 快速失败」，两个栈每轮
+  最多 40s，重试提示按时出现，总等待从分钟级降到秒级。
+
+### Changed
+
+- `src/main/llm/net.ts` — 连接阶段短超时 + connect timeout 识别
+
 ## [0.2.100] - 2026-08-04
 
 ### Fixed (P108 — 流式工具调用失败: net::ERR_NAME_NOT_RESOLVED)

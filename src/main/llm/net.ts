@@ -52,10 +52,45 @@ function isTransient(err: unknown): boolean {
   const code: string | undefined = e?.cause?.code ?? e?.code;
   if (code && TRANSIENT.has(code)) return true;
   const msg = String(e?.message ?? '');
+  // P109: our own connect-stage abort (see llmFetch) — a fast local timeout.
+  if (msg.includes('connect timeout')) return true;
   return CHROMIUM_TRANSIENT.test(msg);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * P109: connect-stage short timeout for each fetch attempt.
+ *
+ * The outer streaming path protects the whole request with an IDLE timeout
+ * (120s of silence), which is right for a long-thinking model — but it means a
+ * dead DNS / refused connection hangs for 120s before failing. With two stacks
+ * and outer retries that compounded into minutes of "waiting for the retry
+ * hint". The fetch() promise resolving = response HEADERS arrived; everything
+ * after (the SSE body) is the outer idle timeout's job. So a short timeout on
+ * just this stage is safe and makes failures fail fast.
+ */
+async function fetchWithConnectTimeout(
+  fetcher: (url: string, init: RequestInit) => Promise<Response>,
+  url: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+  connectMs = 20_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('connect timeout')), connectMs);
+  const onAbort = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) controller.abort(signal.reason);
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  try {
+    return await fetcher(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
 
 /**
  * Fetch that respects the OS system proxy (via Electron's Chromium stack) and
@@ -71,36 +106,31 @@ export async function llmFetch(
   for (let attempt = 0; attempt <= retries; attempt++) {
     // Try BOTH stacks every attempt: Chromium (system-proxy aware) first, then
     // undici. P108: the two behave differently — one may resolve where the other
-    // fails (proxy config broken vs DNS broken). Never `break` out of the loop
-    // on a non-transient Chromium error; fall through so undici still gets a shot.
+    // fails (proxy config broken vs DNS broken). Never `break`/`continue` past
+    // undici: even a transient Chromium failure gets the undici shot this attempt.
+    // P109: each stack gets a 20s connect-stage cap so failures fail fast.
     let electronFailed = false;
     if (typeof net !== 'undefined' && typeof net.fetch === 'function') {
       try {
-        return await net.fetch(url, init as any);
+        return await fetchWithConnectTimeout(
+          (u, i) => net.fetch(u, i as any), url, init, init.signal ?? undefined,
+        );
       } catch (err) {
         lastErr = err;
         electronFailed = true;
-        if (isTransient(err)) {
-          if (attempt < retries) await sleep(400 * (attempt + 1));
-          continue; // retry on the same stack
-        }
-        // Non-transient (cert / abort / etc.) — still try undici below this attempt.
+        // No continue here — fall through so undici still gets a try this attempt.
       }
     }
 
     // Fallback path — global fetch (also the only path outside Electron).
     try {
-      return await fetch(url, init);
+      return await fetchWithConnectTimeout(fetch, url, init, init.signal ?? undefined);
     } catch (err) {
       lastErr = err;
-      if (isTransient(err)) {
+      if (isTransient(err) || electronFailed) {
+        // Either stack reported a transient failure (or Electron died and undici
+        // inherited a transient) → back off and retry the round.
         if (attempt < retries) await sleep(400 * (attempt + 1));
-        continue;
-      }
-      // Both stacks failed non-transiently. If Electron's failure was transient
-      // but undici's wasn't, prefer the transient one for a final retry round.
-      if (electronFailed && attempt < retries) {
-        await sleep(400 * (attempt + 1));
         continue;
       }
       throw err;
