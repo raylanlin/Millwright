@@ -54,7 +54,7 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Array<{
   { name: 'OpenAI', url: 'https://api.openai.com/v1', supportsTools: true, suggestedModel: 'gpt-5.6-sol', contextWindow: 1_000_000, maxTokens: 32_768 },
   { name: 'DeepSeek', url: 'https://api.deepseek.com', supportsTools: true, suggestedModel: 'deepseek-v4-pro', contextWindow: 1_048_576, maxTokens: 32_768 },
   { name: 'Kimi / Moonshot', url: 'https://api.moonshot.cn/v1', supportsTools: true, suggestedModel: 'kimi-k2.5', contextWindow: 262_144, maxTokens: 32_768 },
-  { name: 'MiniMax', url: 'https://api.minimaxi.io/v1', supportsTools: true, suggestedModel: 'minimax-m3', contextWindow: 512_000, maxTokens: 32_768 },
+  { name: 'MiniMax', url: 'https://api.minimax.io/v1', supportsTools: true, suggestedModel: 'minimax-m3', contextWindow: 512_000, maxTokens: 32_768 },
   { name: 'Zhipu (GLM)', url: 'https://open.bigmodel.cn/api/paas/v4', supportsTools: true, suggestedModel: 'glm-4.6', contextWindow: 200_000, maxTokens: 32_768 },
   { name: 'Alibaba Bailian (Qwen)', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', supportsTools: true, suggestedModel: 'qwen3.7-max', contextWindow: 262_144, maxTokens: 32_768 },
   { name: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', supportsTools: true, contextWindow: 128_000, maxTokens: 32_768 },
