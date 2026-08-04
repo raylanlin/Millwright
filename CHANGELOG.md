@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [0.2.104] - 2026-08-04
+
+### Fixed (P110 — idle timeout signal chain broken by P109)
+
+`fetchWithConnectTimeout` removed the `onAbort` listener on the idle-timeout
+signal in its `finally` block as soon as the fetch promise resolved (headers
+arrived). After that removal, the idle timeout could no longer abort the
+SSE body stream — a silent connection would hang forever instead of timing
+out after 120s.
+
+The listener now stays connected (it auto-removes via `{ once: true }` when
+the signal actually fires; the signal's full lifecycle is managed by
+`withIdleTimeout`'s cleanup).
+
+### Changed
+
+- `src/main/llm/net.ts` — don't remove idle-timeout listener after connect
+
 ## [0.2.103] - 2026-08-04
 
 ### Changed (P110 v3 — zip distribution instead of portable exe)

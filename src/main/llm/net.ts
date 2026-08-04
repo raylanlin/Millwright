@@ -88,7 +88,10 @@ async function fetchWithConnectTimeout(
     return await fetcher(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
-    signal?.removeEventListener('abort', onAbort);
+    // P110: do NOT remove the onAbort listener here — the idle-timeout signal
+    // (from withIdleTimeout) must stay connected so it can abort the SSE body
+    // stream after headers arrive. The { once: true } option auto-clears it
+    // when (if) it fires; the signal's lifecycle is managed by the outer caller.
   }
 }
 
