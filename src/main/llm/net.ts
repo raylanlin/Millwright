@@ -42,6 +42,19 @@ const TRANSIENT = new Set([
   'EPIPE',
 ]);
 
+/** P108: Chromium network-stack failures carry no Node error `code` — the whole
+ *  diagnosis lives in the message (`net::ERR_NAME_NOT_RESOLVED`). Match those
+ *  here so net.fetch failures are retried and classified just like undici's. */
+const CHROMIUM_TRANSIENT = /net::err_(name_not_resolved|connection_refused|connection_reset|connection_aborted|internet_disconnected|timed_out|address_unreachable|network_changed|network_io_suspended|dns_)/i;
+
+function isTransient(err: unknown): boolean {
+  const e = err as any;
+  const code: string | undefined = e?.cause?.code ?? e?.code;
+  if (code && TRANSIENT.has(code)) return true;
+  const msg = String(e?.message ?? '');
+  return CHROMIUM_TRANSIENT.test(msg);
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -56,31 +69,38 @@ export async function llmFetch(
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    // 1) Electron path — Chromium network stack honors system proxy.
+    // Try BOTH stacks every attempt: Chromium (system-proxy aware) first, then
+    // undici. P108: the two behave differently — one may resolve where the other
+    // fails (proxy config broken vs DNS broken). Never `break` out of the loop
+    // on a non-transient Chromium error; fall through so undici still gets a shot.
+    let electronFailed = false;
     if (typeof net !== 'undefined' && typeof net.fetch === 'function') {
       try {
         return await net.fetch(url, init as any);
       } catch (err) {
         lastErr = err;
-        const code = (err as any)?.cause?.code ?? (err as any)?.code;
-        if (TRANSIENT.has(code)) {
+        electronFailed = true;
+        if (isTransient(err)) {
           if (attempt < retries) await sleep(400 * (attempt + 1));
           continue; // retry on the same stack
         }
-        // Non-transient (e.g. cert errors, aborts): still give the undici path
-        // one shot — some gateways behave differently under the two stacks.
-        break;
+        // Non-transient (cert / abort / etc.) — still try undici below this attempt.
       }
     }
 
-    // 2) Fallback path — global fetch (tests / non-Electron).
+    // Fallback path — global fetch (also the only path outside Electron).
     try {
       return await fetch(url, init);
     } catch (err) {
       lastErr = err;
-      const code = (err as any)?.cause?.code ?? (err as any)?.code;
-      if (TRANSIENT.has(code)) {
+      if (isTransient(err)) {
         if (attempt < retries) await sleep(400 * (attempt + 1));
+        continue;
+      }
+      // Both stacks failed non-transiently. If Electron's failure was transient
+      // but undici's wasn't, prefer the transient one for a final retry round.
+      if (electronFailed && attempt < retries) {
+        await sleep(400 * (attempt + 1));
         continue;
       }
       throw err;

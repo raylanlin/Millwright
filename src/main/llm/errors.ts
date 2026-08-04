@@ -33,6 +33,10 @@ const NETWORK_ERROR_CODES = new Set([
   'ENETUNREACH',
 ]);
 
+/** P108: Chromium network-stack failures carry no Node `code` — the whole
+ *  diagnosis lives in the message (`net::ERR_NAME_NOT_RESOLVED`). The matcher
+ *  lives inline in toLLMError below (it needs the capture group for the name). */
+
 /**
  * Convert any thrown value into an `LLMErrorInfo`. Never throws.
  */
@@ -69,6 +73,23 @@ export function toLLMError(err: unknown, context?: string): LLMErrorInfo {
         code: code === 'ETIMEDOUT' ? 'LLM_TIMEOUT' : 'LLM_NETWORK_ERROR',
         message: `网络连接失败 (${code})`,
         raw: e.message,
+      };
+    }
+
+    // P108: Chromium stack (net.fetch) — same class of failure, different spelling.
+    // Give DNS failures a hint: usually proxy/DNS config, not the API itself.
+    const netMsg = String(e.message ?? '');
+    const netMatch = netMsg.match(/net::err_([a-z0-9_]+)/i);
+    if (netMatch) {
+      const name = netMatch[1].toUpperCase();
+      const isTimeout = /timed_out|connection_timeout/i.test(name);
+      const hint = /name_not_resolved|dns_/i.test(name)
+        ? '（DNS 解析失败——请检查本机网络 / 代理 / hosts 配置，或确认 API 地址拼写）'
+        : '';
+      return {
+        code: isTimeout ? 'LLM_TIMEOUT' : 'LLM_NETWORK_ERROR',
+        message: `网络连接失败 (net::ERR_${name})${hint}`,
+        raw: netMsg,
       };
     }
 

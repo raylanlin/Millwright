@@ -6,6 +6,37 @@
 
 ## [Unreleased]
 
+## [0.2.100] - 2026-08-04
+
+### Fixed (P108 — 流式工具调用失败: net::ERR_NAME_NOT_RESOLVED)
+
+症状：v0.2.96 切到 net.fetch（Chromium 网络栈）后，DNS 失败报
+`net::ERR_NAME_NOT_RESOLVED`，且不重试、不分类，裸抛英文。
+
+根因有两个：
+
+1. **llmFetch 结构性 bug**：net.fetch 非瞬态失败时 `break` 直接跳出
+   整个循环——注释说“给 undici 一次机会”，但 break 把 undici fallback
+   永远跳过了。两个栈（Chromium 走系统代理 / undici 直连）行为不同，
+   一个能通时另一个可能不通，必须每轮都试两个。
+2. **Chromium 错误格式没被识别**：net.fetch 的失败不带 Node 风格的
+   `code`（EAI_AGAIN / ENOTFOUND 等），诊断全在 message 里
+   （net::ERR_NAME_NOT_RESOLVED）——TRANSIENT 集合和
+   NETWORK_ERROR_CODES 都匹配不上，于是不重试、不分类。
+
+修法：
+- `net.ts`：新增 CHROMIUM_TRANSIENT 正则（net::err_name_not_resolved /
+  connection_refused / timed_out / dns_ 等），isTransient() 同时看
+  code 和 message；每轮尝试先 net.fetch、失败立即试 undici（不再 break）。
+- `errors.ts`：解析 net::ERR_* 消息——DNS 类（name_not_resolved/dns_）
+  归 LLM_NETWORK_ERROR 并附提示「检查本机网络/代理/hosts 或 API 地址
+  拼写」；超时类归 LLM_TIMEOUT。
+
+### Changed
+
+- `src/main/llm/net.ts` — Chromium 错误识别 + 双栈 fallback 修复
+- `src/main/llm/errors.ts` — net::ERR_* 分类 + DNS 提示
+
 ## [0.2.99] - 2026-08-04
 
 ### Added (P107 · issue #1 ② — run_shell 工具 + 默认关闭的开关)
