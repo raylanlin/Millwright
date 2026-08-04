@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import math
 
-from .. import units
-from ..bridge import DOC_PART, Context, SWError, sw_get
-from ..registry import tool
+from sw_agent import units
+from sw_agent.bridge import DOC_PART, Context, SWError, sw_get
+from sw_agent.registry import tool
 
 # P62: no circular pattern any more — the whole outline is one sketch, one extrude,
 # so the pattern/axis-selection helpers are no longer needed here.
@@ -178,7 +178,7 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
     m = float(module)
 
     if new_part:
-        from .document import new_part as _new_part
+        from sw_agent.tools.document import new_part as _new_part
         _new_part(ctx)
     ctx.require(DOC_PART, "part")
 
@@ -250,7 +250,7 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
         pass
     sk.InsertSketch(True)
 
-    from .feature import extrude
+    from sw_agent.tools.feature import extrude
     try:
         body = extrude(ctx, depth=thickness, sketch=gear_sketch)
     except SWError as e:
@@ -259,7 +259,7 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
         # the user finds debris in a part they believe is clean.
         if gear_sketch:
             try:
-                from .feature import delete_feature
+                from sw_agent.tools.feature import delete_feature
                 delete_feature(ctx, gear_sketch)
             except Exception:  # noqa: BLE001 — the real error below is what matters
                 pass
@@ -289,7 +289,7 @@ def create_spur_gear(ctx: Context, module: float, teeth: int, thickness: float,
         except Exception:  # noqa: BLE001
             pass
         sk.InsertSketch(True)
-        from .feature import cut_extrude
+        from sw_agent.tools.feature import cut_extrude
         cut_extrude(ctx, through_all=True, sketch=bore_sketch)
 
     ctx.rebuild()
@@ -374,7 +374,7 @@ def create_stepped_shaft(ctx: Context, steps: str, new_part: bool = True):
         raise SWError('give at least one step, e.g. "20x30 30x50".')
 
     if new_part:
-        from .document import new_part as _new_part
+        from sw_agent.tools.document import new_part as _new_part
         _new_part(ctx)
     ctx.require(DOC_PART, "part")
 
@@ -413,7 +413,7 @@ def create_stepped_shaft(ctx: Context, steps: str, new_part: bool = True):
         pass
     sk.InsertSketch(True)
 
-    from .feature import revolve
+    from sw_agent.tools.feature import revolve
     revolve(ctx, angle=360, sketch=shaft_sketch)
     ctx.rebuild()
     return {

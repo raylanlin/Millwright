@@ -11,8 +11,8 @@ edge-selection strategy works here, which feature-creation route is available.
 """
 from __future__ import annotations
 
-from ..bridge import Context, sw_get
-from ..registry import tool
+from sw_agent.bridge import Context, sw_get
+from sw_agent.registry import tool
 
 
 @tool(
@@ -29,7 +29,7 @@ def sw_diagnostics(ctx: Context):
 
     # 1. Early-binding cache. Reporting only true/false was not enough — when it came
     #    back false there was no way to tell WHICH generation route failed or why.
-    from ..typelib import feature_id, typelib_state
+    from sw_agent.typelib import feature_id, typelib_state
     try:
         import win32com.client as wc
         dicts = getattr(wc.constants, "__dicts__", None)
@@ -77,7 +77,7 @@ def sw_diagnostics(ctx: Context):
     #    is the only report that settles it: a non-zero number means that strategy can
     #    pick those edges on this machine, today, on this model.
     try:
-        from ..edge_select import probe
+        from sw_agent.edge_select import probe
         out["edge_strategies"] = probe(ctx)
     except Exception as e:  # noqa: BLE001
         out["edge_strategies"] = {"error": str(e)}

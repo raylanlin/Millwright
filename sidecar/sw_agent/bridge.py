@@ -444,7 +444,7 @@ class Context:
         This used to hold six fallback routes accumulated over eight rounds of
         machine-specific failures, any of which could quietly return a wrong answer.
         """
-        from .edge_select import select
+        from sw_agent.edge_select import select
         return select(self, which)
 
     def select_axis_edge(self, axis: str, append=False, mark=0) -> bool:

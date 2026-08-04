@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import os
 
-from ..bridge import Context, SWError
-from ..registry import tool
+from sw_agent.bridge import Context, SWError
+from sw_agent.registry import tool
 
 # swUserPreferenceIntegerValue_e.swExportStlQuality. P77: this used to carry a "# VERIFY"
 # note, and setting it was on the critical path — a wrong constant on some release would

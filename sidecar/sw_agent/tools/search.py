@@ -22,8 +22,8 @@ from __future__ import annotations
 import fnmatch
 import os
 
-from ..bridge import Context, SWError
-from ..registry import tool
+from sw_agent.bridge import Context, SWError
+from sw_agent.registry import tool
 
 # 遍历深度上限（含根目录本身）。SolidWorks 模板一般在 3 层内。
 MAX_DEPTH = 6

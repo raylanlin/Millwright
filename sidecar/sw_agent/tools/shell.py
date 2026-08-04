@@ -26,8 +26,8 @@ import subprocess
 import tempfile
 import time
 
-from ..bridge import Context, SWError
-from ..registry import tool
+from sw_agent.bridge import Context, SWError
+from sw_agent.registry import tool
 
 SHELL_TIMEOUT_S = 30
 MAX_OUTPUT_CHARS = 4000

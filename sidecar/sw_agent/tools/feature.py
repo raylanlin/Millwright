@@ -22,9 +22,9 @@ P13 fixes:
 """
 from __future__ import annotations
 
-from .. import units
-from ..bridge import DOC_PART, Context, SWError, sw_get
-from ..registry import tool
+from sw_agent import units
+from sw_agent.bridge import DOC_PART, Context, SWError, sw_get
+from sw_agent.registry import tool
 
 # swInConfigurationOpts_e
 CFG_THIS = 1
@@ -501,7 +501,7 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical", feature: 
         # match every flat-lying edge in the part. When the model names a feature, only
         # that feature's edges are candidates; the fallback stays the whole part.
         if feature:
-            from ..edge_select import select_feature_edges
+            from sw_agent.edge_select import select_feature_edges
             picked = select_feature_edges(ctx, feature, edges)
         else:
             picked = ctx.select_edges(edges)

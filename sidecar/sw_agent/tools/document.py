@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from ..bridge import (
+from sw_agent.bridge import (
     DOC_ASSEMBLY,
     DOC_DRAWING,
     DOC_PART,
@@ -18,7 +18,7 @@ from ..bridge import (
     doc_type_name,
     sw_get,
 )
-from ..registry import tool
+from sw_agent.registry import tool
 
 # swUserPreferenceStringValue_e: default templates
 # P27: fix DOC_PART key (was 9 = swDefaultTemplatePart; correct value is 8 =
@@ -186,7 +186,7 @@ def save_document(ctx: Context):
     # the same defensive com_call used everywhere else; fall back to SaveAs when the
     # document was never saved. Model.Save3(Silent) then GetPathName check is the
     # intent; the arity/typing dance is transport noise.
-    from .feature import com_call
+    from sw_agent.tools.feature import com_call
     errors: list = []
     r = com_call(model, ("Save3", "Save2"), (1, 0, 0), errors, min_args=1)
     ok = bool(r)

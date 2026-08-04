@@ -13,9 +13,9 @@ CreateMassProperty2 when CreateMassProperty is member-not-found.
 """
 from __future__ import annotations
 
-from .. import units
-from ..bridge import DOC_ASSEMBLY, DOC_PART, Context, SWError, sw_get
-from ..registry import tool
+from sw_agent import units
+from sw_agent.bridge import DOC_ASSEMBLY, DOC_PART, Context, SWError, sw_get
+from sw_agent.registry import tool
 
 
 @tool("mass_properties", "Get mass properties: mass / volume / surface area / center of mass (= 质量属性; Extension.CreateMassProperty)", params={}, category="query")

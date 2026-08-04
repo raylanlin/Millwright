@@ -1,10 +1,10 @@
 """sw_agent.tools.assembly — assembly: insert components, mates, suppress."""
 from __future__ import annotations
 
-from .. import units
-from ..bridge import DOC_ASSEMBLY, Context, SWError
-from ..registry import tool
-from .feature import com_call
+from sw_agent import units
+from sw_agent.bridge import DOC_ASSEMBLY, Context, SWError
+from sw_agent.registry import tool
+from sw_agent.tools.feature import com_call
 
 # swMateType_e (verified against the API reference)
 _MATE = {

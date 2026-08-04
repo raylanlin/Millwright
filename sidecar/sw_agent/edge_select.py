@@ -27,7 +27,7 @@
 """
 from __future__ import annotations
 
-from .bridge import Context, SWError, edge_fingerprint, sw_get
+from sw_agent.bridge import Context, SWError, edge_fingerprint, sw_get
 
 # 面法向的 Y 分量小于这个值就认为是"侧面"（SolidWorks 是 Y-UP）
 _SIDE_FACE_TOL = 0.1

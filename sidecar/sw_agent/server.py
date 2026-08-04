@@ -26,11 +26,11 @@ import json
 import sys
 import threading
 
-from . import registry
-from .bridge import Context
+from sw_agent import registry
+from sw_agent.bridge import Context
 
 # Trigger tool registration (the import order also defines category display order)
-from .tools import (  # noqa: F401
+from sw_agent.tools import (  # noqa: F401
     assembly,
     batch,
     diagnose,

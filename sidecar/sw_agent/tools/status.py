@@ -15,8 +15,8 @@ Deliberately never raises. A status call that throws is useless — "no document
 """
 from __future__ import annotations
 
-from ..bridge import Context, sw_get
-from ..registry import tool
+from sw_agent.bridge import Context, sw_get
+from sw_agent.registry import tool
 
 _DOC_TYPE = {1: "part", 2: "assembly", 3: "drawing"}
 

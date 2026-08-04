@@ -6,6 +6,32 @@
 
 ## [Unreleased]
 
+## [0.2.110] - 2026-08-04
+
+### Changed (P110 — systematic: convert ALL sidecar relative imports to absolute)
+
+Raylan: stop patching, fix the class. P105/P109 only converted batch.py and
+verify.py; the other 60 relative imports were still one brittle environment
+away from the same "attempted relative import beyond top-level package" that
+killed build_part on the user's install.
+
+Mechanical conversion of every `from .` / `from ..` import across all 27
+sidecar modules (62 imports) to `sw_agent.*` absolute form. Verified with a
+full runpy.run_module simulation (the bundled interpreter's launch path) —
+all modules import, tool_count 77, same as before.
+
+Also from P110 (same release window):
+- `sketch_circle`: warns when a circle would land far outside the sketch
+  extent (out-of-bounds contours were silently killing whole cuts).
+- `cut_extrude`: failure message explains the out-of-bounds-contour cause.
+
+### Changed
+
+- `sidecar/sw_agent/**` — 62 relative imports → absolute (21 files)
+- `sidecar/sw_agent/tools/sketch.py` — out-of-bounds circle warning
+- `sidecar/sw_agent/tools/feature.py` — cut failure hint
+- `package.json` — 0.2.110
+
 ## [0.2.109] - 2026-08-04
 
 ### Fixed (P110 — issue-1 test failures: build_part relative import + out-of-bounds holes)

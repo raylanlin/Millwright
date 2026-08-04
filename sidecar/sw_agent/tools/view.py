@@ -9,9 +9,9 @@ from __future__ import annotations
 import os
 import tempfile
 
-from .. import units
-from ..bridge import Context, SWError
-from ..registry import tool
+from sw_agent import units
+from sw_agent.bridge import Context, SWError
+from sw_agent.registry import tool
 
 # swStandardViews_e
 _VIEWS = {

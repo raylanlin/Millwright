@@ -21,15 +21,15 @@ from __future__ import annotations
 
 import json
 
+from sw_agent.bridge import Context, SWError
+from sw_agent.registry import TOOLS, call, tool
+
 # P105: absolute import at MODULE level — a function-level "from ..verify import"
 # died with "attempted relative import beyond top-level package" on the bundled
 # interpreter (runpy.run_module("sw_agent", run_name="__main__") leaves __package__
 # broken for deeper relative hops). Loading at import time also surfaces any verify
 # problem at startup instead of at the first build_part call.
 from sw_agent.verify import precheck, snapshot, verify_step
-
-from ..bridge import Context, SWError
-from ..registry import TOOLS, call, tool
 
 MAX_STEPS = 80
 

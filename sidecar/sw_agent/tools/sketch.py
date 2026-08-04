@@ -19,9 +19,9 @@ except ImportError:  # Python 3.9 -- pairwise landed in 3.10
 
 import math
 
-from .. import units
-from ..bridge import Context, SWError, sw_get
-from ..registry import tool
+from sw_agent import units
+from sw_agent.bridge import Context, SWError, sw_get
+from sw_agent.registry import tool
 
 # swInConfigurationOpts_e
 CFG_ALL = 2

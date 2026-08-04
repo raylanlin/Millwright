@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import os
 
-from .. import units
-from ..bridge import DOC_DRAWING, Context, SWError, sw_get
-from ..registry import tool
-from .feature import com_call
+from sw_agent import units
+from sw_agent.bridge import DOC_DRAWING, Context, SWError, sw_get
+from sw_agent.registry import tool
+from sw_agent.tools.feature import com_call
 
 # swCreateDrawingViewOptions_e / standard view IDs (swStandardViews_e)
 _VIEW_IDS = {

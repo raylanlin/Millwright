@@ -1,10 +1,10 @@
 """sw_agent.tools.reference — reference geometry: reference planes / axes / points."""
 from __future__ import annotations
 
-from .. import units
-from ..bridge import Context, SWError, sw_get
-from ..registry import tool
-from .feature import com_call
+from sw_agent import units
+from sw_agent.bridge import Context, SWError, sw_get
+from sw_agent.registry import tool
+from sw_agent.tools.feature import com_call
 
 
 @tool(

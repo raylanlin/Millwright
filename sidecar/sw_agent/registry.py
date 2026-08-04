@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .bridge import Context, SWError
+from sw_agent.bridge import Context, SWError
 
 
 @dataclass

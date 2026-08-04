@@ -5,9 +5,9 @@
 """
 from __future__ import annotations
 
-from ..bridge import Context
-from ..guidance import GUIDANCE, read_guidance_section
-from ..registry import tool
+from sw_agent.bridge import Context
+from sw_agent.guidance import GUIDANCE, read_guidance_section
+from sw_agent.registry import tool
 
 
 @tool(
@@ -30,6 +30,6 @@ from ..registry import tool
 def read_guidance(ctx: Context, section: str):
     text = read_guidance_section(section)
     if text is None:
-        from ..bridge import SWError
+        from sw_agent.bridge import SWError
         raise SWError(f"unknown guidance section: {section} (known: {sorted(GUIDANCE.keys())})")
     return {"section": section, "guidance": text}
