@@ -108,7 +108,7 @@ export function envToConfig(env: Record<string, string>): LLMConfig | null {
       keyVar: 'MINIMAX_API_KEY',
       urlVar: 'MINIMAX_BASE_URL',
       modelVar: 'MINIMAX_MODEL',
-      defaultURL: 'https://api.minimax.chat/v1',
+      defaultURL: 'https://api.minimaxi.io/v1',
     },
   ];
 
