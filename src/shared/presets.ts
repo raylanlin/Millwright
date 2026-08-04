@@ -72,4 +72,5 @@ export const DEFAULT_CONFIG: LLMConfig = {
   contextWindow: 128_000,
   stream: true,
   timeoutMs: 120_000,
+  enableShell: false,  // P107: shell 工具总开关，默认关闭（见设置页说明）
 };

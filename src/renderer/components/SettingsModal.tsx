@@ -517,6 +517,25 @@ export function SettingsModal({
         <p style={{ color: t.textMuted, fontSize: 11, margin: '0 0 12px 1px' }}>
           {tr('settings.mainModelVisionHint')}
         </p>
+
+        {/* P107: Shell 总开关 —— 默认关闭，开启即把任意命令执行权交给模型 */}
+        <label
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
+            cursor: 'pointer', color: t.textSecondary, fontSize: 13,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={!!draft.enableShell}
+            onChange={(e) => update('enableShell', e.target.checked)}
+            style={{ cursor: 'pointer' }}
+          />
+          {tr('settings.enableShell')}
+        </label>
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '0 0 12px 1px' }}>
+          {tr('settings.enableShellHint')}
+        </p>
         {!draft.mainModelVision && (
           <div
             style={{

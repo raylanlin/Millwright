@@ -32,6 +32,9 @@ export interface LLMConfig {
   reasoningLevel?: 'auto' | 'off' | 'adaptive' | 'low' | 'medium' | 'high';
   /** P70: 用户在「工具」页关闭的工具名。模型看不到这些工具,造出来也会被拒 */
   disabledTools?: string[];
+  /** P107: shell 工具总开关（默认关闭）。关闭时 run_shell 不可见不可调；
+   *  开启后模型可执行受限 shell 命令，每次仍走确认门。风险见设置页说明 */
+  enableShell?: boolean;
   /** P54: 推理参数方言，auto 按 baseURL 自动识别 */
   reasoningDialect?: 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek' | 'minimax';
 }

@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+## [0.2.99] - 2026-08-04
+
+### Added (P107 · issue #1 ② — run_shell 工具 + 默认关闭的开关)
+
+在 search_files（只读）之上补真正的 shell 能力，但**默认关闭**，
+需要的人打开并自担风险：
+
+- **`enableShell` 配置**：默认 `false`。关闭时 run_shell 被折叠进
+disabledTools，模型既看不到也调不到（同 Tools 页开关通道）——
+攻击面为零。
+- **run_shell 工具**（sidecar）：执行 shell 命令，自带护栏：
+  - 超时 30s 硬限制（超时 kill 进程树）
+  - 输出截断 4000 字符
+  - 工作目录白名单：仅临时目录 / 当前文档目录，不接受任意路径
+  - 非交互：stdin 关闭、无终端
+- **确认门**：run_shell 归入 IRREVERSIBLE——任何审批模式（含
+permissive/auto 之外的所有）每次执行都弹确认卡。
+- **设置页开关 + 风险说明**：勾选开启，附中文/英文说明。
+
+### Changed
+
+- `src/shared/types.ts` — LLMConfig 加 enableShell
+- `src/shared/presets.ts` — DEFAULT_CONFIG.enableShell = false
+- `sidecar/sw_agent/tools/shell.py`（新增）— run_shell 受限执行
+- `sidecar/sw_agent/server.py` — 注册 shell 模块
+- `src/main/agent/agent-loop-sidecar.ts` — run_shell 进 IRREVERSIBLE
+- `src/main/ipc/handlers.ts` — enableShell=false 时过滤 run_shell
+- `src/renderer/components/SettingsModal.tsx` — 开关 + 说明
+- `src/renderer/i18n/strings.ts` — enableShell 文案（zh/en）
+
 ## [0.2.98] - 2026-08-04
 
 ### Added (P107 · issue #1 ② — search_files 只读搜索工具)

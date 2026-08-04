@@ -314,7 +314,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           // while this session is running applies on the next tool call.
           getApprovalMode: () => getCachedApprovalMode(),
           contextWindow: payload.config.contextWindow,
-          disabledTools: payload.config.disabledTools ?? [],
+          // P107: shell is OFF by default — fold run_shell into the disabled set so
+          // the model never sees it (same channel as the Tools tab). The sidecar
+          // always registers the tool; visibility is decided here.
+          disabledTools: [
+            ...(payload.config.disabledTools ?? []),
+            ...(payload.config.enableShell ? [] : ['run_shell']),
+          ],
           signal: controller.signal,
           onEvent: send,
           confirmTool: (call) => requestUserConfirm(e.sender, requestId, call),

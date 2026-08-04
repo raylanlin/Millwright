@@ -221,6 +221,9 @@ export async function runSidecarAgent(
   // change applies to this running session immediately — no session-start snapshot.
   const IRREVERSIBLE = new Set([
     'delete_feature', 'save_as', 'save_document', 'export_file', 'export_stl',
+    // P107: shell is opt-in via Settings, and even then EVERY call confirms —
+    // arbitrary command execution is the widest blast radius in the toolset.
+    'run_shell',
   ]);
   const wantsConfirm = (name: string): boolean => {
     if (!opts.confirmTool) return false;
