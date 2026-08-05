@@ -1,86 +1,87 @@
-"""sw_agent.refplane — datum-plane sidedness: set it, then MEASURE it (P116).
+"""sw_agent.refplane — datum-plane creation with verified positioning (P116).
 
-## The bug this module exists for
+The problem this module solves
+------------------------------
+`create_plane base=front offset=-50` built its plane at Z=+50 on top of the +50 plane.
+Two blind fixes failed because they targeted non-existent enum values, and *nothing in
+the pipeline ever read where the plane actually went* — the tool echoed back the offset
+it was asked for, so a plane that never moved still reported offset_mm=-50.
 
-`create_plane base=front offset=-50` built its plane at Z=+50, on top of the plane a
-previous `offset=50` had made. Two patches tried to fix it blind and both were reported
-"no effect" from the real machine:
+Root causes of the two failed patches
+--------------------------------------
+P105  InsertRefPlane(15, …) — 15 is Parallel|Perpendicular|Coincident|Distance (1|2|4|8),
+      not the Flip flag. SolidWorks satisfied the Distance part and built the default side.
 
-  P105  InsertRefPlane(15, mm(abs(offset)), …)
-        15 is not the Flip flag. It is Parallel|Perpendicular|Coincident|Distance
-        (1|2|4|8) — three constraints the call never meant to ask for. SolidWorks kept
-        the part it could satisfy (Distance) and built the default side.
+P114  SelectByID2(…, SelectOption=16) — swSelectOption_e has only Default(0) and
+      Extensive(1). 16 is not a valid value; the call silently ignored it.
 
-  P114  SelectByID2(…, SelectOption=16) — "reverse the selection"
-        swSelectOption_e has no Reverse member (Default 0 / Extensive 1). 16 was not an
-        ignored flag, it was not a value; the call selected the base plane normally and
-        the plane landed at +50 again.
+The real Flip flag is swRefPlaneReferenceConstraint_OptionFlip = 256, in the
+swRefPlaneReferenceConstraints_e bit-flag enum (Distance=8, so Distance|Flip=264).
 
-Both attempts share one failure mode, and it matters more than either enum mistake:
-**nothing in the pipeline ever looked at where the plane actually went.** The tool
-returned `{"offset_mm": -50}` because that is what it was asked for, and a later vision
-pass then "confirmed" the negative offset worked. Two rounds of debugging were spent on
-a plane that had never moved.
+Design
+------
+1. Create the plane with InsertRefPlane, passing Distance|Flip (264) for negative offsets.
+2. Read the plane's actual world-space position via IRefPlane.Transform — the documented
+   approach (see cadbooster.com "Understanding MathTransform", SolidWorks VBA example
+   "Get the Normal and Origin of a Reference Plane Using Its Transform"). ArrayData[9:11]
+   is the translation vector; the axis-aligned component gives the signed offset.
+3. If position is wrong-side, flip the feature definition via IRefPlaneFeatureData, or
+   recreate with the opposite flag — re-measuring after each step.
+4. If it still won't land, DELETE the wrong plane and raise. A plane on the wrong side is
+   worse than no plane: the next sketch goes on it and the extrude merges into the body
+   already there (the verified_failed we chased).
 
-## What this module does instead
-
-Sidedness is a property of the FEATURE, not of how its reference was selected, so:
-
-  1. create the plane at the distance, asking for the flip flag when the caller wants
-     the far side (`swRefPlaneReferenceConstraint_OptionFlip`, 256 — read from the live
-     typelib constants when a gen_py cache exists, table below otherwise);
-  2. `measure()` the plane's real signed position off its own transform;
-  3. if the sign is wrong, correct it — flip the feature definition, else rebuild it
-     with the opposite flag — re-measuring after each step;
-  4. if it still will not land, DELETE the wrong plane and raise. A plane on the wrong
-     side is worse than no plane: the next sketch goes on it and the extrude merges into
-     the body that is already there (that is the verified_failed we chased).
-
-No step trusts an enum value to have done anything. Measurement is the only authority,
-which is exactly what was missing from P105 and P114.
+pywin32 binding note
+--------------------
+Under dynamic COM dispatch (no gen_py cache), GetSpecificFeature2() returns a generic
+IDispatch wrapper that does not expose IRefPlane members. The fix is win32com.client.CastTo
+— the same pattern bridge.py uses for IPartDoc.GetBodies2. FeatureByName gives a cleaner
+IFeature reference than the raw InsertRefPlane return value.
 """
 from __future__ import annotations
 
 from sw_agent.bridge import SWError, sw_get
 
-# swRefPlaneReferenceConstraints_e — bit flags, in swconst declaration order.
+# ---------------------------------------------------------------------------
+# Constraint enum (swRefPlaneReferenceConstraints_e) — bit flags
+# ---------------------------------------------------------------------------
+# Source: rimptec.com mirror of swconst + SolidWorks VBA macro recorder output.
+# The values are stable across all releases we support (2017–2026).
+
 CONSTRAINT = {
-    "parallel": 1,
-    "perpendicular": 2,
-    "coincident": 4,
-    "distance": 8,
-    "angle": 16,
-    "tangent": 32,
-    "project": 64,
-    "midplane": 128,
-    "flip": 256,                    # swRefPlaneReferenceConstraint_OptionFlip
-    "origin_on_curve": 512,
-    "project_nearest": 1024,
+    "parallel":              1,
+    "perpendicular":         2,
+    "coincident":            4,
+    "distance":              8,      # swRefPlaneReferenceConstraint_Distance
+    "angle":                16,
+    "tangent":              32,
+    "project":              64,
+    "midplane":            128,
+    "flip":                256,      # swRefPlaneReferenceConstraint_OptionFlip
+    "origin_on_curve":     512,
+    "project_nearest":    1024,
     "project_sketch_normal": 2048,
-    "parallel_to_screen": 4096,
-    "reference_flip": 8192,
+    "parallel_to_screen":  4096,
+    "reference_flip":      8192,     # swRefPlaneReferenceConstraint_OptionReferenceFlip
 }
 
-_CONST_NAME = {
+# Live-typelib constant names (used when a gen_py cache exists)
+_CONST_NAMES = {
     "distance": "swRefPlaneReferenceConstraint_Distance",
-    "flip": "swRefPlaneReferenceConstraint_OptionFlip",
-    "midplane": "swRefPlaneReferenceConstraint_MidPlane",
-    "reference_flip": "swRefPlaneReferenceConstraint_OptionReferenceFlip",
+    "flip":     "swRefPlaneReferenceConstraint_OptionFlip",
 }
 
-# World axis each standard plane's normal runs along. SolidWorks world space is Y-UP:
-# Front is XY (normal Z), Top is XZ (normal Y), Right is YZ (normal X). Same convention
-# as bridge.select_face — getting this wrong is how face="top" once found the front face.
+# World-axis index each standard plane's normal runs along. SolidWorks is Y-up:
+#   Front = XY (normal Z=2), Top = XZ (normal Y=1), Right = YZ (normal X=0).
 NORMAL_AXIS = {"front": 2, "top": 1, "right": 0}
 
 
-def constraint(kind: str) -> int:
-    """Constraint flag for InsertRefPlane. Live typelib constants win when a gen_py
-    cache happens to exist (typelib.py never builds one on the startup path), otherwise
-    the table above — same arrangement as typelib.feature_id()."""
+def constraint_mask(kind: str) -> int:
+    """Bit-flag value for InsertRefPlane. Prefers live typelib constants when a gen_py
+    cache exists, otherwise the table above — same pattern as typelib.feature_id()."""
     try:
         import win32com.client as wc
-        name = _CONST_NAME.get(kind)
+        name = _CONST_NAMES.get(kind)
         if name:
             v = getattr(wc.constants, name, None)
             if isinstance(v, int) and v > 0:
@@ -93,95 +94,171 @@ def constraint(kind: str) -> int:
     return v
 
 
-def _translation(obj, axis: int):
-    """Signed position (metres) of a datum plane along `axis`, off IRefPlane.Transform.
+# ---------------------------------------------------------------------------
+# Position reading — two clean routes, not a bag of fallbacks
+# ---------------------------------------------------------------------------
 
-    IMathTransform.ArrayData is 16 doubles: [0:9] rotation, [9:12] translation, [12]
-    scale. For a plane offset from a standard plane the translation lies along that
-    plane's normal, so one component is the offset we are looking for.
-    """
-    xf = sw_get(obj, "Transform")
-    arr = list(sw_get(xf, "ArrayData") or [])
-    if len(arr) < 12:
-        return None
-    return float(arr[9 + axis])
+def read_position(ctx, name: str, base: str) -> float | None:
+    """Signed offset (metres) of the named datum plane along `base`'s normal.
 
+    Returns None only when the plane's position is genuinely unreadable — never raises.
 
-def measure(ctx, feat, base: str, name: str | None = None):
-    """Signed offset in METRES of `feat` from its base plane, or None if unreadable.
+    Route A  IRefPlane.Transform (the documented approach)
+             FeatureByName → GetSpecificFeature2 → CastTo("IRefPlane") → Transform →
+             ArrayData[9 + axis]. CastTo is needed because pywin32 dynamic dispatch
+             returns a generic wrapper that doesn't expose IRefPlane members.
 
-    Three routes, because a datum plane is one of the flakier things to read over COM on
-    an arbitrary install, and an unreadable plane must not be mistaken for a wrong one.
+    Route B  IRefPlaneFeatureData (definition readback)
+             FeatureByName → GetDefinition → Distance + ReverseDirection → signed offset.
+             Reads HOW the plane was defined, not its world position, but for offset planes
+             from standard planes the two are identical.
     """
     axis = NORMAL_AXIS[base]
 
-    # A — the feature's own IRefPlane
-    try:
-        rp = sw_get(feat, "GetSpecificFeature2")
-        if rp is not None:
-            v = _translation(rp, axis)
-            if v is not None:
-                return v
-    except Exception:  # noqa: BLE001
-        pass
+    # -- Route A: IRefPlane.Transform ------------------------------------------
+    feat = _feature_by_name(ctx, name)
+    if feat is not None:
+        pos = _read_transform(feat, axis)
+        if pos is not None:
+            return pos
 
-    # B — select the plane by name and read the selected IRefPlane. Survives the case
-    # where the feature wrapper went stale after ModifyDefinition rebuilt it.
-    if name:
-        try:
-            ctx.clear_selection()
-            if ctx.select_by_id(name, "PLANE"):
-                obj = sw_get(ctx.sel_mgr, "GetSelectedObject6", 1, -1)
-                if obj is not None:
-                    v = _translation(obj, axis)
-                    if v is not None:
-                        return v
-        except Exception:  # noqa: BLE001
-            pass
-        finally:
-            try:
-                ctx.clear_selection()
-            except Exception:  # noqa: BLE001
-                pass
+    # -- Route B: IRefPlaneFeatureData -----------------------------------------
+    if feat is not None:
+        pos = _read_definition(feat)
+        if pos is not None:
+            return pos
 
-    # C — the datum's display box. A plane has no thickness, so its extent along the
-    # normal collapses to its position.
-    try:
-        box = list(sw_get(feat, "GetBox") or [])
-        if len(box) >= 6:
-            return (float(box[axis]) + float(box[axis + 3])) / 2.0
-    except Exception:  # noqa: BLE001
-        pass
     return None
 
 
-# Property that carries "which side" on IRefPlaneFeatureData. The member name is not
-# worth betting the fix on (this is the third patch to be wrong about a name), so every
-# plausible one is tried and the RESULT is measured either way.
-_REVERSE_PROPS = ("ReverseDirection", "Reverse", "FlipDirection", "Flip")
-
-
-def flip_definition(ctx, feat, value: bool) -> str | None:
-    """Toggle the plane's direction through its feature definition.
-
-    Returns the property name that took the write, or None if the definition could not
-    be edited. Never raises — this is one rung of a ladder, not the answer.
-    """
-    model = ctx.model
-    data = None
+def _feature_by_name(ctx, name: str):
+    """Get a feature by name — more reliable than holding the InsertRefPlane return."""
     try:
-        data = sw_get(feat, "GetDefinition")
+        return ctx.model.FeatureByName(name)
     except Exception:  # noqa: BLE001
         return None
-    if data is None:
+
+
+def _read_transform(feat, axis: int) -> float | None:
+    """Route A: IRefPlane.Transform → ArrayData[9 + axis].
+
+    cadbooster.com: "the reference plane's transform is the transform that takes a
+    reference plane from its canonical position/orientation to its actual position."
+    IMathTransform.ArrayData is 16 doubles: [0:8] rotation, [9:11] translation, [12] scale.
+    """
+    import win32com.client as wc
+
+    spec = None
+    try:
+        spec = sw_get(feat, "GetSpecificFeature2")
+    except Exception:  # noqa: BLE001
+        pass
+    if spec is None:
         return None
+
+    # Try CastTo("IRefPlane") — solves the dynamic-dispatch member resolution issue.
+    for iface in ("IRefPlane", "RefPlane"):
+        try:
+            rp = wc.CastTo(spec, iface)
+            xf = sw_get(rp, "Transform")
+            arr = list(sw_get(xf, "ArrayData") or [])
+            if len(arr) >= 12:
+                return float(arr[9 + axis])
+        except Exception:  # noqa: BLE001
+            continue
+
+    # Last resort: try without CastTo (works when early binding is already active)
+    try:
+        xf = sw_get(spec, "Transform")
+        arr = list(sw_get(xf, "ArrayData") or [])
+        if len(arr) >= 12:
+            return float(arr[9 + axis])
+    except Exception:  # noqa: BLE001
+        pass
+
+    return None
+
+
+def _read_definition(feat) -> float | None:
+    """Route B: IRefPlaneFeatureData.Distance + ReverseDirection.
+
+    IRefPlaneFeatureData.Distance is documented as "distance to offset the reference
+    plane" (despite the docs saying "in radians" — that's a doc bug for distance planes;
+    the value is in metres). ReverseDirection / ReversedReferenceDirection gives the sign.
+    """
+    try:
+        data = sw_get(feat, "GetDefinition")
+        if data is None:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+
+    dist_m = None
+    for attr in ("Distance", "Distance2"):
+        try:
+            raw = getattr(data, attr, None)
+            if raw is None:
+                continue
+            # Distance might be a Dimension object with .SystemValue, or a plain float
+            v = float(raw.SystemValue if hasattr(raw, "SystemValue") else raw)
+            if abs(v) > 1e-12:
+                dist_m = abs(v)
+                break
+        except Exception:  # noqa: BLE001
+            continue
+
+    if dist_m is None:
+        return None
+
+    # Read the direction flag
+    flipped = False
+    for prop in ("ReverseDirection", "ReversedReferenceDirection", "Reverse", "FlipDirection"):
+        try:
+            val = getattr(data, prop, None)
+            if val is not None:
+                flipped = bool(val)
+                break
+        except Exception:  # noqa: BLE001
+            continue
+
+    return -dist_m if flipped else dist_m
+
+
+# ---------------------------------------------------------------------------
+# Feature definition editing (flip direction)
+# ---------------------------------------------------------------------------
+
+def flip_definition(ctx, feat_or_name, value: bool) -> str | None:
+    """Toggle the plane's direction via IRefPlaneFeatureData.
+
+    Follows the documented pattern (cadbooster.com part 10):
+      1. GetDefinition → IRefPlaneFeatureData
+      2. AccessSelections
+      3. Set ReverseDirection / ReversedReferenceDirection
+      4. ModifyDefinition to commit, or ReleaseSelectionAccess to discard
+
+    Returns the property name that accepted the write, or None on failure. Never raises.
+    """
+    feat = feat_or_name if not isinstance(feat_or_name, str) else _feature_by_name(ctx, feat_or_name)
+    if feat is None:
+        return None
+
+    model = ctx.model
+    try:
+        data = sw_get(feat, "GetDefinition")
+        if data is None:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+
     try:
         try:
             data.AccessSelections(model, None)
-        except Exception:  # noqa: BLE001 — some installs do not need it for datums
+        except Exception:  # noqa: BLE001 — some installs skip this for datums
             pass
+
         used = None
-        for prop in _REVERSE_PROPS:
+        for prop in ("ReverseDirection", "ReversedReferenceDirection", "Reverse", "FlipDirection"):
             if not hasattr(data, prop):
                 continue
             try:
@@ -190,11 +267,14 @@ def flip_definition(ctx, feat, value: bool) -> str | None:
                 break
             except Exception:  # noqa: BLE001
                 continue
+
         if used is None:
             _release(data)
             return None
+
         if bool(feat.ModifyDefinition(data, model, None)):
             return used
+
         _release(data)
         return None
     except Exception:  # noqa: BLE001
@@ -209,9 +289,13 @@ def _release(data):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Deletion
+# ---------------------------------------------------------------------------
+
 def delete(ctx, name: str) -> bool:
-    """Delete a datum plane by name. Used to clean up a plane that landed wrong —
-    leaving it behind would let a later sketch pick it up by name or by 'last'."""
+    """Delete a datum plane by name. Used to clean up a plane that landed on the wrong
+    side — leaving it would let a later sketch pick it up by name or by 'last'."""
     try:
         ctx.clear_selection()
         if not ctx.select_by_id(name, "PLANE"):
@@ -230,11 +314,10 @@ def delete(ctx, name: str) -> bool:
             pass
 
 
-def wrong_side(measured: float, target: float, tol: float) -> bool:
-    """Pure decision helper: is the measured offset NOT the requested one?
+# ---------------------------------------------------------------------------
+# Decision helper
+# ---------------------------------------------------------------------------
 
-    Sign and magnitude in one test — a plane at +50 when -50 was asked for fails, and so
-    does one at +5 when +50 was asked for. Kept free of COM so it can be reasoned about
-    and tested without SolidWorks.
-    """
+def wrong_side(measured: float, target: float, tol: float) -> bool:
+    """Is the measured offset NOT the requested one? Sign and magnitude in one test."""
     return abs(measured - target) > tol

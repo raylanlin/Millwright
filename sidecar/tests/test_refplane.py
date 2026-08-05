@@ -1,9 +1,8 @@
 """Pure-logic tests for sw_agent.refplane — no SolidWorks, no COM.
 
-The two failed fixes (P105 constraint 15, P114 select option 16) were both wrong about a
-number, and nothing in the test suite could have caught either one. These lock down what
-CAN be checked without a machine: the constraint table is a real set of bit flags with the
-documented values, and the "did the plane land where we asked" decision is sign-aware.
+Locks down what CAN be checked without a machine: the constraint table is a real set of
+bit flags with the documented values, and the "did the plane land where we asked" decision
+is sign-aware.
 """
 import unittest
 
@@ -19,40 +18,41 @@ class TestConstraintTable(unittest.TestCase):
             self.assertTrue(v > 0 and v & (v - 1) == 0, f"{name}={v} is not a single bit")
 
     def test_documented_values(self):
+        """Distance=8 (used since P13), Flip=256 (the value P105 should have used)."""
         self.assertEqual(refplane.CONSTRAINT["distance"], 8)
         self.assertEqual(refplane.CONSTRAINT["flip"], 256)
 
     def test_distance_plus_flip_is_264(self):
-        # P105 passed 15, which is Parallel|Perpendicular|Coincident|Distance.
+        # P105 passed 15 (Par|Perp|Coinc|Dist). P114 passed 16 to SelectByID2 (wrong API).
         mask = refplane.CONSTRAINT["distance"] | refplane.CONSTRAINT["flip"]
         self.assertEqual(mask, 264)
-        self.assertNotEqual(mask, 15)
+        self.assertNotEqual(mask, 15, "P105's mask was wrong")
+        self.assertNotEqual(mask, 16, "P114's SelectOption was wrong")
 
-    def test_constraint_lookup_rejects_unknown(self):
-        self.assertEqual(refplane.constraint("distance"), refplane.CONSTRAINT["distance"])
+    def test_constraint_mask_rejects_unknown(self):
+        self.assertEqual(refplane.constraint_mask("distance"), 8)
         with self.assertRaises(SWError):
-            refplane.constraint("nope")
+            refplane.constraint_mask("nope")
 
 
 class TestWrongSide(unittest.TestCase):
-    def test_right_place_passes(self):
+    def test_correct_position(self):
         self.assertFalse(refplane.wrong_side(-0.05, -0.05, 2e-6))
 
-    def test_wrong_sign_fails(self):
+    def test_opposite_sign(self):
         # The actual bug: -50 mm requested, plane built at +50 mm.
         self.assertTrue(refplane.wrong_side(0.05, -0.05, 5e-5))
 
-    def test_wrong_magnitude_fails(self):
+    def test_wrong_magnitude(self):
         self.assertTrue(refplane.wrong_side(0.005, 0.05, 5e-5))
 
-    def test_within_tolerance_passes(self):
+    def test_within_tolerance(self):
         self.assertFalse(refplane.wrong_side(0.0500004, 0.05, 5e-5))
 
 
-class TestAxisMap(unittest.TestCase):
+class TestAxisMapping(unittest.TestCase):
     def test_y_up_convention(self):
-        # SolidWorks world space is Y-up: Front is XY (normal Z), Top is XZ (normal Y),
-        # Right is YZ (normal X). Same mapping bridge.select_face uses.
+        """SolidWorks is Y-up: Front normal=Z(2), Top normal=Y(1), Right normal=X(0)."""
         self.assertEqual(refplane.NORMAL_AXIS, {"front": 2, "top": 1, "right": 0})
 
 

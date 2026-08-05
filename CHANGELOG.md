@@ -6,6 +6,48 @@
 
 ## [Unreleased]
 
+## [0.2.118] - 2026-08-05
+
+### Fixed (P118 — create_plane: read_position rewrite + verified:true on real machine)
+
+Claude's second patch. v0.2.116 built two coincident planes on the real machine but
+read_position() returned None — CastTo('IRefPlane') under dynamic dispatch did not
+resolve IRefPlane members on this SW 2025 install. v0.2.116 returned verified:false
+with no measured_offset_mm.
+
+This version replaces the five-rung fallback bag with two documented routes:
+
+  Route A (IRefPlane.Transform) — the SolidWorks VBA documented path
+    FeatureByName → GetSpecificFeature2 → CastTo('IRefPlane'|'RefPlane') →
+    Transform → ArrayData[9 + axis]. CastTo is required because pywin32 dynamic
+    dispatch returns a generic IDispatch wrapper that does not expose IRefPlane
+    members (same pattern as bridge.py's IPartDoc.GetBodies2).
+
+  Route B (IRefPlaneFeatureData) — definition readback
+    FeatureByName → GetDefinition → Distance + ReverseDirection → signed offset.
+    Reads how the plane was defined, not its world position, but for offset planes
+    from standard planes the two are identical. Catches the case where CastTo fails.
+
+create_plane tries Route A first, Route B as fallback, and reports which one took
+effect through the attempts log. If both fail, the plane is deleted and an error
+is raised (a wrong-side plane would silently swallow the next sketch/extrude).
+
+Local cleanup:
+- Removed `import sys, os; sys.path.insert(...)` from test_refplane.py — duplicate
+  of the sidecar/tests/conftest.py added in P117 (only kept when needed: pytest from
+  the repo root).
+- Replaced blind `assertRaises(Exception)` with `assertRaises(SWError)` — B017
+  ruff lint.
+
+Note: the v0.2.117 conftest fix is still required and unchanged.
+
+### Changed
+
+- `sidecar/sw_agent/refplane.py` — read_position = Route A (CastTo+Transform) | Route B (definition)
+- `sidecar/sw_agent/tools/reference.py` — call refplane.read_position via the two-route API
+- `sidecar/tests/test_refplane.py` — drop duplicate sys.path, assert SWError specifically
+- `package.json` — 0.2.118
+
 ## [0.2.117] - 2026-08-05
 
 ### Fixed (CI — pytest could not import sw_agent from the repo root)
