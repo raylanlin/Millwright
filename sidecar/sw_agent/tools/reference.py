@@ -17,17 +17,18 @@ from sw_agent.tools.feature import com_call
 )
 def create_plane(ctx: Context, base: str, offset: float):
     ctx.clear_selection()
-    if not ctx.select_plane(base):
+    # P114: NEGATIVE offsets — select the base plane REVERSED (swSelectOptionReverse,
+    # sel_type=16) and offset by the positive distance. This is exactly what the
+    # SolidWorks macro recorder emits for a plane on the other side. P105 tried the
+    # Flip constraint (15) instead; this install silently ignored it and both ±planes
+    # landed at +50 — the test model's 基准面1/2 ended up in the SAME place, and the
+    # second side plate then overlapped the first (extrude merged → verified_failed).
+    reverse = offset < 0
+    if not ctx.select_plane(base, reverse=reverse):
         raise SWError(f"failed to select reference plane: {base}")
     # InsertRefPlane(firstConstraint, firstVal, second, secondVal, third, thirdVal)
-    # 8 = swRefPlaneReferenceConstraint_Distance; 15 = swRefPlaneReferenceConstraint_Flip
-    # P105: a NEGATIVE distance silently produced a plane ON the base plane on this
-    # install (offset=-45 landed at Z=0) — the negative sign was dropped in transit.
-    # Flip is the documented way to reverse a distance constraint; use it instead.
-    if offset >= 0:
-        feat = ctx.feat_mgr.InsertRefPlane(8, units.mm(offset), 0, 0, 0, 0)
-    else:
-        feat = ctx.feat_mgr.InsertRefPlane(8, units.mm(-offset), 15, 0, 0, 0)
+    # 8 = swRefPlaneReferenceConstraint_Distance
+    feat = ctx.feat_mgr.InsertRefPlane(8, units.mm(abs(offset)), 0, 0, 0, 0)
     if feat is None:
         raise SWError("failed to create reference plane.")
     name = sw_get(feat, "Name")

@@ -199,15 +199,22 @@ class Context:
                 others.add(typ)
         return edges, others
 
-    def select_by_id(self, name, typ, x=0.0, y=0.0, z=0.0, append=False, mark=0) -> bool:
+    def select_by_id(self, name, typ, x=0.0, y=0.0, z=0.0, append=False, mark=0, reverse=False) -> bool:
         # P26: under early binding the Callout param ([in] IDispatch*) must be a
         # VARIANT(VT_DISPATCH, None) — a bare None raises DISP_E_TYPEMISMATCH
         # (0x80020005), which broke start_sketch / every selection-based tool.
         import pythoncom
         from win32com.client import VARIANT
         callout = VARIANT(pythoncom.VT_DISPATCH, None)
+        # P114: swSelectOption_e.swSelectOptionReverse = 16 — reverse the selection's
+        # normal. Used by create_plane for NEGATIVE offsets: select the base plane
+        # reversed, then offset by the positive distance → plane lands on the other
+        # side. This is how the SolidWorks macro recorder does it; the Flip
+        # constraint (15) used in P105 was silently ignored on this install and
+        # both ±planes landed at +50.
+        sel_type = 16 if reverse else 0
         return bool(
-            self.model.Extension.SelectByID2(name, typ, x, y, z, append, mark, callout, 0)
+            self.model.Extension.SelectByID2(name, typ, x, y, z, append, mark, callout, sel_type)
         )
 
     def _variant_null(self):
@@ -535,15 +542,15 @@ class Context:
 
         return self._select_entity(best, append, mark)
 
-    def select_plane(self, which: str, append=False, mark=0) -> bool:
+    def select_plane(self, which: str, append=False, mark=0, reverse=False) -> bool:
         """Select a reference plane; auto-handles both English and localized (zh-CN) templates."""
         key = (which or "").lower()
         if key not in _PLANES:
             raise SWError(f"unknown plane: {which} (expected front/top/right)")
         en, zh = _PLANES[key]
-        if self.select_by_id(en, "PLANE", append=append, mark=mark):
+        if self.select_by_id(en, "PLANE", append=append, mark=mark, reverse=reverse):
             return True
-        return self.select_by_id(zh, "PLANE", append=append, mark=mark)
+        return self.select_by_id(zh, "PLANE", append=append, mark=mark, reverse=reverse)
 
     # ---- Rebuild ----
     def rebuild(self, top_only=False):

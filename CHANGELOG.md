@@ -6,6 +6,38 @@
 
 ## [Unreleased]
 
+## [0.2.114] - 2026-08-05
+
+### Fixed (P114 — create_plane negative offset: both planes landed at +50)
+
+The step-3 test caught a REAL tool bug (not an agent problem):
+`create_plane base=front offset=50` and `offset=-50` BOTH landed at +50 —
+基准面1/2 ended up in the SAME place. The step-4 side plate on 基准面2 then
+overlapped the first plate and extrude silently merged (verified_failed:
+实体数未增长).
+
+Root cause: P105 "fixed" negative offsets with the Flip constraint (15) in
+InsertRefPlane — this install silently ignores it. The macro-recorder way to
+make a plane on the other side is to select the base plane REVERSED
+(swSelectOptionReverse, sel_type=16 in SelectByID2) and offset by the
+POSITIVE distance.
+
+Fix:
+- `bridge.py`: select_by_id / select_plane accept `reverse=True` → passes
+  sel_type=16 to SelectByID2.
+- `reference.py`: create_plane uses reverse-selection + abs(offset) for
+  negative offsets (drop the Flip constraint).
+
+Note: the agent's first step-3 report was a MiniMax M3 hallucination (it
+claimed a warning that the tool never returned) — but the geometry bug was
+real and is now fixed.
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — reverse selection (sel_type=16)
+- `sidecar/sw_agent/tools/reference.py` — negative offset via reverse select
+- `package.json` — 0.2.114
+
 ## [0.2.113] - 2026-08-05
 
 ### Changed (P113 — remove the sketch_circle out-of-bounds warning)
