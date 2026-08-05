@@ -260,28 +260,12 @@ def sketch_rectangle(ctx: Context, width: float, height: float, x: float = 0, y:
 )
 def sketch_circle(ctx: Context, radius: float, x: float = 0, y: float = 0):
     _require_sketch(ctx)
-    # P110: warn loudly when the requested circle would land far outside the current
-    # sketch's bounds. The issue-1 failure: the model placed a hole at x=105 on a
-    # 120mm plate centred at the origin (range -60..+60), SolidWorks then rejected
-    # the WHOLE cut with "profile may not overlap the solid" — one out-of-bounds
-    # circle silently killed all three holes. A bounds check makes the mistake
-    # visible at DRAW time instead of at CUT time.
-    ex_w, ex_h = _sketch_extent(ctx)
-    if ex_w is not None and ex_h is not None and ex_w > 0 and ex_h > 0:
-        # centre of the existing geometry, plus half-extent as a loose fence
-        cx, cy = ex_w / 2, ex_h / 2
-        r = float(radius)
-        margin = max(ex_w, ex_h) * 0.5 + r * 3
-        if abs(x) > margin or abs(y) > margin:
-            return {
-                "circle": {"x": x, "y": y, "r": radius},
-                "warning": (
-                    f"⚠️ 圆 ({x}, {y}) r{radius} 可能超出当前草图范围 "
-                    f"(现有几何约 {ex_w:.0f}×{ex_h:.0f}mm，中心约 ({cx:.0f},{cy:.0f}))。"
-                    "如果它不在实体轮廓内，后续切除会整个失败——请先确认坐标相对草图中心"
-                    "而不是相对某条边。"
-                ),
-            }
+    # P113: the P110 out-of-bounds warning is REMOVED — Raylan's call: large geometry
+    # used to cut/trim a model is a legit workflow, so a "circle far outside the
+    # sketch" warning would fire on valid use. The model is expected to reason about
+    # coordinates; the cut tool reports "profile may not overlap" clearly if a
+    # contour is out of the solid. Keep only the P69 landed-check below (silent
+    # failure guard, different purpose).
     ctx.sketch_mgr.CreateCircle(units.mm(x), units.mm(y), 0, units.mm(x + radius), units.mm(y), 0)
     # P69: confirm the circle actually landed. A circle that reports success but is not
     # on the solid produces the most misleading failure we have seen: the cut then fails

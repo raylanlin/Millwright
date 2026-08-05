@@ -6,6 +6,27 @@
 
 ## [Unreleased]
 
+## [0.2.113] - 2026-08-05
+
+### Changed (P113 — remove the sketch_circle out-of-bounds warning)
+
+Raylan's call: large geometry used to cut/trim a model is a legit workflow,
+so the P110 "circle far outside the sketch" warning would fire on valid use.
+Removed the bounds check from sketch_circle; the model is expected to reason
+about coordinates, and cut_extrude already reports "profile may not overlap"
+clearly when a contour is out of the solid. Kept the P69 landed-check (a
+silent-failure guard with a different purpose).
+
+Note: the MiniMax M3 test run confirmed the warning never actually fired in
+the build_part path anyway — the agent's report of a warning was a
+hallucination (the tool returned ok with no warning field). Removing the
+check also removes that ambiguity.
+
+### Changed
+
+- `sidecar/sw_agent/tools/sketch.py` — drop P110 bounds warning
+- `package.json` — 0.2.113
+
 ## [0.2.112] - 2026-08-05
 
 ### Fixed (P112 — precheck ignores the document's existing solid for stage-2 batches)
