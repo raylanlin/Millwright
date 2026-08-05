@@ -95,6 +95,12 @@ const zh: Dict = {
   // P54: adaptive 档（MiniMax 独有）
   'settings.reasoning.adaptive': '自适应',
   'settings.reasoningHint': '推理模型（MiniMax M3 / DeepSeek-R1 / GLM-Z1 等）思考的深度。「自动」用厂商默认；调低更快更省，调高更稳但更慢。思考过程会折叠显示，不占用对话上下文。',
+  // P115: 提示词强度档位
+  'settings.promptMode': '提示词强度',
+  'settings.promptMode.l1': 'L1 弱约束',
+  'settings.promptMode.l2': 'L2 标准',
+  'settings.promptMode.l3': 'L3 强约束',
+  'settings.promptModeHint': 'L1 弱约束（适合 Claude / DeepSeek 等高智商模型，给自由度）；L2 标准（默认）；L3 强约束（适合 MiniMax M3 等容易编造工具结果的模型——每轮注入工具调用规则 + 自动审计声称的调用，发现未实际调用就当场纠正）。',
   // P54: 上下文窗口
   'settings.contextWindow': '上下文窗口（token）',
   'settings.contextWindowHint': '模型能记住的对话长度上限，超出会自动截断旧消息。MiniMax M3 建议 512000（标称 1M，但超过 512K 会走更贵的长上下文计费，实测效果也不如 512K）。',
@@ -261,6 +267,12 @@ const en: Dict = {
   // P54: adaptive option (MiniMax-specific)
   'settings.reasoning.adaptive': 'Adaptive',
   'settings.reasoningHint': "How hard reasoning models (MiniMax M3, DeepSeek-R1, GLM-Z1…) think. Auto uses the provider default; lower is faster and cheaper, higher is steadier but slower. The scratchpad is shown collapsed and never enters the conversation context.",
+  // P115: prompt reinforcement level
+  'settings.promptMode': 'Prompt strength',
+  'settings.promptMode.l1': 'L1 loose',
+  'settings.promptMode.l2': 'L2 standard',
+  'settings.promptMode.l3': 'L3 strict',
+  'settings.promptModeHint': 'L1 loose (for high-capability models like Claude / DeepSeek — more freedom); L2 standard (default); L3 strict (for models like MiniMax M3 that tend to fabricate tool results — injects the tool-calling rules every round and audits claimed calls, correcting any that were never actually invoked).',
   // P54: context window
   'settings.contextWindow': 'Context window (tokens)',
   'settings.contextWindowHint': 'How much conversation the model can hold; older messages are trimmed beyond this. For MiniMax M3, 512000 is recommended — it advertises 1M, but past 512K you pay the long-context rate and quality drops.',

@@ -61,7 +61,7 @@ def _model_path_for_drawing(ctx: Context) -> str:
 
 @tool(
     "create_drawing_of",
-    "Create a drawing of the CURRENT part/assembly with standard views laid out (= 工程图; "
+    "Create a drawing of the CURRENT part/assembly with standard views laid out (= Drawing; "
     "NewDocument + Create3rdAngleViews. Saves the model first if it has never been saved)",
     params={
         "views": {
@@ -124,7 +124,7 @@ def create_drawing_of(ctx: Context, views: str = "standard3_iso", sheet_size: st
 @tool(
     "add_drawing_view",
     "Place one more view of a model on the current drawing sheet at a position "
-    "(= 模型视图; CreateDrawViewFromModelView3)",
+    "(= Model View; CreateDrawViewFromModelView3)",
     params={
         "orientation": {
             "type": "string",
@@ -168,7 +168,7 @@ def add_drawing_view(ctx: Context, orientation: str = "isometric", x: float = 20
 @tool(
     "add_section_view",
     "Cut a section view through an existing view along a horizontal or vertical line "
-    "(= 剖面视图; CreateSectionViewAt5)",
+    "(= Section View; CreateSectionViewAt5)",
     params={
         "x": {"type": "number", "desc": "Where to place the section view, sheet X (mm)"},
         "y": {"type": "number", "desc": "Where to place the section view, sheet Y (mm)"},
@@ -198,7 +198,7 @@ def add_section_view(ctx: Context, x: float, y: float, label: str = "A"):
 @tool(
     "insert_model_dimensions",
     "Import the model's own dimensions onto the drawing views — the fast way to dimension "
-    "a drawing (= 模型项目; InsertModelAnnotations3)",
+    "a drawing (= Model Items; InsertModelAnnotations3)",
     params={
         "all_views": {"type": "boolean", "desc": "Apply to every view on the sheet, not just the selected one", "default": True},
     },
@@ -225,7 +225,7 @@ def insert_model_dimensions(ctx: Context, all_views: bool = True):
 @tool(
     "add_drawing_note",
     "Add a text note on the drawing sheet — title-block text, tolerances, general notes "
-    "(= 注释; InsertNote)",
+    "(= Note; InsertNote)",
     params={
         "text": {"type": "string", "desc": "Note text"},
         "x": {"type": "number", "desc": "Sheet X (mm)"},
@@ -254,7 +254,7 @@ def add_drawing_note(ctx: Context, text: str, x: float, y: float, height: float 
 
 @tool(
     "insert_bom",
-    "Insert a bill of materials table on an assembly drawing (= 材料明细表; InsertBomTable4)",
+    "Insert a bill of materials table on an assembly drawing (= Bill of Materials; InsertBomTable4)",
     params={
         "x": {"type": "number", "desc": "Table anchor, sheet X (mm)", "default": 250},
         "y": {"type": "number", "desc": "Table anchor, sheet Y (mm)", "default": 260},

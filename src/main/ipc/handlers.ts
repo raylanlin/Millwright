@@ -310,6 +310,9 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
           requestId,
           maxRounds: payload.config.maxRounds ?? 24,
           approvalMode: payload.config.approvalMode ?? 'normal',
+          // P115: strong-prompt mode — L3 re-injects tool rules every round +
+          // audits narration against the real call trail (anti-hallucination).
+          promptMode: (payload.config as any).promptMode ?? 'L2',
           // P107: settings hot-reload — read the live saved mode so a change made
           // while this session is running applies on the next tool call.
           getApprovalMode: () => getCachedApprovalMode(),

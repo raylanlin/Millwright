@@ -203,8 +203,8 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
         steps = _steps_from_text(steps_text)
         if not steps:
             raise SWError(
-                'steps_text 没有解析出任何步骤。每行一个："<工具名> 参数=值 参数=值"，'
-                '例如 "extrude depth=10"。'
+                'steps_text did not parse into any steps. One per line: "<tool name> key=value key=value", '
+                'e.g. "extrude depth=10".'
             )
     if isinstance(steps, str):   # the whole array may arrive as one JSON string
         try:
@@ -276,8 +276,9 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
             "total": len(plan),
             "steps": [],
             "rejected": issues,
-            "hint": "计划在开跑前被预检拦下（见 rejected）。修好这些问题再整批重提 —— "
-                    "预检不通过说明计划本身有错，重发同样的内容还会被拦。",
+            "hint": "The plan was blocked by the precheck before running (see rejected). "
+                    "Fix these issues and resubmit the whole batch — a rejected plan means the "
+                    "plan itself is wrong; resending the same content will be blocked again.",
         }
 
     before = snapshot(ctx)
@@ -314,11 +315,13 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
                 "failed_step": {
                     "index": i + 1, "tool": name, "params": params,
                     "error": "; ".join(check.get("checks", [])),
-                    "note": "工具没有抛异常，但几何验证发现它没建成/没改对 —— "
-                            "这是静默失败，继续后面的步骤只会建立在错误假设上。",
+                    "note": "The tool did not raise an exception, but geometry verification found it did "
+                            "not build/change what was asked — this is a silent failure; continuing with "
+                            "the remaining steps would only build on wrong assumptions.",
                 },
-                "hint": "这一步报告成功但验证不通过。修好这一步再重提剩余步骤；"
-                        "如果反复出现，换一种建模方式（例如 sketch_fillet 代替 fillet_edges）。",
+                "hint": "This step reported success but failed verification. Fix this step and "
+                        "resubmit the remaining steps; if it keeps happening, switch modeling "
+                        "approach (e.g. sketch_fillet instead of fillet_edges).",
             }
         before = after
 

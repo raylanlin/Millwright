@@ -6,6 +6,47 @@
 
 ## [Unreleased]
 
+## [0.2.115] - 2026-08-05
+
+### Added (P115 — prompt strength levels + tool-call audit + full English)
+
+Raylan's call after MiniMax M3 fabricated tool results without invoking any
+ tools: make the model actually call tools, catch narration that claims calls
+ that never happened, and switch all model-visible text to English.
+
+#### Prompt strength levels (`promptMode`)
+- L1 loose — for high-capability models (Claude / DeepSeek): freedom.
+- L2 standard — current single system prompt (default).
+- L3 strict — for hallucination-prone models (MiniMax M3): re-injects the
+  tool-calling rules as a system message EVERY round so they stay in the
+  active context instead of being buried in the first prompt.
+
+#### Tool-call audit (L3)
+The loop records every REAL tool invocation (`actualCalls`). When the model's
+narration claims a tool was called/returned ("✅ X …", "调用了 X", "called
+X returned") that is NOT in the trail, an `[AUDIT]` correction is injected
+and the turn is re-run — the fabricated result does not stand.
+
+#### All model-visible text now English
+- `prompts.ts`: AGENT_SYSTEM_PROMPT + DEFAULT_SYSTEM_PROMPT rewritten in
+  English (same structure, same rules).
+- sidecar: 37 tool descriptions + 4 param descs + all 6 guidance sections +
+  18 runtime error/hint strings translated (11 files). Verified with an
+  independent Chinese-residual scan (0 remaining) + runtime tool registry
+  check.
+- Settings: new "Prompt strength" L1/L2/L3 selector (zh/en).
+
+### Changed
+
+- `src/main/agent/agent-loop-sidecar.ts` — L3 injection + call audit
+- `src/main/ipc/handlers.ts` — pass promptMode
+- `src/main/llm/prompts.ts` — English prompts
+- `src/shared/types.ts` — promptMode field
+- `src/renderer/components/SettingsModal.tsx` — L1/L2/L3 selector
+- `src/renderer/i18n/strings.ts` — promptMode copy (zh/en)
+- `sidecar/sw_agent/guidance.py` + `tools/*.py` — English tool copy
+- `package.json` — 0.2.115
+
 ## [0.2.114] - 2026-08-05
 
 ### Fixed (P114 — create_plane negative offset: both planes landed at +50)

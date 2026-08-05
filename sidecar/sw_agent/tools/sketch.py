@@ -171,7 +171,7 @@ def _require_sketch(ctx: Context):
     "(like clicking a face in SolidWorks) — no offset plane needed; use plane= only for the very "
     "first sketch or when you genuinely need a datum plane",
     params={
-        "plane": {"type": "string", "desc": "front / top / right, or the name of a plane you created (e.g. 基准面1)", "default": ""},
+        "plane": {"type": "string", "desc": "front / top / right, or the name of a plane you created (e.g. Plane1)", "default": ""},
         "face": {"type": "string", "enum": ["top", "bottom", "front", "back", "left", "right"], "desc": "Sketch on the solid's outermost planar face in this direction (e.g. top = the current top face of the part)", "default": ""},
     },
     category="sketch",
@@ -200,7 +200,7 @@ def start_sketch(ctx: Context, plane: str = "", face: str = ""):
     if key.lower() == "last":
         key = ctx.scratch.get("last_plane", "")
         if not key:
-            raise SWError('plane="last" 需要先 create_plane（当前没有最近创建的基准面）')
+            raise SWError('plane="last" requires create_plane first (no recently created plane)')
     ok = ctx.select_plane(key) if key.lower() in ("front", "top", "right") else False
     if not ok:
         # P37: sketch on ANY reference plane in the tree. Previously only the three
@@ -287,7 +287,7 @@ def sketch_circle(ctx: Context, radius: float, x: float = 0, y: float = 0):
 @tool(
     "sketch_rounded_rectangle",
     "Draw a rectangle with all four corners rounded to the same radius — one call, exact "
-    "outer size (= 边角矩形 + 草图圆角). Use this for plates and blocks with rounded corners "
+    "outer size (= Corner Rectangle + Sketch Fillet). Use this for plates and blocks with rounded corners "
     "instead of working out arc tangent points by hand",
     params={
         "x": {"type": "number", "desc": "Lower-left X (mm) of the OVERALL rectangle", "default": 0},
@@ -312,14 +312,14 @@ def sketch_rounded_rectangle(ctx: Context, width: float, height: float, radius: 
     """
     _require_sketch(ctx)
     if width <= 0 or height <= 0:
-        raise SWError("width 和 height 必须大于 0。")
+        raise SWError("width and height must be greater than 0.")
     r = float(radius)
     if r <= 0:
-        raise SWError("radius 必须大于 0；不需要圆角请用 sketch_rectangle。")
+        raise SWError("radius must be greater than 0; use sketch_rectangle if no fillet is needed.")
     if r >= min(width, height) / 2:
         raise SWError(
-            f"radius {r} 太大：四个 R{r} 圆角要求短边大于 {2 * r}，"
-            f"而当前短边是 {min(width, height)}。"
+            f"radius {r} is too large: four R{r} fillets require the short side to exceed {2 * r}, "
+            f"but the current short side is {min(width, height)}."
         )
 
     x2, y2 = x + width, y + height
@@ -336,7 +336,7 @@ def sketch_rounded_rectangle(ctx: Context, width: float, height: float, radius: 
             ):
                 if sk.CreateLine(units.mm(p1[0]), units.mm(p1[1]), 0.0,
                                  units.mm(p2[0]), units.mm(p2[1]), 0.0) is None:
-                    raise SWError("直边绘制失败。")
+                    raise SWError("failed to draw a straight edge.")
             for start, end, centre in (
                 ((x2 - r, y), (x2, y + r), (x2 - r, y + r)),
                 ((x2, y2 - r), (x2 - r, y2), (x2 - r, y2 - r)),
@@ -346,10 +346,10 @@ def sketch_rounded_rectangle(ctx: Context, width: float, height: float, radius: 
                 if sk.CreateArc(units.mm(centre[0]), units.mm(centre[1]), 0.0,
                                 units.mm(start[0]), units.mm(start[1]), 0.0,
                                 units.mm(end[0]), units.mm(end[1]), 0.0, 1) is None:
-                    raise SWError("圆角圆弧绘制失败。")
+                    raise SWError("failed to draw a fillet arc.")
     except SWError:
         cleaned = _delete_new_segments(ctx, before)
-        raise SWError(f"圆角矩形绘制失败，已清理 {cleaned} 段残留。请检查尺寸。") from None
+        raise SWError(f"rounded rectangle failed; cleaned up {cleaned} leftover segments. Check the dimensions.") from None
 
     return {
         "rounded_rectangle": {"x": x, "y": y, "width": width, "height": height, "radius": r},

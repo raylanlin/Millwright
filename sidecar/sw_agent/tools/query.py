@@ -18,7 +18,7 @@ from sw_agent.bridge import DOC_ASSEMBLY, DOC_PART, Context, SWError, sw_get
 from sw_agent.registry import tool
 
 
-@tool("mass_properties", "Get mass properties: mass / volume / surface area / center of mass (= 质量属性; Extension.CreateMassProperty)", params={}, category="query")
+@tool("mass_properties", "Get mass properties: mass / volume / surface area / center of mass (= Mass Properties; Extension.CreateMassProperty)", params={}, category="query")
 def mass_properties(ctx: Context):
     ext = ctx.model.Extension
     mp = None
@@ -108,7 +108,7 @@ def list_components(ctx: Context, limit: int = 200):
     return {"count": len(out), "components": out}
 
 
-@tool("check_interference", "Run interference detection on the assembly (= 干涉检查; InterferenceDetectionManager); returns pairs and volumes", params={}, category="query")
+@tool("check_interference", "Run interference detection on the assembly (= Interference Detection; InterferenceDetectionManager); returns pairs and volumes", params={}, category="query")
 def check_interference(ctx: Context):
     asm = ctx.require(DOC_ASSEMBLY, "assembly")
     mgr = asm.InterferenceDetectionManager

@@ -109,7 +109,8 @@ def search_files(ctx: Context, pattern: str, root: str = "templates", max_result
             "root": root,
             "count": 0,
             "results": [],
-            "note": "该白名单目录在当前机器上不存在（或环境变量未定义）。",
+            "note": "The whitelisted root directory does not exist on this machine "
+                    "(or its environment variable is unset).",
         }
 
     cap = max(1, min(int(max_results or DEFAULT_MAX_RESULTS), HARD_MAX_RESULTS))
@@ -143,5 +144,6 @@ def search_files(ctx: Context, pattern: str, root: str = "templates", max_result
         "pattern": p,
     }
     if truncated:
-        out["note"] = f"结果达到上限 {cap} 条，可能不完整——请缩小 pattern（如加前缀）再搜。"
+        out["note"] = f"Result cap of {cap} reached — the list may be incomplete; " \
+                      f"narrow the pattern (e.g. add a prefix) and search again."
     return out

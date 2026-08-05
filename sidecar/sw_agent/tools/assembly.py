@@ -20,7 +20,7 @@ _ALIGN = {"closest": 2, "aligned": 0, "anti_aligned": 1}
 
 
 @tool(
-    "insert_component", "Insert a component into the current assembly, at the origin by default (= 插入零部件; AddComponent5)",
+    "insert_component", "Insert a component into the current assembly, at the origin by default (= Insert Component; AddComponent5)",
     params={
         "path": {"type": "string", "desc": "Absolute path to the part or sub-assembly"},
         "x": {"type": "number", "desc": "X (mm)", "default": 0},
@@ -40,7 +40,7 @@ def insert_component(ctx: Context, path: str, x: float = 0, y: float = 0, z: flo
 
 
 @tool(
-    "add_mate", "Add a mate (= 配合; AddMate5). Select two entities first: face/edge/vertex/axis",
+    "add_mate", "Add a mate (= Mate; AddMate5). Select two entities first: face/edge/vertex/axis",
     params={
         "type": {"type": "string", "enum": list(_MATE.keys()), "desc": "Mate type"},
         "distance": {"type": "number", "desc": "Distance value for a distance mate (mm)", "default": 0},

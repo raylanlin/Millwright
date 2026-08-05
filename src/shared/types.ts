@@ -37,6 +37,8 @@ export interface LLMConfig {
   enableShell?: boolean;
   /** P54: 推理参数方言，auto 按 baseURL 自动识别 */
   reasoningDialect?: 'auto' | 'none' | 'effort' | 'qwen' | 'zhipu' | 'deepseek' | 'minimax';
+  /** P115: 提示词强度档位 —— L1 弱约束（高智商模型）/ L2 标准（默认）/ L3 强约束（幻觉高发模型：每轮注入工具规则 + 调用审计） */
+  promptMode?: 'L1' | 'L2' | 'L3';
 }
 
 /** P3: configuration for a dedicated vision model (OpenAI-compatible multimodal) */

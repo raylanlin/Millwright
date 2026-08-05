@@ -14,48 +14,48 @@ or not it is used, while a resource body costs only when read）。
 from __future__ import annotations
 
 GUIDANCE: dict[str, str] = {
-    "tools": r"""## 工具用法要点（避免上一版反复失败的那些坑）
-- **闭合轮廓一律用 \`sketch_polyline\`**（如 \`"30,15 30,50 55,15"\`）。多次 \`sketch_line\` 的端点不会自动焊接，profile 不闭合，拉伸必失败。
-- **圆弧要用真圆弧，不要用短直线近似**。\`sketch_polyline\` 的点可以带弧：\`r<半径>:\` 前缀表示从上一点沿圆弧走到这一点，例如 \`"0,0 60,0 r10:60,20 0,20"\`（三条直边 + 一段 R10 圆弧）。正半径向行进方向右侧凸，负半径向左凸，始终取劣弧。用折线拟合圆弧得到的既不是真圆柱面、也无法编辑。
-- **等截面外轮廓的圆角优先用 \`sketch_rounded_rectangle\` 或 \`sketch_fillet\` 画进草图**：矩形板四角倒 R 用 \`sketch_rounded_rectangle(width, height, radius)\`，切点由工具算，尺寸精确；草图圆角有尺寸，照样可改。\`fillet_edges\` 留给真正的三维边（已成型实体的顶面边、交线等）。
-- \`fillet_edges\` 失败时如实报告，不要反复重试。也可以请用户在 SolidWorks 里选好边，然后用 \`edges="selected"\` —— 这比让工具猜哪几条边更可靠。
-- **倒圆角直接说清哪些边**：\`fillet_edges(radius=10, edges="vertical")\`。vertical=四角竖边 / horizontal / circular / all / top / bottom / selected。圆柱顶面边用 \`edges="top"\`（只倒顶圈），别用 circular（会连底面一起倒）。
-- ⚠️ **\`circular\` 会选中整个文档里所有圆形边**（孔的圆边、圆柱的顶/底边、已有圆角的边全算）——复杂零件里整批倒容易失败。想倒"某个特征自己的边"（如圆柱顶面边），直接说清特征：工具会优先按最近特征选边（feature 策略）。也可以请用户在 SolidWorks 里手动选中目标边，然后用 \`edges="selected"\`（工具会校验选中的确实是边，混有面/特征会拒绝）。
-- **腰形槽/键槽用 \`sketch_slot\`**（两端是真半圆弧），不要用矩形加两个圆去拼。
-- **阵列给特征名**：\`linear_pattern(feature="切除-拉伸1", direction="x", count=2, spacing=90)\`；圆周阵列同理给 \`feature\`。特征名用 \`list_features\` 查。
-- **镜像给特征名**：\`mirror_feature(plane="front", features="凸台-拉伸3")\`。
-- **在模型面上开草图**：\`start_sketch(face="top")\`。
-- 某个工具失败 2 次就换思路或问用户，**不要删了重画**——每轮删改都会在特征树里留垃圾，越弄越乱。""",
+    "tools": r"""## Tool usage notes (avoiding the pitfalls that failed repeatedly in the previous version)
+- **Always use \`sketch_polyline\` for closed profiles** (e.g. \`"30,15 30,50 55,15"\`). Endpoints of separate \`sketch_line\` calls are not auto-welded; if the profile is not closed, extrusion fails.
+- **Use real arcs, not short straight segments.** \`sketch_polyline\` points can carry arcs: the \`r<radius>:\` prefix means "go from the previous point to this point along an arc", e.g. \`"0,0 60,0 r10:60,20 0,20"\` (three straight edges + one R10 arc). A positive radius bulges to the right of travel, a negative one to the left; the minor arc is always taken. A polyline fit of an arc is neither a true cylindrical face nor editable.
+- **For corner radii of a constant cross-section outline, prefer \`sketch_rounded_rectangle\` or \`sketch_fillet\` inside the sketch**: round the four corners of a rectangular plate with \`sketch_rounded_rectangle(width, height, radius)\` — the tool computes the tangent points and the size is exact; sketch fillets carry dimensions and stay editable. Keep \`fillet_edges\` for true 3D edges (top-face edges of a formed solid, intersection lines, etc.).
+- When \`fillet_edges\` fails, report it honestly; do not retry repeatedly. You can also ask the user to select the edges in SolidWorks and use \`edges="selected"\` — more reliable than letting the tool guess which edges.
+- **Say exactly which edges to fillet**: \`fillet_edges(radius=10, edges="vertical")\`. vertical = the four corner uprights / horizontal / circular / all / top / bottom / selected. For a cylinder's top rim use \`edges="top"\` (rim of the top cap only); do not use circular (it would fillet the bottom rim too).
+- ⚠️ **\`circular\` selects every circular edge in the whole document** (hole edges, cylinder top/bottom rims, existing fillet edges all count) — batch-filleting complex parts this way fails easily. To fillet "a feature's own edges" (e.g. a cylinder's top rim), name the feature: the tool picks edges by the most recent feature (feature strategy). You can also ask the user to manually select the target edges in SolidWorks and use \`edges="selected"\` (the tool verifies the selection really is edges; selections mixed with faces/features are rejected).
+- **Use \`sketch_slot\` for obround/keyway slots** (both ends are true half-arcs); do not build them from a rectangle plus two circles.
+- **Give the feature name for patterns**: \`linear_pattern(feature="Cut-Extrude1", direction="x", count=2, spacing=90)\`; circular patterns take \`feature\` the same way. Look up feature names with \`list_features\`.
+- **Give the feature name for mirroring**: \`mirror_feature(plane="front", features="Boss-Extrude3")\`.
+- **Start sketches on model faces**: \`start_sketch(face="top")\`.
+- If a tool fails twice, change approach or ask the user — **do not delete and redraw**: every delete/edit round leaves junk in the feature tree and makes things messier.""",
 
-    "modeling": r"""## 建模要点（按 SolidWorks 实际操作习惯）
-- 打孔一律用 \`cut_extrude\`，通孔传 \`through_all: true\`。**不要用 revolve 打孔**——旋转特征是加材料的，会长出凸台。
-- 切除方向由工具自动判定（先按给定方向、再反向、再双向），**不要因为一次失败就换建模方案**；真正失败的原因通常是草图轮廓与实体不重叠（位置/平面选错），不是方向。
-- **在模型上继续建特征，直接在面上开草图**：\`start_sketch(face="top")\`（也可 bottom/front/back/left/right），就像在 SolidWorks 里点一下那个面。**不要为此新建基准面** —— 那会让零件里堆满「基准面N」，还容易把高度算错。
-- \`plane=\` 只用于第一张草图，或确实需要一个偏移基准面的场合（此时用 \`create_plane\` 建，建完立刻用掉）。
-- 拉伸方向不对时给 \`extrude\` 传 \`flip: true\`；两侧对称拉伸传 \`both_dir: true\`。
-- 一个工具连续失败 2 次就停下来问用户，不要连环换方案——每次失败都会留下废草图，越改越乱。""",
+    "modeling": r"""## Modeling notes (following real SolidWorks workflow)
+- Make holes with \`cut_extrude\`; pass \`through_all: true\` for through holes. **Do not use revolve for holes** — a revolve adds material and grows a boss.
+- The cut direction is auto-detected (tries the given direction, then reversed, then both ways); **do not switch modeling approaches because of a single failure** — the usual real cause is the sketch profile not overlapping the solid (wrong position/plane), not the direction.
+- **To continue building features on the model, start the sketch directly on a face**: \`start_sketch(face="top")\` (also bottom/front/back/left/right), like clicking that face in SolidWorks. **Do not create a new reference plane for this** — it fills the part with "PlaneN" junk and makes height calculations error-prone.
+- Use \`plane=\` only for the first sketch, or when you genuinely need an offset plane (create it with \`create_plane\` and use it immediately).
+- If the extrusion direction is wrong, pass \`flip: true\` to \`extrude\`; for a symmetric two-side extrusion pass \`both_dir: true\`.
+- If a tool fails twice in a row, stop and ask the user; do not chain through alternatives — every failure leaves a wasted sketch behind, and things only get messier.""",
 
-    "macro": r"""## \`run_macro\`：逃生舱，不是主路
-只在**现成工具覆盖不到**时用（复杂扫描/放样曲面、方程驱动曲线、跨大量特征的批量编辑）。常规建模用工具严格更好 —— 工具替你换算单位、搜索本机可用的 API 参数个数、按语义选面选边、并报出真实错误。
+    "macro": r"""## \`run_macro\`: an escape hatch, not the main path
+Use it only when the **built-in tools cannot cover the task** (complex sweep/loft surfaces, equation-driven curves, batch edits across many features). For regular modeling, the tools are strictly better — they convert units for you, probe how many API arguments this local install accepts, pick faces/edges by semantics, and report real errors.
 
-写宏时注意这三条（否则静态检查会直接拦下来）：
-1. **长度单位是米**：40mm 要写 \`0.04\` 或 \`40/1000\`。写 \`40\` 意味着 40 米，宏会"成功"但几何完全错。
-2. **禁止 \`On Error Resume Next\`**：它让后续每一步失败都静默通过，宏报告成功但什么也没做。
-3. **不要臆造面名/边名**（\`"轴-1@装配体1/圆柱面"\` 这种）：\`SelectByID2\` 会返回 False 然后后续调用空转。用 \`list_features\` / \`list_components\` 拿真实名字。""",
+Three rules when writing a macro (the static check rejects violations otherwise):
+1. **Lengths are in meters**: 40mm must be written \`0.04\` or \`40/1000\`. Writing \`40\` means 40 meters — the macro "succeeds" but the geometry is completely wrong.
+2. **No \`On Error Resume Next\`**: it silently lets every later step fail, so the macro reports success while doing nothing.
+3. **Do not invent face/edge names** (like \`"Axis-1@Assembly1/CylindricalFace"\`): \`SelectByID2\` returns False and later calls spin idly. Get real names from \`list_features\` / \`list_components\`.""",
 
-    "drawing": r"""## 工程图（交付的最后一步）
-模型做完了不等于活干完了。\`create_drawing_of\` 一步生成三视图+等轴测；\`insert_model_dimensions\` 直接把模型自带尺寸导到视图上（最快的标注方式）；装配图用 \`insert_bom\` 加明细表。视图位置单位是图纸 mm。""",
+    "drawing": r"""## Drawings (the final delivery step)
+The model being done is not the job being done. \`create_drawing_of\` generates the three standard views plus an isometric in one call; \`insert_model_dimensions\` pulls the model's own dimensions straight onto the views (the fastest way to dimension); for assembly drawings use \`insert_bom\` to add the bill of materials. View positions are in drawing mm.""",
 
-    "generators": r"""## 标准机械件：用生成器，不要手画
-这些零件的几何是**数学定义**的，手画必然错：
-- **齿轮** → \`create_spur_gear(module, teeth, thickness, bore)\`。渐开线齿形是特定曲线，手画的"圆周开梯形槽/矩形槽"啮合不了，那不是齿轮而是废件。**这个工具失败时，如实报告失败并把报错原文给用户，不要退化成矩形齿槽方案** —— 一个不能啮合的"齿轮"比没有齿轮更糟，用户拿到会以为能用。设计齿轮箱**先调 \`gear_pair_geometry\`** 拿到中心距 —— 两个轴孔必须精确按这个距离放，否则齿轮不啮合。
-- **阶梯轴** → \`create_stepped_shaft(steps="20x30 30x50 25x40")\`。一次给出所有台阶，比逐段拉伸可靠得多（逐段要为每段建偏移面，肩部很容易错位）。""",
+    "generators": r"""## Standard mechanical parts: use the generators, do not draw by hand
+The geometry of these parts is **mathematically defined**; drawing them by hand always fails:
+- **Gear** → \`create_spur_gear(module, teeth, thickness, bore)\`. An involute tooth profile is a specific curve; a hand-drawn "trapezoidal/rectangular slots around the circumference" cannot mesh — that is scrap, not a gear. **When this tool fails, report the failure honestly and give the user the original error text; do not fall back to rectangular tooth slots** — a "gear" that cannot mesh is worse than no gear, because the user will assume it works. For a gearbox, **call \`gear_pair_geometry\` first** to get the center distance — the two shaft holes must be placed exactly at that distance or the gears will not mesh.
+- **Stepped shaft** → \`create_stepped_shaft(steps="20x30 30x50 25x40")\`. Give all steps in one call — far more reliable than extruding segment by segment (each segment needs its own offset plane, and shoulders easily misalign).""",
 
-    "assembly": r"""## 装配体
-- 每个零件各用一次 \`build_part\` 造好并 \`save_as\` 保存，再新建装配体逐个 \`insert_component\`。**不要在一个零件文档里堆出整台机器。**
-- 插入的组件位置默认在原点；需要精确定位时传 x/y/z（装配体坐标系，mm）。
-- 配合（\`add_mate\`）前必须先选中两个实体（面/边/顶点/轴），配合类型：coincident / concentric / perpendicular / parallel / tangent / distance / angle。
-- 对齐默认 \`closest\`（让 SolidWorks 选合理的一侧，就是 UI 默认行为）；要明确同向/反向时再传 \`aligned\` / \`anti_aligned\`。""",
+    "assembly": r"""## Assemblies
+- Build each part with one \`build_part\` call and save it with \`save_as\`, then create a new assembly and \`insert_component\` each one. **Do not pile an entire machine into a single part document.**
+- Inserted components are placed at the origin by default; pass x/y/z (assembly coordinates, mm) when precise positioning is needed.
+- Before mating (\`add_mate\`), you must select two entities first (face/edge/vertex/axis). Mate types: coincident / concentric / perpendicular / parallel / tangent / distance / angle.
+- Alignment defaults to \`closest\` (let SolidWorks pick the sensible side — the UI default behavior); pass \`aligned\` / \`anti_aligned\` only when you need an explicit same/opposite direction.""",
 }
 
 

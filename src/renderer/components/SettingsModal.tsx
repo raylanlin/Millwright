@@ -446,6 +446,33 @@ export function SettingsModal({
           {tr('settings.reasoningHint')}
         </p>
 
+        {/* P115: prompt reinforcement level — L3 re-injects tool rules every round
+            + audits claimed calls (anti-hallucination for MiniMax M3 etc.) */}
+        <label style={labelStyle}>{tr('settings.promptMode')}</label>
+        <div style={{ display: 'flex', gap: 7, marginBottom: 6, flexWrap: 'wrap' }}>
+          {(['L1', 'L2', 'L3'] as const).map((lv) => {
+            const on = (draft.promptMode ?? 'L2') === lv;
+            return (
+              <button
+                key={lv}
+                onClick={() => update('promptMode', lv)}
+                style={{
+                  padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+                  border: `1px solid ${on ? t.btnPrimary : t.cardBorder}`,
+                  background: on ? t.btnPrimary : 'transparent',
+                  color: on ? t.btnPrimaryText : t.textSecondary,
+                  fontSize: 12, fontWeight: on ? 600 : 500, fontFamily: 'inherit',
+                }}
+              >
+                {tr(`settings.promptMode.${lv}`)}
+              </button>
+            );
+          })}
+        </div>
+        <p style={{ color: t.textMuted, fontSize: 11, margin: '0 0 10px 1px' }}>
+          {tr('settings.promptModeHint')}
+        </p>
+
         {(draft.reasoningLevel ?? 'auto') !== 'auto' && (
           <>
             <label style={labelStyle}>{tr('settings.reasoningDialect')}</label>

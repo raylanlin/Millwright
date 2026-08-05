@@ -8,7 +8,7 @@ from sw_agent.tools.feature import com_call
 
 
 @tool(
-    "create_plane", "Create an offset reference plane (= 基准面; InsertRefPlane with a distance constraint). Prefer start_sketch(face=…) when you just need to sketch on the model",
+    "create_plane", "Create an offset reference plane (= Plane; InsertRefPlane with a distance constraint). Prefer start_sketch(face=…) when you just need to sketch on the model",
     params={
         "base": {"type": "string", "enum": ["front", "top", "right"], "desc": "Base reference plane"},
         "offset": {"type": "number", "desc": "Offset distance (mm)"},
@@ -40,7 +40,7 @@ def create_plane(ctx: Context, base: str, offset: float):
 
 
 @tool(
-    "create_axis", "Create a reference axis from the current selection (= 基准轴; InsertAxis2) — two planes / a cylindrical face / two points",
+    "create_axis", "Create a reference axis from the current selection (= Reference Axis; InsertAxis2) — two planes / a cylindrical face / two points",
     params={},
     category="reference",
 )
@@ -56,7 +56,7 @@ def create_axis(ctx: Context):
 
 @tool(
     "create_reference_point",
-    "Create a reference point on the selected vertices/edges/faces (= 参考点; InsertReferencePoint). "
+    "Create a reference point on the selected vertices/edges/faces (= Reference Point; InsertReferencePoint). "
     "Select the references in SolidWorks first",
     params={
         "point_type": {

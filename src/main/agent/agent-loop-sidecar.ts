@@ -58,6 +58,11 @@ export interface SidecarAgentOptions {
   /** P43: approval strictness — 'strict' asks for every tool · 'normal' destructive only
    *  (previous behaviour) · 'permissive' irreversible only · 'auto' never asks. */
   approvalMode?: 'strict' | 'normal' | 'permissive' | 'auto';
+  /** P115: prompt reinforcement level. L2 = current single system prompt;
+   *  L3 injects the tool-calling rules EVERY round (strong nudge for models that
+   *  drift into narration instead of calling tools — MiniMax M3 was caught
+   *  fabricating tool results without ever invoking them). */
+  promptMode?: 'L1' | 'L2' | 'L3';
   /** P107: live reader for the LATEST saved approval mode (settings hot-reload). */
   getApprovalMode?: () => 'strict' | 'normal' | 'permissive' | 'auto' | undefined;
   /** P5: lazy session backup — called once, right before the first destructive tool runs */
@@ -78,6 +83,19 @@ export interface SidecarAgentOptions {
 }
 
 const TOOL_RESULT_MAX = 4000;
+
+// P115 L3: re-injected into history EVERY round. Kept as a standalone constant so
+// the strong mode is a one-line toggle — weak/standard modes keep the single
+// system prompt and never see this.
+const L3_TOOL_RULES = `[STRONG PROMPT MODE] You are operating SolidWorks through tools RIGHT NOW.
+
+Rules for this turn — read them before acting:
+1. To do anything to the model you MUST call a tool. Never narrate an action you did not actually invoke. "I will create the plate" is not a result — call build_part or start_sketch + extrude.
+2. Every tool call returns a real result with a real _verified field. Your report may ONLY repeat what the tool actually returned. If a tool was not called, you did not do it — say what you intend, then call it.
+3. If you are unsure which tool fits, call list_features / sw_status / read_guidance first — cheap queries beat guessing.
+4. Do not invent tool outputs, warnings, or feature names. Fabricated results are the worst failure mode: they look done but leave nothing real in the model.
+5. Work in stages: sketch → extrude/cut → verify (list_features / bounding_box / analyze_view). After each stage, call the next tool; do not stall waiting for permission.
+6. When a tool errors, report the ORIGINAL error text and stop that path — do not silently retry with invented variations.`;
 const VIRTUAL_TOOLS = [
   {
     type: 'function',
@@ -210,6 +228,8 @@ export async function runSidecarAgent(
     ...VIRTUAL_TOOLS.filter((t) => t.function.name !== 'run_macro' || !!opts.runMacro),
     ...sidecarTools,
   ].filter((t: any) => !off.has(t?.function?.name));
+  // P115: every advertised tool name — the audit scans narration for these.
+  const toolNames = new Set(tools.map((t: any) => t?.function?.name).filter(Boolean));
   const destructive = new Set(
     sidecarTools.filter((t) => t.x_meta?.destructive).map((t) => t.function.name),
   );
@@ -254,12 +274,29 @@ export async function runSidecarAgent(
 
   opts.onEvent?.({ type: 'start', requestId: opts.requestId });
 
+  // P115: tool-call audit trail — every REAL tool invocation is recorded here.
+  // When the model's narration claims a tool that was never actually called
+  // (MiniMax M3 fabricated results without invoking tools), we catch it and
+  // inject a correction instead of letting the lie stand.
+  const actualCalls = new Set<string>();
+  const addCall = (name: string) => actualCalls.add(name);
+
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
     history = truncateMessages(history, '', opts.requestId ? String(opts.requestId) : '', opts.contextWindow);
     // Thin guard (block-aware truncation should already prevent this)
     while (history.length > 0 && (history[0].role === 'tool' || (history[0].role === 'system' && history[0].toolCalls?.length))) {
       history.shift();
+    }
+
+    // P115 L3: inject the tool-calling rules EVERY round. A model that drifts
+    // into narration forgets the contract between rounds; re-stating it keeps it
+    // in the active context window instead of buried in the first system prompt.
+    if (opts.promptMode === 'L3') {
+      history.push({
+        role: 'system',
+        content: L3_TOOL_RULES,
+      });
     }
 
     // Convergence nudge when the budget is nearly spent
@@ -291,6 +328,23 @@ export async function runSidecarAgent(
     lastHadReasoning = !!(resp.reasoning ?? '').trim();
 
     if (resp.content) resp.content = stripThinking(resp.content);
+
+    // P115: audit the narration against the REAL call trail. If the model's text
+    // claims a tool was called (past-tense result phrasing) that we never actually
+    // invoked, inject a correction so the lie does not stand — this is the
+    // MiniMax M3 hallucination case (fabricated warning/result without any call).
+    if (opts.promptMode === 'L3' && resp.content && !resp.toolCalls?.length) {
+      const claimed = auditClaimedCalls(resp.content, toolNames, actualCalls);
+      if (claimed.length > 0) {
+        history.push({
+          role: 'system',
+          content: `[AUDIT] You wrote that ${claimed.join(', ')} was called/returned, but the system has NO record of those calls. You may describe what you INTEND to do, but you must not report tool results that were never invoked. Actually call the tool, or say plainly that it was not executed.`,
+        });
+        // Feed the corrected history back immediately so the next turn knows.
+        continue;
+      }
+    }
+
     if (resp.content && !resp.streamed) {
       finalText = resp.content;
       opts.onEvent?.({ type: 'text', text: resp.content });
@@ -351,6 +405,7 @@ export async function runSidecarAgent(
 
     for (const call of resp.toolCalls) {
       if (opts.signal?.aborted) throw new Error('已取消');
+      addCall(call.name);  // P115: audit trail — this tool was REALLY invoked
 
       // P107: guard EVERY call — an exception here (RPC timeout, SW hiccup) used to
       // abort the whole loop, leaving the remaining tool_calls WITHOUT tool responses
@@ -654,5 +709,40 @@ async function runTurnWithRetry(
       await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
     }
   }
+}
+
+/**
+ * P115: audit a narration turn against the REAL tool-call trail.
+ *
+ * Returns the names of advertised tools that the text CLAIMS were called/returned
+ * (past-tense result phrasing: "✅ build_part …", "sketch_circle returned …",
+ * "调用了 X", "X 返回") but that are NOT in `actualCalls`. This catches the
+ * MiniMax M3 hallucination: it wrote a fabricated warning/result without ever
+ * invoking the tool. No match = empty array (no intervention needed).
+ */
+function auditClaimedCalls(
+  content: string,
+  toolNames: Set<string>,
+  actualCalls: Set<string>,
+): string[] {
+  const text = content ?? '';
+  const claimed: string[] = [];
+  // Claim signals: result-prefix (✅/❌/✓/✗ + tool), "调用了 X", "called X",
+  // "X 返回", "X returned", "X succeeded", "invoked X", "ran X".
+  const patterns = [
+    /[✅❌✓✗]\s*([a-z_]+)/gi,
+    /调用了\s*([a-z_]+)/gi,
+    /(?:called|invoked|ran|used)\s+([a-z_]+)/gi,
+    /([a-z_]+)\s+(?:返回|returned|succeeded|completed)/gi,
+  ];
+  for (const re of patterns) {
+    for (const m of text.matchAll(re)) {
+      const name = (m[1] || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+      if (!name || !toolNames.has(name)) continue;
+      if (actualCalls.has(name)) continue;  // genuinely invoked — fine
+      if (!claimed.includes(name)) claimed.push(name);
+    }
+  }
+  return claimed;
 }
 

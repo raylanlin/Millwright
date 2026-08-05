@@ -171,7 +171,7 @@ def _find_feature(ctx: Context, name: str):
 
 
 @tool(
-    "extrude", "Extrude the current sketch into a solid (= 凸台-拉伸; wraps FeatureExtrusion3 — same operation your macro knowledge calls FeatureExtrusion2, with unit conversion and arity handled)",
+    "extrude", "Extrude the current sketch into a solid (= Boss-Extrude; wraps FeatureExtrusion3 — same operation your macro knowledge calls FeatureExtrusion2, with unit conversion and arity handled)",
     params={
         "depth": {"type": "number", "desc": "Extrusion depth (mm)"},
         "both_dir": {"type": "boolean", "desc": "Equal-distance both-direction extrusion", "default": False},
@@ -188,7 +188,7 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = Fal
     # 报了 closed-sketch 错误，实际是深度非法). Precheck catches this inside
     # build_part, but single-step extrude calls need it here too.
     if not isinstance(depth, (int, float)) or depth <= 0:
-        raise SWError(f"extrude depth 必须 > 0，收到 {depth!r}")
+        raise SWError(f"extrude depth must be > 0, got {depth!r}")
     # P32: manual-modeling order — with an ACTIVE sketch, extrude directly (SW uses it
     # and auto-exits, like the UI). Only when no sketch is active do we select one.
     if ctx.sketch_mgr.ActiveSketch is None:
@@ -212,7 +212,7 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = Fal
 
 
 @tool(
-    "cut_extrude", "Cut material using the current sketch (= 切除-拉伸; wraps FeatureCut4/CreateDefinition(swFmCut)). A through hole is direction-agnostic: pass through_all=true",
+    "cut_extrude", "Cut material using the current sketch (= Cut-Extrude; wraps FeatureCut4/CreateDefinition(swFmCut)). A through hole is direction-agnostic: pass through_all=true",
     params={
         "depth": {"type": "number", "desc": "Cut depth (mm); omit or 0 when through_all is true", "default": 0},
         "through_all": {"type": "boolean", "desc": "Cut through the whole body — use this for through holes", "default": False},
@@ -398,10 +398,13 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
         raise SWError(
             "cut failed — the sketch profile may not overlap the solid "
             f"(sketch: {target or 'unknown'}). attempts: {detail} "
-            "\n\nP110 提示：这个错误最常见的原因是某个轮廓画在了实体范围之外"
-            "（例如底板 120mm 居中时 X 范围是 -60~+60，把孔画在 x=105 就超界了）——"
-            "SolidWorks 会因为一个越界轮廓拒绝整个切除。请用 list_features/analyze_view "
-            "检查草图，确认所有圆的坐标都相对草图中心、且落在实体轮廓内，再重试切除。"
+            "\n\nP110 note: the most common cause of this error is a profile drawn "
+            "outside the solid (e.g. a 120mm base plate centered on the origin spans "
+            "X = -60..+60; a hole drawn at x=105 is out of bounds) — SolidWorks "
+            "rejects the whole cut because of a single out-of-bounds profile. Use "
+            "list_features/analyze_view to inspect the sketch, make sure all circle "
+            "coordinates are relative to the sketch center and inside the solid "
+            "outline, then retry the cut."
         )
     return {
         "feature": sw_get(made, "Name"),
@@ -411,7 +414,7 @@ def cut_extrude(ctx: Context, depth: float = 0, through_all: bool = False,
 
 
 @tool(
-    "revolve", "Revolve the current sketch around a centerline (= 旋转; wraps FeatureRevolve2). Set cut=true to REMOVE material (a revolved cut/groove); default adds material",
+    "revolve", "Revolve the current sketch around a centerline (= Revolve; wraps FeatureRevolve2). Set cut=true to REMOVE material (a revolved cut/groove); default adds material",
     params={
         "angle": {"type": "number", "desc": "Revolve angle (degrees)", "default": 360},
         "cut": {"type": "boolean", "desc": "Remove material instead of adding it — use for revolved grooves, NOT for simple holes (use cut_extrude for holes)", "default": False},
@@ -449,7 +452,7 @@ def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = "
 
 
 @tool(
-    "fillet_edges", "Round edges of the solid (= 圆角; wraps FeatureFillet3). Say WHICH edges — no manual picking needed, unlike a macro where you must resolve edge objects yourself",
+    "fillet_edges", "Round edges of the solid (= Fillet; wraps FeatureFillet3). Say WHICH edges — no manual picking needed, unlike a macro where you must resolve edge objects yourself",
     params={
         "radius": {"type": "number", "desc": "Fillet radius (mm)"},
         "edges": {
@@ -462,7 +465,7 @@ def revolve(ctx: Context, angle: float = 360, cut: bool = False, sketch: str = "
             "desc": 'Scope the edge search to ONE feature (P100) — multi-feature parts make '
                     '"horizontal" match edges of every feature (top-face rim + side-plate '
                     'seam are both "horizontal"). Pass the feature name to round only its '
-                    'edges, e.g. feature="凸台-拉伸2". Default = the most recent feature.',
+                    'edges, e.g. feature="Boss-Extrude2". Default = the most recent feature.',
             "default": "",
         },
     },
@@ -479,10 +482,11 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical", feature: 
         # human picking. Count only edges, and say what else is selected.
         picked, others = ctx.selected_edge_count()
         if picked < 1:
-            detail = f"（当前选中了非边实体 {sorted(others)}）" if others else "（当前没有任何选中）"
+            detail = f" (currently selected non-edge entities: {sorted(others)})" if others else " (nothing is currently selected)"
             raise SWError(
-                f"edges=\"selected\" 需要你先在 SolidWorks 里选中要圆角的边（当前选中的不是边，"
-                f"或没有选中任何实体）。{detail} 也可以改用 edges=vertical/horizontal/circular/all。"
+                f'edges="selected" requires you to select the edges to fillet in SolidWorks '
+                f"first (the current selection is not edges, or nothing is selected).{detail} "
+                f"Alternatively use edges=vertical/horizontal/circular/all."
             )
         if others:
             # P93: edges mixed with faces/features — FeatureFillet3 would round every edge
@@ -490,8 +494,9 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical", feature: 
             # selection silently filleted both rims of a fresh cylinder). Refuse rather
             # than quietly doing more than asked.
             raise SWError(
-                f"edges=\"selected\" 选中里混有非边实体 {sorted(others)}。"
-                "请只选中要圆角的边（可先 Ctrl+点击取消其它选中），或改用 edges=vertical/horizontal/circular/all。"
+                f'edges="selected" selection contains non-edge entities: {sorted(others)}. '
+                "Select ONLY the edges to fillet (Ctrl+click to deselect others), or use "
+                "edges=vertical/horizontal/circular/all instead."
             )
     else:
         # P45.1: clear first. A leftover selection from the previous tool is why one run
@@ -552,7 +557,7 @@ def fillet_all(ctx: Context, radius: float):
 
 
 @tool(
-    "chamfer", "Chamfer the selected edges, equal-distance (= 倒角; wraps InsertFeatureChamfer). Select edges first",
+    "chamfer", "Chamfer the selected edges, equal-distance (= Chamfer; wraps InsertFeatureChamfer). Select edges first",
     params={"distance": {"type": "number", "desc": "Chamfer distance (mm)"}},
     category="feature",
 )
@@ -571,7 +576,7 @@ def chamfer(ctx: Context, distance: float):
 
 
 @tool(
-    "shell", "Shell the body — hollow it out keeping a wall thickness (= 抽壳; wraps InsertFeatureShell). Pre-select faces to remove them as openings",
+    "shell", "Shell the body — hollow it out keeping a wall thickness (= Shell; wraps InsertFeatureShell). Pre-select faces to remove them as openings",
     params={
         "thickness": {"type": "number", "desc": "Wall thickness (mm)"},
         "outward": {"type": "boolean", "desc": "Thicken outward instead of inward", "default": False},
@@ -603,11 +608,11 @@ def shell(ctx: Context, thickness: float, outward: bool = False):
 
 
 @tool(
-    "linear_pattern", "Repeat a feature in a straight line (= 线性阵列; wraps FeatureLinearPattern5). Give the feature name and a direction — the direction edge is picked for you",
+    "linear_pattern", "Repeat a feature in a straight line (= Linear Pattern; wraps FeatureLinearPattern5). Give the feature name and a direction — the direction edge is picked for you",
     params={
         "count": {"type": "integer", "desc": "Total instance count (including the original)"},
         "spacing": {"type": "number", "desc": "Spacing (mm)"},
-        "feature": {"type": "string", "desc": "Name of the feature to repeat, e.g. 切除-拉伸1 (use list_features to see names). Omit to use the current selection", "default": ""},
+        "feature": {"type": "string", "desc": "Name of the feature to repeat, e.g. Cut-Extrude1 (use list_features to see names). Omit to use the current selection", "default": ""},
         "direction": {"type": "string", "enum": ["x", "y", "z"], "desc": "Direction to repeat along", "default": "x"},
     },
     category="feature",
@@ -641,7 +646,7 @@ def linear_pattern(ctx: Context, count: int, spacing: float, feature: str = "", 
 
 
 @tool(
-    "circular_pattern", "Repeat a feature around an axis (= 圆周阵列; wraps FeatureCircularPattern5). Give the feature name; the part's cylindrical face is used as the axis automatically",
+    "circular_pattern", "Repeat a feature around an axis (= Circular Pattern; wraps FeatureCircularPattern5). Give the feature name; the part's cylindrical face is used as the axis automatically",
     params={
         "count": {"type": "integer", "desc": "Total instance count (including the original)"},
         "angle": {"type": "number", "desc": "Total angle (degrees)", "default": 360},
@@ -680,10 +685,10 @@ def circular_pattern(ctx: Context, count: int, angle: float = 360, feature: str 
 
 
 @tool(
-    "mirror_feature", "Mirror features across a plane (= 镜像; wraps InsertMirrorFeature2). Give the feature names — selection marks are handled for you",
+    "mirror_feature", "Mirror features across a plane (= Mirror; wraps InsertMirrorFeature2). Give the feature names — selection marks are handled for you",
     params={
         "plane": {"type": "string", "desc": "Symmetry plane: front / top / right, or the name of a plane you created"},
-        "features": {"type": "string", "desc": "Comma-separated feature names to mirror, e.g. 凸台-拉伸3,切除-拉伸2 (list_features shows names). Omit to use the current selection", "default": ""},
+        "features": {"type": "string", "desc": "Comma-separated feature names to mirror, e.g. Boss-Extrude3,Cut-Extrude2 (list_features shows names). Omit to use the current selection", "default": ""},
     },
     category="feature",
 )
@@ -716,7 +721,7 @@ def mirror_feature(ctx: Context, plane: str, features: str = ""):
 
 
 @tool(
-    "modify_dimension", "Modify a feature's dimension parameter (= 修改尺寸; Parameter() + SetSystemValue3, applied to ALL configurations)",
+    "modify_dimension", "Modify a feature's dimension parameter (= Modify Dimension; Parameter() + SetSystemValue3, applied to ALL configurations)",
     params={
         "feature": {"type": "string", "desc": "Feature name, e.g. Boss-Extrude1"},
         "dimension": {"type": "string", "desc": "Dimension name, e.g. D1"},
@@ -745,7 +750,7 @@ def _select_feature(ctx: Context, name: str):
     return feat
 
 
-@tool("suppress_feature", "Suppress the specified feature (= 压缩; EditSuppress2)",
+@tool("suppress_feature", "Suppress the specified feature (= Suppress; EditSuppress2)",
       params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature")
 def suppress_feature(ctx: Context, name: str):
@@ -759,7 +764,7 @@ def suppress_feature(ctx: Context, name: str):
     return {"suppressed": name}
 
 
-@tool("unsuppress_feature", "Unsuppress the specified feature (= 解除压缩; EditUnsuppress2)",
+@tool("unsuppress_feature", "Unsuppress the specified feature (= Unsuppress; EditUnsuppress2)",
       params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature")
 def unsuppress_feature(ctx: Context, name: str):
@@ -770,7 +775,7 @@ def unsuppress_feature(ctx: Context, name: str):
     return {"unsuppressed": name}
 
 
-@tool("delete_feature", "Delete the specified feature (= 删除; EditDelete)",
+@tool("delete_feature", "Delete the specified feature (= Delete; EditDelete)",
       params={"name": {"type": "string", "desc": "Feature name"}},
       category="feature", destructive=True)
 def delete_feature(ctx: Context, name: str):
@@ -796,7 +801,8 @@ def delete_feature(ctx: Context, name: str):
     if name in after:
         raise SWError(
             f"SolidWorks refused to delete {name} — the feature is still in the tree. "
-            "常见原因：该特征被其他特征引用（父子关系），或当前处于激活状态。"
+            "Common causes: the feature is referenced by other features (parent-child), "
+            "or it is currently active."
         )
     return {"deleted": name}
 
