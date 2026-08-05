@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+## [0.2.111] - 2026-08-05
+
+### Fixed (P111 — precheck wrongly rejected the most basic sketch→extrude sequence)
+
+Step-1 test of the L-bracket checklist caught it: build_part rejected
+`start_sketch → sketch_rounded_rectangle → exit_sketch → extrude` with
+"step 4: extrude 需要活跃草图，但前面没有 start_sketch" — even though
+step 1 IS start_sketch.
+
+Root cause: `_REQUIRES_SKETCH` grouped drawing tools AND the feature tools
+(extrude / cut_extrude / revolve) into one bucket that required an ACTIVE
+sketch. exit_sketch clears the active flag, and then extrude — which
+consumes the ALREADY-EXISTING sketch (last_sketch), not the active one —
+was wrongly blocked. The most fundamental SolidWorks sequence (sketch →
+exit → extrude) could never pass precheck, so build_part was effectively
+dead for every part.
+
+Fix: two distinct states in precheck:
+- `has_sketch` (active) — required by drawing tools only
+- `has_drawn` (a sketch exists, exited or not) — required by
+  extrude/cut_extrude/revolve, cleared only when a feature consumes it
+
+Verified: the exact failing steps_text now passes precheck.
+
+### Changed
+
+- `sidecar/sw_agent/verify.py` — separate active-sketch vs drawn-sketch
+  precheck states
+- `package.json` — 0.2.111
+
 ## [0.2.110] - 2026-08-04
 
 ### Changed (P110 — systematic: convert ALL sidecar relative imports to absolute)

@@ -219,9 +219,14 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
 # ---- 预检（执行前，静态） ----
 
 # 每个工具需要的前置状态（None = 不要求）
-_REQUIRES_SKETCH = {"extrude", "cut_extrude", "revolve"} | _SKETCH_ADDERS | _SKETCH_OPS
-# 这些特征把草图用掉了（SolidWorks 会自动退出），之后草图不再活跃
-_CONSUMES_SKETCH = {"extrude", "cut_extrude", "revolve", "exit_sketch"}
+# P110: 画图工具需要「活跃草图」；特征工具（extrude/cut/revolve）只需要「已有
+# 草图」——用户最常见的序列 start_sketch → 画 → exit_sketch → extrude 里，
+# exit_sketch 后草图不再活跃，但 extrude 用的是已退出但存在的草图（last_sketch）。
+# 把两者混在一起会让这条最基础的序列被预检误杀（“extrude 需要活跃草图”）。
+_REQUIRES_SKETCH = _SKETCH_ADDERS | _SKETCH_OPS
+_REQUIRES_DRAWN = {"extrude", "cut_extrude", "revolve"}
+# 这些特征把草图用掉了（SolidWorks 会自动退出），之后草图不再存在
+_CONSUMES_SKETCH = {"extrude", "cut_extrude", "revolve"}
 # P97: extrude 和 revolve 不在这里 —— 它们创建的正是第一个实体。把它们列为
 # 「需要已有实体」，等于拒绝掉 SolidWorks 里最基本的那条序列（start_sketch →
 # 画轮廓 → extrude），而这恰恰是每个零件的第一步。实测中 build_part 因此连拒
@@ -270,6 +275,7 @@ def precheck(plan: list) -> list:
     """
     issues: list = []
     has_sketch = False   # 上一步是 start_sketch 或草图工具 → 活跃草图
+    has_drawn = False    # P110: 已经画过并退出/存在的草图（extrude/cut/revolve 用）
     has_body = False     # 已创建过实体特征
     # P100: required-parameter check up front. The benchmark batch ran 10 steps, then
     # died at step 11 with "create_plane: missing required parameter 'base'" — ten
@@ -292,14 +298,20 @@ def precheck(plan: list) -> list:
             if params.get("face") and not has_body:
                 issues.append(f"step {step}: start_sketch(face=...) 需要实体上已有面，但前面还没有任何实体特征")
             has_sketch = True
+            has_drawn = True
             continue
         if name == "exit_sketch":
             if not has_sketch:
                 issues.append(f"step {step}: exit_sketch 之前没有活跃草图")
             has_sketch = False
+            # P110: 退出草图后它仍然存在，extrude/cut/revolve 可以用 —— 不清 has_drawn
             continue
         if name in _REQUIRES_SKETCH and not has_sketch:
             issues.append(f"step {step}: {name} 需要活跃草图，但前面没有 start_sketch")
+        # P110: extrude/cut_extrude/revolve 用的是「已画好并退出的草图」（last_sketch），
+        # 不需要草图处于活跃状态。检查 has_drawn 而不是 has_sketch。
+        if name in _REQUIRES_DRAWN and not has_drawn:
+            issues.append(f"step {step}: {name} 需要先画好一张草图（start_sketch → 画轮廓）")
         if name in _REQUIRES_BODY and not has_body and name not in _SKETCH_ADDERS and name not in _SKETCH_OPS:
             issues.append(f"step {step}: {name} 需要已有实体（前面至少一个拉伸/旋转/…特征）")
 
@@ -313,8 +325,10 @@ def precheck(plan: list) -> list:
         # 才炸 —— 而预检存在的意义正是不让它白跑一遍。
         if name in _CONSUMES_SKETCH:
             has_sketch = False
+            has_drawn = False   # P110: 草图被特征消费，不再存在
         if name in _SKETCH_ADDERS or name in _SKETCH_OPS:
             has_sketch = True
+            has_drawn = True
 
         # 数值合理性
         for pname, val in (params or {}).items():
