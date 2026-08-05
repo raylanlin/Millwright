@@ -6,6 +6,22 @@
 
 ## [Unreleased]
 
+## [0.2.117] - 2026-08-05
+
+### Fixed (CI — pytest could not import sw_agent from the repo root)
+
+Both CI workflows (CI / Build Windows Installer) failed on v0.2.116:
+`pytest sidecar/tests -q` runs from the repository root, where `sidecar/`
+is not on sys.path, so `from sw_agent import refplane` raised
+ModuleNotFoundError. Local runs passed because the tests were executed from
+inside `sidecar/`. Added `sidecar/tests/conftest.py` which injects the
+sidecar package root into sys.path before collection.
+
+### Changed
+
+- `sidecar/tests/conftest.py` — NEW (sys.path injection for root-level pytest)
+- `package.json` — 0.2.117
+
 ## [0.2.116] - 2026-08-05
 
 ### Fixed (P116 — create_plane negative offset: the two previous fixes patched enums that do not exist)
