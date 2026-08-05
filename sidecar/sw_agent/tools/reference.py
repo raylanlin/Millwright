@@ -1,42 +1,108 @@
 """sw_agent.tools.reference — reference geometry: reference planes / axes / points."""
 from __future__ import annotations
 
-from sw_agent import units
+from sw_agent import refplane, units
 from sw_agent.bridge import Context, SWError, sw_get
 from sw_agent.registry import tool
 from sw_agent.tools.feature import com_call
 
 
 @tool(
-    "create_plane", "Create an offset reference plane (= Plane; InsertRefPlane with a distance constraint). Prefer start_sketch(face=…) when you just need to sketch on the model",
+    "create_plane",
+    "Create an offset reference plane (= Plane; InsertRefPlane with a distance constraint). "
+    "offset may be negative — the plane then goes on the other side of the base plane, and the "
+    "tool measures where it actually landed before reporting success. "
+    "Prefer start_sketch(face=…) when you just need to sketch on the model",
     params={
         "base": {"type": "string", "enum": ["front", "top", "right"], "desc": "Base reference plane"},
-        "offset": {"type": "number", "desc": "Offset distance (mm)"},
+        "offset": {"type": "number", "desc": "Offset distance (mm); negative = the other side of the base plane"},
     },
     category="reference",
 )
 def create_plane(ctx: Context, base: str, offset: float):
-    ctx.clear_selection()
-    # P114: NEGATIVE offsets — select the base plane REVERSED (swSelectOptionReverse,
-    # sel_type=16) and offset by the positive distance. This is exactly what the
-    # SolidWorks macro recorder emits for a plane on the other side. P105 tried the
-    # Flip constraint (15) instead; this install silently ignored it and both ±planes
-    # landed at +50 — the test model's 基准面1/2 ended up in the SAME place, and the
-    # second side plate then overlapped the first (extrude merged → verified_failed).
-    reverse = offset < 0
-    if not ctx.select_plane(base, reverse=reverse):
-        raise SWError(f"failed to select reference plane: {base}")
-    # InsertRefPlane(firstConstraint, firstVal, second, secondVal, third, thirdVal)
-    # 8 = swRefPlaneReferenceConstraint_Distance
-    feat = ctx.feat_mgr.InsertRefPlane(8, units.mm(abs(offset)), 0, 0, 0, 0)
-    if feat is None:
-        raise SWError("failed to create reference plane.")
-    name = sw_get(feat, "Name")
+    """P116: create, then MEASURE — see refplane.py for the two blind fixes before this.
+
+    Short version: the flip flag P105 passed (15) was three unrelated constraints, and the
+    "reverse selection" option P114 passed (16) is not a member of swSelectOption_e at all.
+    Both were reported as no-ops from the machine because both were no-ops, and neither
+    could be caught here: create_plane echoed back the offset it had been ASKED for, so a
+    plane that never moved still reported offset_mm=-50 and the next step happily built on
+    top of the existing solid. This version reads the plane's real position and either
+    corrects it or fails loudly.
+    """
+    if abs(float(offset)) < 1e-9:
+        raise SWError("offset must be non-zero — to sketch on the base plane itself use start_sketch(plane=…).")
+
+    target = units.mm(offset)              # metres, signed
+    dist = abs(target)
+    tol = max(2e-6, dist * 1e-3)           # 2µm floor, else 0.1% of the distance
+    want_flip = offset < 0
+    log: list[str] = []
+
+    def insert(flip: bool):
+        ctx.clear_selection()
+        if not ctx.select_plane(base):
+            raise SWError(f"failed to select reference plane: {base}")
+        mask = refplane.constraint("distance") | (refplane.constraint("flip") if flip else 0)
+        feat = ctx.feat_mgr.InsertRefPlane(mask, dist, 0, 0, 0, 0)
+        if feat is None:
+            raise SWError(f"failed to create reference plane (constraint mask {mask}, distance {dist} m).")
+        return feat, sw_get(feat, "Name"), mask
+
+    def check(feat, name, how):
+        m = refplane.measure(ctx, feat, base, name)
+        if m is None:
+            log.append(f"{how}: position unreadable")
+            return None
+        log.append(f"{how}: measured {m * 1000:+.3f} mm (wanted {offset:+.3f})")
+        return m
+
+    feat, name, mask = insert(want_flip)
+    measured = check(feat, name, f"insert(mask={mask})")
+    how = "flip" if want_flip else "distance"
+
+    # Unreadable position — report the plane, but do NOT claim it was verified. Silent
+    # success is what made this bug survive two patches; an honest "unverified" lets the
+    # model decide to check with bounding_box / analyze_view.
+    if measured is None:
+        ctx.scratch["last_plane"] = name
+        return {"plane": name, "base": base, "offset_mm": offset, "verified": False,
+                "warning": "could not read the plane's actual position on this install — "
+                           "verify the side before building on it", "attempts": log}
+
+    if refplane.wrong_side(measured, target, tol):
+        # Rung 1 — flip the feature definition in place.
+        prop = refplane.flip_definition(ctx, feat, not want_flip)
+        if prop:
+            m2 = check(feat, name, f"definition.{prop}={not want_flip}")
+            if m2 is not None and not refplane.wrong_side(m2, target, tol):
+                measured, how = m2, f"definition.{prop}"
+        else:
+            log.append("definition: no writable direction property")
+
+    if refplane.wrong_side(measured, target, tol):
+        # Rung 2 — rebuild it with the opposite flag. Delete first: two coincident
+        # planes is precisely the state that broke the test model.
+        refplane.delete(ctx, name)
+        feat, name, mask = insert(not want_flip)
+        m3 = check(feat, name, f"recreate(mask={mask})")
+        if m3 is not None:
+            measured, how = m3, "recreate"
+
+    if measured is None or refplane.wrong_side(measured, target, tol):
+        refplane.delete(ctx, name)
+        raise SWError(
+            f"reference plane would not land at {offset:+g} mm from {base} — deleted it rather than "
+            "leave a plane on the wrong side (a sketch on it would build into the existing solid). "
+            f"attempts: {' | '.join(log)}"
+        )
+
     # P100: pass the created plane's NAME through scratch so the next step can use
-    # start_sketch(plane="last") instead of guessing "基准面1". The benchmark model
-    # burned a list_features call precisely because it had to guess the name.
+    # start_sketch(plane="last") instead of guessing "基准面1".
     ctx.scratch["last_plane"] = name
-    return {"plane": name, "base": base, "offset_mm": offset}
+    return {"plane": name, "base": base, "offset_mm": offset,
+            "measured_offset_mm": round(measured * 1000, 4),
+            "verified": True, "how": how, "attempts": log}
 
 
 @tool(

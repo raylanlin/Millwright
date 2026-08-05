@@ -6,6 +6,51 @@
 
 ## [Unreleased]
 
+## [0.2.116] - 2026-08-05
+
+### Fixed (P116 — create_plane negative offset: the two previous fixes patched enums that do not exist)
+
+Claude's patch. Root cause of P105/P114 failing on the real machine is now clear:
+neither touched a real flag.
+
+- P105 passed `InsertRefPlane(15, …)` believing 15 was the Flip constraint. It is
+  NOT — it is Parallel|Perpendicular|Coincident|Distance (1|2|4|8). SolidWorks kept
+  the Distance part it could satisfy and built the default side.
+- P114 passed `SelectByID2(…, SelectOption=16)` believing it meant "reverse the
+  selection". `swSelectOption_e` has no such member (only Default=0 / Extensive=1);
+  16 was not an ignored flag, it was not a value, and SelectByID2 dropped it.
+
+Real fix — stop trusting enums, measure the plane:
+- `swRefPlaneReferenceConstraint_OptionFlip` = 256 (bit flag, read from the live
+  typelib when a gen_py cache exists), so Distance|Flip = 264.
+- New `refplane.py`: constraint table / measure / flip-definition / delete.
+  `measure()` reads the plane's real signed position from IRefPlane.Transform
+  (fallback: select-by-name, then GetBox).
+- `create_plane` is now create → measure → correct → fail loudly:
+  1. insert at the distance with the flip flag when the caller wants the far side;
+  2. measure where it actually landed;
+  3. wrong side → flip the feature definition in place, else delete and rebuild
+     with the opposite flag (re-measuring each step);
+  4. still wrong → delete the plane and raise. A wrong-side plane is worse than
+     none — the next sketch lands on it and the extrude merges into the existing
+     solid (the verified_failed we chased).
+- Returns `measured_offset_mm` + `verified: true` + `how` (flip / definition.X /
+  recreate) + `attempts` log; if the position is unreadable it returns
+  `verified: false` + warning instead of pretending success.
+- `offset=0` now raises with a hint to use start_sketch(plane=…).
+- `bridge.py`: removed the P114 reverse parameter (dead code, wrong enum).
+- New `sidecar/tests/test_refplane.py` — pure-logic: constraint bit table (all
+  powers of two, distance=8, flip=256, distance|flip=264), wrong_side sign-aware
+  decision, Y-up axis map. 9 tests, no COM needed.
+
+### Changed
+
+- `sidecar/sw_agent/refplane.py` — NEW
+- `sidecar/sw_agent/tools/reference.py` — create→measure→correct→fail
+- `sidecar/sw_agent/bridge.py` — drop P114 reverse param
+- `sidecar/tests/test_refplane.py` — NEW (9 tests)
+- `package.json` — 0.2.116
+
 ## [0.2.115] - 2026-08-05
 
 ### Added (P115 — prompt strength levels + tool-call audit + full English)
