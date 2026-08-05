@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+## [0.2.119] - 2026-08-05
+
+### Fixed (P119 — create_plane: diagnostic traces + Route C temporary sketch)
+
+Claude's third patch. P116/P118 both returned `position unreadable` on the real
+machine, with every helper catching its exception as `except: pass`. The only
+information reaching the user was "unreadable" — no way to tell whether CastTo
+itself, the Transform property, or GetDefinition was the failing step.
+
+Two changes:
+
+1. **Every route returns `(value, trace)`** — exception text from each attempted
+   step. Future failures are diagnosable: `routeA(transform): CastTo(IRefPlane)
+   raised <ComError>`, `routeB(definition): GetDefinition returned None`, etc.
+
+2. **Route C: temporary sketch on the plane**, reads `ISketch.ModelToSketchTransform`
+   and inverts it. This is a STRUCTURALLY DIFFERENT interface than Route A/B
+   (which both depend on `IRefPlane` / `IRefPlaneFeatureData` — the same bet
+   twice). ISketch is proven to resolve on the target installs: `verify.py`'s
+   `snapshot()` already calls `sketch_mgr.ActiveSketch.GetSketchSegments()`.
+   Sketch is entered, read, exited in a `finally` block — leaves no trace.
+
+create_plane's `attempts` log now concatenates the trace from the chosen route.
+
+### Changed
+
+- `sidecar/sw_agent/refplane.py` — read_position returns (value, trace); new Route C
+- `sidecar/sw_agent/tools/reference.py` — attempts log collects route traces
+- `package.json` — 0.2.119
+
 ## [0.2.118] - 2026-08-05
 
 ### Fixed (P118 — create_plane: read_position rewrite + verified:true on real machine)

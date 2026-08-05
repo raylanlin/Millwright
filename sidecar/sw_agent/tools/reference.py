@@ -53,7 +53,8 @@ def create_plane(ctx: Context, base: str, offset: float):
 
     # -- Step 2: measure the actual position -----------------------------------
     def check(label: str) -> float | None:
-        m = refplane.read_position(ctx, name, base)
+        m, route_trace = refplane.read_position(ctx, name, base)
+        log.extend(f"{label} {t}" for t in route_trace)
         if m is None:
             log.append(f"{label}: position unreadable")
             return None
@@ -76,7 +77,7 @@ def create_plane(ctx: Context, base: str, offset: float):
     # -- Step 3: correct if wrong side -----------------------------------------
     if refplane.wrong_side(measured, target_m, tol):
         # Rung 1: flip the feature definition in place
-        feat = refplane._feature_by_name(ctx, name)
+        feat, _ = refplane._feature_by_name(ctx, name)
         if feat is not None:
             prop = refplane.flip_definition(ctx, feat, not want_flip)
             if prop:
