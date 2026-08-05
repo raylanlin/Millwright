@@ -6,6 +6,30 @@
 
 ## [Unreleased]
 
+## [0.2.112] - 2026-08-05
+
+### Fixed (P112 — precheck ignores the document's existing solid for stage-2 batches)
+
+Step-2 test caught it: submitting a SECOND-stage build_part (holes on the
+plate built in step 1) was rejected with "start_sketch(face=...) 需要实体上
+已有面" and "cut_extrude 需要已有实体" — precheck only tracked state
+WITHIN the steps list and had no idea the document already contained a body.
+The agent worked around it with single-step tools, but build_part staging
+(hole cuts on an existing plate) was broken for every multi-batch workflow.
+
+Fix: build_part now probes the document's solid bodies before precheck and
+passes `existing_body` in; precheck starts `has_body` from that instead of
+hardcoded False.
+
+Verified: the exact failing step-2 plan passes with existing_body=True and
+is still correctly rejected on an empty document.
+
+### Changed
+
+- `sidecar/sw_agent/verify.py` — precheck(existing_body=...)
+- `sidecar/sw_agent/tools/batch.py` — probe solid bodies before precheck
+- `package.json` — 0.2.112
+
 ## [0.2.111] - 2026-08-05
 
 ### Fixed (P111 — precheck wrongly rejected the most basic sketch→extrude sequence)

@@ -259,7 +259,15 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
     # because of a bad step leaves a half-built part behind; a batch that never starts
     # because of a bad step costs one round-trip. Refuse up front, tell the model which
     # step and why. (precheck/snapshot/verify_step are imported at module top, P105.)
-    issues = precheck(plan)
+    # P112: tell precheck whether the DOCUMENT already has a body — a second-stage
+    # batch (e.g. holes on a plate built by an earlier build_part) must not be
+    # rejected for "start_sketch(face=...) 需要实体上已有面" when the solid is there.
+    existing_body = False
+    try:
+        existing_body = len(ctx.solid_bodies() or []) > 0
+    except Exception:  # noqa: BLE001
+        existing_body = False
+    issues = precheck(plan, existing_body=existing_body)
     if issues:
         return {
             "part": part or None,

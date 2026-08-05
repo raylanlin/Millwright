@@ -263,7 +263,7 @@ _NON_POSITIVE_OK = {
 }
 
 
-def precheck(plan: list) -> list:
+def precheck(plan: list, existing_body: bool = False) -> list:
     """执行前静态检查。返回问题列表（空 = 没问题）。
 
     检查两类：
@@ -272,11 +272,16 @@ def precheck(plan: list) -> list:
 
     与验证层不同：这里发现问题直接拒绝执行（模型的错，不该白跑），
     由 build_part 把问题转成错误返回。
+
+    P112: `existing_body` 表示文档里**已经存在实体**（前一段 build_part 或
+    单步工具建的）。第二段分段提交（例如「先建底板，再在顶面开孔」）里，
+    precheck 不能只看 steps 列表内部状态——`start_sketch(face=...)` 和
+    `cut_extrude` 需要知道文档本身已经有实体了。
     """
     issues: list = []
     has_sketch = False   # 上一步是 start_sketch 或草图工具 → 活跃草图
     has_drawn = False    # P110: 已经画过并退出/存在的草图（extrude/cut/revolve 用）
-    has_body = False     # 已创建过实体特征
+    has_body = existing_body  # P112: 已创建过实体特征（含文档已有）
     # P100: required-parameter check up front. The benchmark batch ran 10 steps, then
     # died at step 11 with "create_plane: missing required parameter 'base'" — ten
     # steps of real geometry work wasted because the plan itself was wrong. Registry
