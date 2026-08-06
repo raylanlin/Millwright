@@ -60,6 +60,76 @@ def sw_get(obj, name: str, *args):
     return attr(*args) if callable(attr) else attr
 
 
+def as_iface(obj, *ifaces):
+    """Re-bind a SolidWorks COM object so members outside its currently-bound
+    interface become reachable. Returns (obj, note) — never raises.
+
+    Why this exists (P46, then P116-P119 the hard way): bridge connects with
+    gencache.EnsureDispatch, i.e. EARLY BINDING, so every object arrives wrapped as
+    one specific interface. Members the typelib didn't declare on THAT interface are
+    not merely awkward to reach — they do not exist, and access fails with
+    DISP_E_MEMBERNOTFOUND (-2147352573, '找不到成员'). P46 hit this on
+    IPartDoc.GetBodies2 and solved it locally; P116-P119 then burned three real-machine
+    rounds on the same wall reading a datum plane, because CastTo was applied to the
+    RETURN VALUE instead of to the object the member is declared on. Hence one shared
+    helper, used before touching any member that isn't on the object's default
+    interface.
+
+    Ladder, widest-to-narrowest:
+      1. already works           — the member may simply be there
+      2. CastTo(iface)           — proper typed re-binding (needs a makepy module)
+      3. dynamic.Dispatch(raw)   — plain IDispatch off _oleobj_, no typelib involved
+
+    On a non-Windows host (CI / tests) win32com itself is missing — the ladder collapses
+    to step 1, which is fine: the docstring promise of "never raises" must hold there too,
+    otherwise test scaffolding in environments without SolidWorks cannot exercise the helper.
+    """
+    notes = []
+    try:
+        import win32com.client as wc
+        win32com_ok = True
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"import win32com {e.__class__.__name__}")
+        win32com_ok = False
+
+    if win32com_ok:
+        for iface in ifaces:
+            try:
+                cast = wc.CastTo(obj, iface)
+                if cast is not None and cast is not False:
+                    return cast, f"CastTo({iface})"
+                notes.append(f"CastTo({iface})->{cast!r}")
+            except Exception as e:  # noqa: BLE001
+                notes.append(f"CastTo({iface}) {e.__class__.__name__}")
+        try:
+            from win32com.client import dynamic
+            raw = getattr(obj, "_oleobj_", None)
+            if raw is not None:
+                return dynamic.Dispatch(raw), "dynamic IDispatch"
+        except Exception as e:  # noqa: BLE001
+            notes.append(f"dynamic {e.__class__.__name__}")
+
+    return obj, "as-is (" + "; ".join(notes) + ")" if notes else "as-is"
+
+
+def try_member(obj, name: str, *ifaces, args=()):
+    """Read `name` off `obj`, re-binding through as_iface() if the member isn't
+    reachable on the object as given. Returns (value, note); value is None on failure
+    and `note` carries the real reason — the three blind P105/P114/P116 rounds all
+    came from failures that reported nothing."""
+    try:
+        return sw_get(obj, name, *args), "direct"
+    except Exception as e_direct:  # noqa: BLE001
+        first = f"direct: {e_direct!r}"
+    rebound, how = as_iface(obj, *ifaces)
+    if rebound is obj:
+        return None, f"{first}; rebind failed: {how}"
+    try:
+        return sw_get(rebound, name, *args), f"via {how}"
+    except Exception as e:  # noqa: BLE001
+        return None, f"{first}; via {how}: {e!r}"
+
+
 class Context:
     """Per-session execution context. Long-lived so multi-step tool calls reuse the same COM connection."""
 

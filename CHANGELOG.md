@@ -6,6 +6,44 @@
 
 ## [Unreleased]
 
+## [0.2.120] - 2026-08-05
+
+### Fixed (P120 — early-binding interface wall: re-bind the SOURCE, not the return value)
+
+Claude's fourth patch. P119's trace paid for itself on the very first real-machine run:
+all three routes failed with the SAME error, DISP_E_MEMBERNOTFOUND (-2147352573,
+'找不到成员'), on their very first member access — `GetSpecificFeature2`,
+`GetDefinition`, `ModelToSketchTransform`.
+
+Root cause: bridge connects via `gencache.EnsureDispatch` (EARLY BINDING), so every
+SolidWorks object is bound to ONE interface and members outside it simply do not exist.
+P46 hit this wall on `IPartDoc.GetBodies2` and solved it locally with CastTo; P116–P119
+applied the ladder to the wrong object — CastTo went on `GetSpecificFeature2`'s return
+value while the failing member was `GetSpecificFeature2` itself, on the feature. Same
+mistake in route C: the sketch was never re-bound before reading `ModelToSketchTransform`.
+
+Systemic fix (not a fourth mechanism):
+- `bridge.py`: new `as_iface(obj, *ifaces)` ladder — direct → CastTo(iface) → dynamic
+  IDispatch. New `try_member(obj, name, ...)` that auto-rebinds through `as_iface` when
+  the direct read fails, returning `(value, note)` with the real reason.
+- `as_iface` now also tolerates a missing `win32com` module (Linux CI / unit tests) by
+  collapsing to step 1 — "never raises" must hold in environments without SolidWorks.
+- `refplane.py`: three read routes + `flip_definition` all rewritten to use
+  `try_member`, re-binding the SOURCE object at every hop. The four-round history of
+  P105/P114/P116/P119 is now in the module docstring as a permanent record.
+- `test_refplane.py`: new `TestTryMember` with a `_Bound` fake that mimics early-binding
+  shape (some members reachable, others raise `_MemberNotFound`). 3 new tests cover:
+  reachable → direct, unreachable → fails with reason attached, never raises even when
+  the target is `None` / `object()`. Also restored `SWError` import to keep the
+  constraint-lookup test specific.
+
+### Changed
+
+- `sidecar/sw_agent/bridge.py` — new `as_iface` / `try_member` (P46 pattern generalised)
+- `sidecar/sw_agent/refplane.py` — every read hop uses `try_member`; four-round history in docstring
+- `sidecar/tests/test_refplane.py` — `TestTryMember` with `_Bound` fake + restored SWError
+- `package.json` — 0.2.120
+
 ## [0.2.119] - 2026-08-05
 
 ### Fixed (P119 — create_plane: diagnostic traces + Route C temporary sketch)

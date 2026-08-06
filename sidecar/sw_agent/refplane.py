@@ -1,41 +1,46 @@
-"""sw_agent.refplane — datum-plane creation with verified positioning (P119).
+"""sw_agent.refplane — datum-plane creation with verified positioning (P120).
 
-History
--------
-P105/P114 guessed wrong enum values (Flip=15, SelectOption=16 — neither exists).
-P116/P118 replaced that with two documented COM routes (IRefPlane.Transform via
-CastTo, and IRefPlaneFeatureData.Distance) — correct on paper, but BOTH still
-returned "position unreadable" on the real test machine (SW 2025 v31.0.1). Every
-internal helper caught its exception with a bare `except: pass`, so there was no
-way to tell WHICH step failed — CastTo itself? Transform after a successful cast?
-GetDefinition? Guessing a fourth mechanism blind would repeat the same mistake a
-third time.
+History — four rounds on one bug, three of them blind
+----------------------------------------------------
+P105  InsertRefPlane(15, …) as "Flip": 15 is Parallel|Perpendicular|Coincident|Distance.
+P114  SelectByID2(…, SelectOption=16) as "reverse": swSelectOption_e has only 0 and 1.
+P116  Correct enums at last (Flip=256, Distance|Flip=264) plus two documented read
+      routes — but every helper swallowed its exception, so the real machine could only
+      report "position unreadable".
+P119  Added tracing and a third route. The trace immediately paid for itself: all three
+      routes failed with the SAME error, DISP_E_MEMBERNOTFOUND (-2147352573,
+      '找不到成员'), on their very first member access — GetSpecificFeature2,
+      GetDefinition, ModelToSketchTransform.
 
-P119 changes two things:
-  1. Every route now returns (value, trace) — the exception text from each
-     attempted step, so a failure is diagnosable instead of a dead end.
-  2. Added Route C: a temporary sketch on the plane, read via
-     ISketch.ModelToSketchTransform. This is a DIFFERENT interface than
-     IRefPlane/IRefPlaneFeatureData, and one already proven to resolve fine on
-     this exact install — verify.py's snapshot() successfully calls
-     `sketch_mgr.ActiveSketch.GetSketchSegments()` elsewhere in this codebase.
-     If IRefPlane specifically fails to resolve under dynamic dispatch on this
-     machine, ISketch is a load-bearing member that already works, so it is a
-     structurally different bet, not a variation on the same one.
+P120 — what that trace actually meant
+-------------------------------------
+Not "IRefPlane is broken on SW 2025". bridge connects through gencache.EnsureDispatch
+(EARLY BINDING), so each object is bound to ONE interface and members outside it simply
+do not exist. P46 already documented this exact wall on IPartDoc.GetBodies2 and solved
+it with CastTo + a plain-IDispatch fallback.
 
-Design (unchanged from P118)
------------------------------
-1. Create the plane with InsertRefPlane, passing Distance|Flip (264) for negative
-   offsets (swRefPlaneReferenceConstraint_OptionFlip = 256, Distance = 8).
-2. Read the plane's actual position (three routes now, see below).
+P116-P119 applied that ladder to the wrong object: the CastTo went on
+GetSpecificFeature2's RETURN VALUE, while the member that was failing was
+GetSpecificFeature2 itself, on the feature. Same mistake in route C — the sketch was
+never re-bound before reading ModelToSketchTransform.
+
+So the fix is not a fourth mechanism. Re-binding now happens on the SOURCE object at
+every hop, through one shared helper (bridge.try_member → bridge.as_iface), so this
+class of failure is handled once for the whole codebase instead of being rediscovered
+per call site.
+
+Design
+------
+1. InsertRefPlane with Distance (8), plus Flip (256) for negative offsets.
+2. Read the plane's real position — three routes, each hop re-bound and traced.
 3. Wrong side → flip the feature definition, else recreate with the opposite flag.
-4. Still wrong → delete the plane and raise. A plane on the wrong side is worse
-   than no plane — the next sketch lands on it and the extrude merges into the
-   solid already there (the verified_failed this whole chain chases).
+4. Still wrong → delete the plane and raise. A plane on the wrong side is worse than no
+   plane: the next sketch lands on it and the extrude merges into the solid already
+   there — the verified_failed this whole chain has been chasing.
 """
 from __future__ import annotations
 
-from sw_agent.bridge import SWError, sw_get
+from sw_agent.bridge import SWError, try_member
 
 # ---------------------------------------------------------------------------
 # Constraint enum (swRefPlaneReferenceConstraints_e) — bit flags
@@ -130,58 +135,38 @@ def _feature_by_name(ctx, name: str):
     except Exception as e:  # noqa: BLE001
         return None, f"raised {e!r}"
 
-
 def _read_transform(feat, axis: int):
     """Route A: IRefPlane.Transform → ArrayData[9 + axis].
 
-    FeatureByName → GetSpecificFeature2 → CastTo("IRefPlane") → Transform.
-    CastTo is needed because pywin32 dynamic dispatch returns a generic wrapper
-    that does not expose IRefPlane members without it.
+    IMathTransform.ArrayData is 16 doubles — [0:8] rotation, [9:11] translation,
+    [12] scale — so the translation component along the base plane's normal IS the
+    signed offset (SolidWorks VBA sample "Get the Normal and Origin of a Reference
+    Plane Using Its Transform"; cadbooster.com "Understanding MathTransform").
+
+    Each hop re-binds the SOURCE object, which is what P116-P119 got wrong: the
+    CastTo went on GetSpecificFeature2's return value while the failing member was
+    GetSpecificFeature2 itself, on the feature.
     """
-    import win32com.client as wc
-
-    try:
-        spec = sw_get(feat, "GetSpecificFeature2")
-    except Exception as e:  # noqa: BLE001
-        return None, f"GetSpecificFeature2 raised {e!r}"
+    spec, note = try_member(feat, "GetSpecificFeature2", "IFeature", "Feature")
     if spec is None:
-        return None, "GetSpecificFeature2 returned None"
-
-    attempts = []
-    for iface in ("IRefPlane", "RefPlane"):
-        try:
-            rp = wc.CastTo(spec, iface)
-            if rp is None or rp is False:
-                attempts.append(f"CastTo({iface}) returned {rp!r}")
-                continue
-            xf = sw_get(rp, "Transform")
-            arr = list(sw_get(xf, "ArrayData") or [])
-            if len(arr) >= 12:
-                return float(arr[9 + axis]), f"ok via CastTo({iface})"
-            attempts.append(f"CastTo({iface}): ArrayData len={len(arr)}")
-        except Exception as e:  # noqa: BLE001
-            attempts.append(f"CastTo({iface}) raised {e!r}")
-
-    try:
-        xf = sw_get(spec, "Transform")
-        arr = list(sw_get(xf, "ArrayData") or [])
-        if len(arr) >= 12:
-            return float(arr[9 + axis]), "ok via direct .Transform (no CastTo needed)"
-        attempts.append(f"direct .Transform: ArrayData len={len(arr)}")
-    except Exception as e:  # noqa: BLE001
-        attempts.append(f"direct .Transform raised {e!r}")
-
-    return None, "; ".join(attempts)
+        return None, f"GetSpecificFeature2 {note}"
+    xf, note_x = try_member(spec, "Transform", "IRefPlane", "RefPlane")
+    if xf is None:
+        return None, f"GetSpecificFeature2 {note}; Transform {note_x}"
+    arr, note_a = try_member(xf, "ArrayData", "IMathTransform", "MathTransform")
+    if arr is None:
+        return None, f"Transform {note_x}; ArrayData {note_a}"
+    arr = list(arr or [])
+    if len(arr) < 12:
+        return None, f"ArrayData {note_a} but len={len(arr)}"
+    return float(arr[9 + axis]), f"ok (feature {note}, transform {note_x}, array {note_a})"
 
 
 def _read_definition(feat):
     """Route B: IRefPlaneFeatureData.Distance + ReverseDirection."""
-    try:
-        data = sw_get(feat, "GetDefinition")
-    except Exception as e:  # noqa: BLE001
-        return None, f"GetDefinition raised {e!r}"
+    data, note = try_member(feat, "GetDefinition", "IFeature", "Feature")
     if data is None:
-        return None, "GetDefinition returned None"
+        return None, f"GetDefinition {note}"
 
     dist_m = None
     dist_notes = []
@@ -243,33 +228,21 @@ def _read_via_sketch(ctx, name: str, axis: int):
         if act is None:
             return None, "no ActiveSketch after InsertSketch(True)"
 
-        xf = None
-        try:
-            xf = sw_get(act, "ModelToSketchTransform")
-        except Exception as e:  # noqa: BLE001
-            return None, f"ModelToSketchTransform raised {e!r}"
+        xf, note = try_member(act, "ModelToSketchTransform", "ISketch", "Sketch")
         if xf is None:
-            return None, "ModelToSketchTransform returned None"
+            return None, f"ModelToSketchTransform {note}"
 
-        inv = None
-        inv_notes = []
-        for m in ("IInverse", "Inverse"):
-            try:
-                fn = getattr(xf, m, None)
-                if fn is None:
-                    continue
-                inv = fn() if callable(fn) else fn
-                if inv is not None:
-                    break
-            except Exception as e:  # noqa: BLE001
-                inv_notes.append(f"{m} raised {e!r}")
+        inv, note_i = try_member(xf, "Inverse", "IMathTransform", "MathTransform")
         if inv is None:
-            return None, "; ".join(inv_notes) or "no Inverse/IInverse method"
+            inv, note_i = try_member(xf, "IInverse", "IMathTransform", "MathTransform")
+        if inv is None:
+            return None, f"ModelToSketchTransform {note}; Inverse {note_i}"
 
-        arr = list(sw_get(inv, "ArrayData") or [])
+        arr, note_a = try_member(inv, "ArrayData", "IMathTransform", "MathTransform")
+        arr = list(arr or [])
         if len(arr) < 12:
-            return None, f"inverse ArrayData len={len(arr)}"
-        return float(arr[9 + axis]), "ok"
+            return None, f"inverse ArrayData {note_a} len={len(arr)}"
+        return float(arr[9 + axis]), f"ok (sketch {note}, inverse {note_i})"
     except Exception as e:  # noqa: BLE001
         return None, f"exception {e!r}"
     finally:
@@ -305,11 +278,8 @@ def flip_definition(ctx, feat_or_name, value: bool) -> str | None:
         return None
 
     model = ctx.model
-    try:
-        data = sw_get(feat, "GetDefinition")
-        if data is None:
-            return None
-    except Exception:  # noqa: BLE001
+    data, _ = try_member(feat, "GetDefinition", "IFeature", "Feature")
+    if data is None:
         return None
 
     try:
