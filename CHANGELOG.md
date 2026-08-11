@@ -6,6 +6,88 @@
 
 ## [Unreleased]
 
+## [0.2.121] - 2026-08-11
+
+### Fixed (P121 — full-library audit: verify layer was guarding build_part only, the root cause of every "tool that lies" bug)
+
+Two structural gaps surfaced by reading every one of the sidecar's 33 files and the
+120-version causal chain in CHANGELOG. Both fixed at the source, not by patching yet
+another tool.
+
+**Gap 1: verify lived inside build_part only.** `verify.snapshot` / `verify_step` were
+called from `batch.py` exclusively. Single-step calls — the path agents actually walk,
+especially when build_part refuses and they fall back — had no before/after check. This
+gap accounts for an entire recurring bug class:
+
+| Version | Symptom | Local fix at the time |
+| --- | --- | --- |
+| P92 | fillet found 4 edges, selected 3, reported success | edge_select internal check |
+| P105 | delete_feature reported "deleted" ten times, zero deleted | tool-level post-delete reconciliation |
+| P105–P120 | create_plane lied about offset five rounds in a row | refplane self-measurement |
+
+Each time the patch was inside one tool: "says success but never reconciles." Fix one
+class member, the class keeps the door open — next new tool lies again.
+
+**Root fix: move the bookkeeping to the single entry point.** `server.py`'s `call`
+branch now does snapshot → call → snapshot → `verify_step` for every mutating tool
+(`classify ∈ MUTATING_KINDS`), attaching `_verified` evidence to the result — the very
+same set `build_part` carries per step. Query / document / display pay no snapshot cost;
+`build_part` already verifies per step, so it is not double-wrapped. The evidence is not
+a gate: tool results are never rewritten or intercepted, but a successful lie now ships
+with its own counter-evidence (Node-side P115 audit layer can consume `_verified.ok`
+directly).
+
+Also fixed a latent misclassification: modifier features (fillet / chamfer / shell)
+don't grow entity count — that is correct. The old logic only survived because these
+features happened to follow entity-creating ones in batches. Single-step verification
+would have misreported every successful fillet as `verified_failed`. Now exempt; the
+feature-tree "still present" check still has to hold.
+
+**Gap 2: classification tables kept in human memory.** `verify.py` holds nine parallel
+tables (`_FEATURE_CREATORS` / `_SKIP` / …) with no sync mechanism against the registry.
+P96 (a `start_sketch` verification branch that `_SKIP` turned into dead code) and P100
+(`sketch_rounded_rectangle` shipped unverified for three versions) are both products of
+this "shadow ledger."
+
+**Root fix: completeness gate.** New `verify.classify(name)` (every tool belongs to
+exactly one category) and `tests/test_verify_coverage.py`: walks the entire 77-tool
+registry, `classify == None` is a CI failure, error message names the table to add.
+Mutual-exclusion test (one tool in two tables forbidden) and "mutating must actually
+check" test included. All 77 registry entries reconciled: 73 in their existing tables,
+`build_part` joins `_BATCH`, `read_guidance` / `search_files` / `run_shell` join the new
+`_META` (do not touch SolidWorks documents) — "not verified" is now an explicit choice,
+not the forgotten default.
+
+**Side note: typelib's module-level `winreg`.** The sole module-level Windows-only
+import in the entire sidecar made `typelib` and everything that imports it
+un-importable on non-Windows hosts. The completeness test imports every one of the
+17 tool modules, so the sidecar has to import everywhere now anyway. `import winreg`
+moved into `_registered_typelibs()`; behaviour unchanged.
+
+**Audited, deliberately untouched (avoiding over-engineering):**
+
+- **Early-binding + as_iface/try_member ladder (P120)** — architecture is correct.
+  Reverting to dynamic binding would resurrect P15's "'int' object is not callable"
+  class of failures; the interface wall has one exit.
+- **`bridge.solid_bodies` hand-written ladder** — duplicates `as_iface` semantics but
+  was verified on a real machine; do not rewrite working real-machine code for tidiness.
+- **`edge_select` three-strategy structure** — final form after eight rounds of
+  convergence.
+- **`batch.py`'s provider tolerance (`_coerce_step` / `steps_text`)** — necessary
+  defence against real vendor behaviour, not a bad smell.
+- **`reference.py` calling `refplane._feature_by_name` private name** — small wart, not
+  worth a version.
+- **MiniMax fabrication** — everything the tool layer can do (evidence chain) is
+  delivered this release; the rest lives at the model / approval layer.
+
+### Changed
+
+- `sidecar/sw_agent/server.py` — `call` entry-point now runs snapshot → verify on every mutating tool (`_call_verified`); `_verified` evidence attached to results
+- `sidecar/sw_agent/verify.py` — new `classify(name)` + `MUTATING_KINDS` + `_BATCH` + `_META`; modifier-feature exemption from entity-count check
+- `sidecar/sw_agent/typelib.py` — `import winreg` lazy (Windows-only stdlib; module must import on CI)
+- `sidecar/tests/test_verify_coverage.py` — NEW: completeness gate (5 tests, walks all 77 tools)
+- `package.json` — 0.2.121
+
 ## [0.2.120] - 2026-08-05
 
 ### Fixed (P120 — early-binding interface wall: re-bind the SOURCE, not the return value)

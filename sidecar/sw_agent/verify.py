@@ -1,18 +1,19 @@
-"""sw_agent.verify —— build_part 的验证层（P95）。
+"""sw_agent.verify —— 几何验证层（P95 起；P121 升级为全局）。
 
-build_part 之前只有「执行成功/失败」，没有「几何对不对」。工具说成功但
-实际没建成（静默失败）、或者建错了尺寸，模型无从得知 —— 它只能再开一轮
-analyze_view 去猜。这个模块让每一步都带可验证的证据：
+原本只有 build_part 的每一步有「执行成功/失败」之外的「几何对不对」证据。
+P121 把同一套 snapshot/verify_step 提升到 server 的 call 入口——单步工具调用
+（agent 实际最常走的路径）同样带 _verified 证据。P105 delete_feature 谎报删除、
+P105–P120 create_plane 五轮谎报偏移、P92 fillet 部分成功装全成功，都属于同一类
+「工具说成功但没人对过账」；类内每个成员单独修一次，不如把账房搬到唯一入口。
 
-  - 快照（snapshot）：执行前后各拍一张（特征名列表、包围盒、草图实体数）
-  - 验证（verify_step）：按工具类别对比快照，返回 {ok, checks}，附在
-    该步 result 里 —— 模型不用猜「这一步到底成没成」
-  - 预检（precheck）：执行前静态检查序列依赖（extrude 前要有草图、
-    fillet 前要有实体）和数值合理性（depth>0、count>0），一步都不白跑
+  - 快照（snapshot）：执行前后各拍一张（特征名列表、包围盒、实体数、草图段数）
+  - 验证（verify_step）：按工具类别对比快照，返回 {ok, checks}
+  - 预检（precheck）：执行前静态检查序列依赖和数值合理性（build_part 用）
+  - 分类（classify，P121）：每个工具属于且仅属于一个类别；tests/test_verify_coverage.py
+    把「没人认领」变成 CI 失败——P96 的死代码分支和 P100 的漏登记不可能再发生
 
-设计原则：验证是**证据**，不是门禁 —— 验证失败意味着「工具报告成功但
-几何没变/不对」，这必须停下来说清楚（后续步骤建立在错误假设上，继续跑
-只会累积错误），但验证本身绝不抛异常吞掉工具的真实结果。
+设计原则：验证是**证据**，不是门禁——验证失败意味着「工具报告成功但几何没变/
+不对」，必须停下来说清楚，但验证本身绝不抛异常吞掉工具的真实结果。
 """
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ _FEATURE_CREATORS = {
 }
 # 零件生成器：自建草图 + 拉伸，按实体特征验（P96：原本在 _SKIP 里，而它们最需要验）
 _PART_GENERATORS = {"create_spur_gear", "create_stepped_shaft"}
-# 参考几何：创建特征但不改变实体包围盒（box 验证跳过，特征名验证保留）
+# 参考几何：创建特征但不改变实体包围盒（box 验证跳过；create_plane 自带位置实测，P116-P120）
 _REF_GEOMETRY = {"create_plane", "create_axis", "create_reference_point"}
 # 草图实体：执行后草图段数应增加
 _SKETCH_ADDERS = {
@@ -54,7 +55,7 @@ _DOC_OPS = {
     "new_part", "new_assembly", "new_drawing", "open_document", "save_document",
     "save_as", "rebuild_model", "activate_configuration",
 }
-# 不验证的工具（视图/显示/装配组件操作等）
+# 不验证的工具（视图/显示/装配组件操作等；delete_feature 等自带 P105 的删除后核对）
 _SKIP = {
     "set_view_orientation", "rotate_view", "zoom_to_fit", "set_display_mode",
     "set_material", "set_custom_property", "add_equation", "add_drawing_note",
@@ -67,6 +68,49 @@ _SKIP = {
 # P96: 从 _SKIP 里搬走了四个 —— start_sketch / exit_sketch 的专门分支原本永远走不到
 # （开头那个「命中 _SKIP 就跳过」的 return 先拦下了），而这两个检查（草图到底开没开）
 # 恰恰是本模块最该抓的静默失败；两个零件生成器同理，见 _PART_GENERATORS。
+
+# P121: 批处理与 agent 元工具。build_part 自带每步验证（本模块正是它在用），server
+# 不再套一层；read_guidance / search_files / run_shell 完全不触碰 SolidWorks 文档。
+# 单独成组是为了完备性门禁——「不验证」必须是一个显式决定，不是遗忘的默认值。
+_BATCH = {"build_part"}
+_META = {"read_guidance", "search_files", "run_shell"}
+
+# ---- 分类（P121：server 级验证与 CI 完备性门禁共用同一张总表） ----
+
+_KINDS = (
+    ("solid", _FEATURE_CREATORS),
+    ("generator", _PART_GENERATORS),
+    ("ref", _REF_GEOMETRY),
+    ("sketch_add", _SKETCH_ADDERS),
+    ("sketch_op", _SKETCH_OPS),
+    ("sketch_enter", frozenset({"start_sketch"})),
+    ("sketch_exit", frozenset({"exit_sketch"})),
+    ("query", _QUERY_ONLY),
+    ("doc", _DOC_OPS),
+    ("display", _SKIP),
+    ("batch", _BATCH),
+    ("meta", _META),
+)
+
+# server 只为这些类别付出两次快照的成本；其余类别 verify_step 本来就只会跳过
+MUTATING_KINDS = frozenset(
+    {"solid", "generator", "sketch_add", "sketch_op", "sketch_enter", "sketch_exit"}
+)
+
+
+def classify(name: str):
+    """工具名 → 验证类别；None = 没有任何表认领它。
+
+    P96（为 start_sketch 写的验证分支被 _SKIP 拦成死代码）和 P100（新工具
+    sketch_rounded_rectangle 三个版本无人验证）都是「注册表和验证表是两张
+    平行的人肉维护表」的产物。tests/test_verify_coverage.py 遍历注册表断言
+    classify 永不返回 None——新工具不分类，CI 直接红。
+    """
+    for kind, names in _KINDS:
+        if name in names:
+            return kind
+    return None
+
 
 # ---- 快照 ----
 
@@ -109,7 +153,7 @@ def _box_changed(before, after) -> bool:
     return bool(before and after and before["box"] and after["box"] and before["box"] != after["box"])
 
 
-def _feat_added(before, after, want: str | None) -> bool:
+def _feat_added(before, after, want) -> bool:
     if not want:
         return len(after["features"]) > len(before["features"])
     return want in after["features"] and want not in before["features"]
@@ -122,7 +166,10 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
     checks: list = []
     ok = True
 
-    if name in _QUERY_ONLY or name in _DOC_OPS or name in _SKIP or name in _REF_GEOMETRY:
+    if (
+        name in _QUERY_ONLY or name in _DOC_OPS or name in _SKIP
+        or name in _REF_GEOMETRY or name in _BATCH or name in _META
+    ):
         return {"ok": True, "checked": False, "checks": ["只读/文档/显示类操作，跳过几何验证"]}
 
     if name in _PART_GENERATORS:
@@ -159,6 +206,13 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
                 # and even that is exempt for interior cuts (P98). Feature-added already
                 # passed; nothing more to verify here.
                 checks.append("实体数不变（切除不增实体，特征树已确认新增）")
+            elif name in ("fillet_edges", "fillet_all", "chamfer", "shell"):
+                # P121: 修饰类特征作用在已有实体上，实体数不变是正常的 —— 之前这
+                # 条路只在 build_part 里走，修饰特征恰好都跟在增实体特征后面，问题
+                # 没暴露；单步验证会让每个成功的圆角/倒角被误判 verified_failed。
+                # 包围盒变化是它们唯一的粗几何信号，但内圆角可能不改包围盒 ——
+                # 特征树新增已经确认，不再加罚。
+                checks.append("实体数不变（修饰类特征作用于已有实体，特征树已确认新增）")
             else:
                 checks.append(f"实体数未增长（{b_before} → {b_after}）—— 报告成功但没生成实体")
                 ok = False
@@ -222,7 +276,7 @@ def verify_step(name: str, params: dict, before: dict, after: dict) -> dict:
 # P110: 画图工具需要「活跃草图」；特征工具（extrude/cut/revolve）只需要「已有
 # 草图」——用户最常见的序列 start_sketch → 画 → exit_sketch → extrude 里，
 # exit_sketch 后草图不再活跃，但 extrude 用的是已退出但存在的草图（last_sketch）。
-# 把两者混在一起会让这条最基础的序列被预检误杀（“extrude 需要活跃草图”）。
+# 把两者混在一起会让这条最基础的序列被预检误杀（"extrude 需要活跃草图"）。
 _REQUIRES_SKETCH = _SKETCH_ADDERS | _SKETCH_OPS
 _REQUIRES_DRAWN = {"extrude", "cut_extrude", "revolve"}
 # 这些特征把草图用掉了（SolidWorks 会自动退出），之后草图不再存在

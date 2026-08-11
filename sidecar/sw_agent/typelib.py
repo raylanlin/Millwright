@@ -31,11 +31,16 @@ never be able to do that.
 So generation is now on demand only, behind an explicit call, and never on the startup
 path. Nothing needs it to run: the enum table already supplies the values, so this is a
 nice-to-have that must not cost anything.
+
+P121: `import winreg` moved from module level into _registered_typelibs(). It was the
+single module-level Windows-only import in the whole sidecar, which made this module —
+and anything that imports it — impossible to import on the CI runners. The completeness
+gate (tests/test_verify_coverage.py) imports EVERY tool module, so the sidecar must be
+importable everywhere; actual registry access only ever happens on Windows anyway.
 """
 from __future__ import annotations
 
 import os
-import winreg
 
 # SolidWorks type library GUID — stable across releases (the VERSION varies, not this).
 SW_TYPELIB_GUID = "{83A33D31-27C5-11CE-BFD4-00400513BB57}"
@@ -91,6 +96,7 @@ def _registered_typelibs():
     Yields (major, minor, path). Registry versions are HEX strings ("1f.0"), so they are
     parsed with base 16 — reading them as decimal silently selects the wrong release.
     """
+    import winreg  # P121: lazy — Windows-only stdlib, and this module must import on CI
     found = []
     for root in (winreg.HKEY_CLASSES_ROOT, winreg.HKEY_LOCAL_MACHINE):
         base = "TypeLib\\" + SW_TYPELIB_GUID
@@ -164,7 +170,11 @@ def build_typelib_cache(log=None) -> dict:
         return dict(_LAST_STATE)
 
     tried = []
-    versions = _registered_typelibs()
+    try:
+        versions = _registered_typelibs()
+    except ImportError:
+        _LAST_STATE = {"ok": False, "tried": ["winreg unavailable (non-Windows host)"]}
+        return dict(_LAST_STATE)
     if not versions:
         _LAST_STATE = {"ok": False, "tried": ["no SolidWorks type library registered"]}
         return dict(_LAST_STATE)
