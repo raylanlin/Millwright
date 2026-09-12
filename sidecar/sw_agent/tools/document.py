@@ -169,11 +169,35 @@ def open_document(ctx: Context, path: str):
     dt = _EXT_TO_TYPE.get(ext)
     if dt is None:
         raise SWError(f"unsupported file type: {ext}")
-    # OpenDoc6 has [out] err/warn parameters; pywin32 late-binding may return (model) or (model, err, warn)
-    r = ctx.sw.OpenDoc6(path, dt, 1, "", 0, 0)
+    # P127: OpenDoc6's Errors/Warnings are [in,out] byref longs. Under late binding a bare 0
+    # raises DISP_E_TYPEMISMATCH on some installs and returns None on others (the document is
+    # then never loaded — which is also why AddComponent5 "succeeds" without inserting anything).
+    # Pass VARIANT(VT_BYREF|VT_I4) first, fall back to the plain form for early binding.
+    if not os.path.isfile(path):
+        raise SWError(f"file not found: {path}")
+    from sw_agent.verify import _byref_int
+    r = None
+    attempts: list = []
+    for make in (lambda: ctx.sw.OpenDoc6(path, dt, 1, "", _byref_int(), _byref_int()),
+                 lambda: ctx.sw.OpenDoc6(path, dt, 1, "", 0, 0)):
+        try:
+            r = make()
+        except Exception as e:  # noqa: BLE001
+            attempts.append(str(e))
+            continue
+        if r is not None:
+            break
     model = r[0] if isinstance(r, tuple) else r
     if model is None:
-        raise SWError(f"open failed: {path}")
+        # some releases return None yet open the document — trust the active doc if its path matches
+        try:
+            cur = ctx.sw.ActiveDoc
+            if cur is not None and os.path.normcase(sw_get(cur, "GetPathName")) == os.path.normcase(path):
+                model = cur
+        except Exception:  # noqa: BLE001
+            pass
+    if model is None:
+        raise SWError(f"open failed: {path}" + (f" (attempts: {' | '.join(attempts)})" if attempts else ""))
     _reset_scratch(ctx)
     return {"opened": sw_get(model, "GetTitle"), "type": doc_type_name(model)}
 

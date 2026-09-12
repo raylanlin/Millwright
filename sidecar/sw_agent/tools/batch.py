@@ -325,10 +325,22 @@ def build_part(ctx: Context, steps=None, steps_text: str = "", part: str = ""):
             }
         before = after
 
-    return {
+    out = {
         "part": part or None,
         "status": "ok",
         "completed": len(done),
         "total": len(plan),
         "steps": done,
     }
+    # P127: one rebuild + structured error scan at the end of every successful batch. A
+    # feature that "built" but rebuilds with an error mark is the last silent-failure class
+    # the per-step verify cannot see (the tree grew, the volume moved, SW still flags it).
+    try:
+        health = call(ctx, "diagnose_document", {"force_rebuild": True})
+        out["health"] = {k: health.get(k) for k in ("healthy", "problems", "feature_errors", "bodies", "volume_mm3") if k in health}
+        if not health.get("healthy", True):
+            out["status"] = "ok_with_errors"
+            out["hint"] = "All steps verified, but the rebuilt model reports feature errors (see health). Inspect them with feature_diagnostics before adding more features."
+    except Exception:  # noqa: BLE001 — the gate is evidence, never a reason to fail a finished batch
+        pass
+    return out

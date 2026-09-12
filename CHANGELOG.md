@@ -6,6 +6,45 @@
 
 ## [Unreleased]
 
+## [0.2.127] - 2026-09-12
+
+### Changed (P127 — tool hardening, index-selection prompt, verified badges)
+
+Second batch on top of P122–P126, closing the items DEPLOY §5/§6 of v0.2.126 left open.
+
+- **`open_document`**: `OpenDoc6` Errors/Warnings passed as `VARIANT(VT_BYREF|VT_I4)` under
+  late binding (bare `0` → Type mismatch or a silently unloaded document — the same reason
+  `AddComponent5` could "succeed" without inserting). Checks the file exists first; falls back
+  to the active document when the API returns None but opened it anyway.
+- **`fillet_edges` / `chamfer`**: SW 2025+ entry points may return an int status instead of
+  the feature; resolved through the feature-tree diff instead of failing on `.Name`. Both set
+  `last_feature`; chamfer's error points at `list_edges + select_entities`.
+- **`extrude`** returns `part_box_mm` (readback of what was actually built).
+- **`check_interference`**: `InterferenceDetectionManager.Done()` in `finally` (an armed IDM
+  returns stale results on the next run); `GetInterferenceCount` fallback when
+  `GetInterferences` returns None.
+- **`list_features`**: filters 20 non-design tree nodes (folders, lights, …), `include_noise`
+  to see them; carries `error_code` for features SW flags. **`list_components`** adds
+  `position_mm`.
+- **`build_part`**: after a fully verified batch runs `diagnose_document` once; result carries
+  `health`, `status="ok_with_errors"` when the rebuilt model still reports feature errors.
+- **precheck** knows 0 is a legal index for `sketch_on_face / cut_face_outline /
+  select_entities`; `sketch_on_face` requires a body.
+- **Prompt** (`AGENT_SYSTEM_PROMPT`): "list first, then select by index" section; `_verified`
+  semantics upgraded to volume evidence; error-code handling; structured readback before
+  screenshots; `discipline` / `pitfalls` guidance sections.
+- **UI**: `ToolCallGroup` shows per-call badges — verified (+ΔV) / unverified / error code /
+  duplicate — and lists `checks` when expanded. `tool-labels.ts` covers every tool added
+  since P97.
+
+### Added
+- `sidecar/tests/test_query_p127.py`
+
+### Changed
+- `sidecar/sw_agent/tools/{query,document,feature,batch}.py`, `verify.py`
+- `src/main/llm/prompts.ts`, `src/renderer/components/ToolCallGroup.tsx`, `src/renderer/i18n/tool-labels.ts`
+- `package.json` — 0.2.127
+
 ## [0.2.126] - 2026-09-12
 
 ### Changed (P122–P126 — five-stage rebuild of the execution layer, from a three-project ecosystem review)

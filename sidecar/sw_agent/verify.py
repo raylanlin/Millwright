@@ -384,7 +384,7 @@ _CONSUMES_SKETCH = {"extrude", "cut_extrude", "revolve"}
 # 画轮廓 → extrude），而这恰恰是每个零件的第一步。实测中 build_part 因此连拒
 # 两次完全正确的计划，模型只能退回单步调用 —— build_part 的意义被这一行抵消掉了。
 # cut_extrude 留着是对的：没有实体就无从切除。
-_REQUIRES_BODY = {"cut_extrude", "cut_face_outline", "fillet_edges", "fillet_all",
+_REQUIRES_BODY = {"cut_extrude", "cut_face_outline", "sketch_on_face", "fillet_edges", "fillet_all",
                   "chamfer", "shell", "linear_pattern", "circular_pattern",
                   "mirror_feature"}
 
@@ -412,6 +412,12 @@ _NON_POSITIVE_OK = {
     # P96: 视图旋转角度天然可正可负（往回转），当成「必须 > 0」会拒掉正确的计划
     "rotate_view": {"angle", "x", "y", "z"},
     "chamfer": {"angle"},
+    # P127: indices are 0-based — 0 is a legal face/edge index
+    "sketch_on_face": {"face_index"},
+    "cut_face_outline": {"face_index"},
+    "select_entities": {"faces", "edges", "mark"},
+    "list_faces": {"k", "near", "axis"},
+    "list_edges": {"k", "near", "axis"},
 }
 
 

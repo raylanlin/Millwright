@@ -1,15 +1,10 @@
 """sw_agent.tools.query — observe/analyze: return SolidWorks state as structured JSON to the agent.
 
-This is the hallmark of a "mature agent": no more MsgBox popups — return
-structured data so the model can read the current feature tree / dimensions
-/ mass / interferences, and plan and self-correct from there.
-
-P16: no-arg SW getters (GetPathName / IsSuppressed / GetTypeName2 / Volume /
-GetInterferences / ...) are propget under early binding on many SW versions —
-calling them with () raised "'str'/'tuple'/'bool' object is not callable".
-All such reads now go through bridge.sw_get(), and traversals are wrapped so
-one finicky member can't abort the whole query. mass_properties falls back to
-CreateMassProperty2 when CreateMassProperty is member-not-found.
+P16: no-arg SW getters are propget under early binding on many SW versions — all reads go
+through bridge.sw_get(). P127: check_interference releases the InterferenceDetectionManager
+(Done()) — upstream pitfall: without Done() the manager stays armed and the next call
+returns stale/empty results; also reads counts via GetInterferenceCount when GetInterferences
+comes back None (late-binding out-param shape).
 """
 from __future__ import annotations
 
@@ -55,14 +50,22 @@ def bounding_box(ctx: Context):
     return {"length_mm": round(dx, 3), "width_mm": round(dy, 3), "height_mm": round(dz, 3)}
 
 
+# P127: tree nodes that carry no design intent (SolidPilot's NoiseFeatureTypes idea)
+_NOISE = {
+    "HistoryFolder", "SensorFolder", "DocsFolder", "DetailCabinet", "MaterialFolder",
+    "CommentsFolder", "SolidBodyFolder", "SurfaceBodyFolder", "EnvFolder", "FavoriteFolder",
+    "SelectionSetFolder", "AmbientLight", "DirectionLight", "PointLight", "SpotLight",
+    "LiveSectionFolder", "MarkupFolder", "EqnFolder", "BlockFolder", "NotesAreaFolder",
+}
+
+
 @tool("list_features", "List the feature tree: name/type/suppressed (FeatureManager.GetFeatures). Read this before renaming, patterning or mirroring — it gives you the EXACT feature names, which a macro would have to guess",
-      params={"limit": {"type": "number", "desc": "Maximum number of items to return", "default": 100}},
+      params={"limit": {"type": "number", "desc": "Maximum number of items to return", "default": 100},
+              "include_noise": {"type": "boolean", "desc": "Also list folders/lights/origin and other non-design nodes", "default": False}},
       category="query")
-def list_features(ctx: Context, limit: int = 100):
-    # P32: IFeatureManager.GetFeatures instead of linked-list traversal
-    # (the linked-list API is member-not-found over COM on some installs).
+def list_features(ctx: Context, limit: int = 100, include_noise: bool = False):
     out = []
-    feats = list(ctx.model.FeatureManager.GetFeatures(True) or [])
+    feats = ctx.all_features()
     for feat in feats:
         if len(out) >= int(limit):
             break
@@ -73,14 +76,17 @@ def list_features(ctx: Context, limit: int = 100):
                 tn = sw_get(feat, "GetTypeName")
             except Exception:  # noqa: BLE001
                 tn = ""
-        if tn in ("HistoryFolder", "SensorFolder", "DocsFolder", "DetailCabinet"):
+        if not include_noise and tn in _NOISE:
             continue
         try:
-            out.append({
-                "name": sw_get(feat, "Name"),
-                "type": tn,
-                "suppressed": bool(sw_get(feat, "IsSuppressed")),
-            })
+            item = {"name": sw_get(feat, "Name"), "type": tn, "suppressed": bool(sw_get(feat, "IsSuppressed"))}
+            try:
+                code = int(feat.GetErrorCode2(True))
+                if code:
+                    item["error_code"] = code
+            except Exception:  # noqa: BLE001
+                pass
+            out.append(item)
         except Exception:  # noqa: BLE001 — skip a feature whose members won't read
             continue
     return {"count": len(out), "features": out}
@@ -91,19 +97,26 @@ def list_features(ctx: Context, limit: int = 100):
       category="query")
 def list_components(ctx: Context, limit: int = 200):
     asm = ctx.require(DOC_ASSEMBLY, "assembly")
-    comps = asm.GetComponents(True)  # arg-taking → real method
+    comps = asm.GetComponents(True)
     out = []
     for c in (comps or []):
         if len(out) >= int(limit):
             break
         try:
             path = sw_get(c, "GetPathName") or ""
-            out.append({
+            item = {
                 "name": sw_get(c, "Name2"),
                 "file": path.split("\\")[-1] if path else "",
                 "suppressed": bool(sw_get(c, "IsSuppressed")),
-            })
-        except Exception:  # noqa: BLE001 — skip an unreadable component rather than abort the whole list
+            }
+            # P127: position in assembly space (mm) — add_mate verification and the model both need it
+            try:
+                d = c.Transform2.ArrayData
+                item["position_mm"] = [round(float(d[9]) * 1000, 3), round(float(d[10]) * 1000, 3), round(float(d[11]) * 1000, 3)]
+            except Exception:  # noqa: BLE001
+                pass
+            out.append(item)
+        except Exception:  # noqa: BLE001
             continue
     return {"count": len(out), "components": out}
 
@@ -117,21 +130,39 @@ def check_interference(ctx: Context):
         mgr.IncludeMultibodyPartInterferences = True
     except Exception:  # noqa: BLE001 — setter differences across versions are non-fatal
         pass
-    inters = sw_get(mgr, "GetInterferences")
-    if not inters:
-        return {"count": 0, "interferences": []}
     out = []
-    for i, inter in enumerate(inters):
-        if i >= 50:
-            break
+    try:
+        inters = None
         try:
-            comps = sw_get(inter, "Components") or []
-            out.append({
-                "pair": [sw_get(c, "Name2") for c in comps],
-                "volume_mm3": round(units.m3_to_mm3(sw_get(inter, "Volume")), 3),
-            })
+            inters = sw_get(mgr, "GetInterferences")
         except Exception:  # noqa: BLE001
-            continue
+            inters = None
+        if not inters:
+            # late binding: GetInterferences may hand back None while the count is real
+            try:
+                n = int(sw_get(mgr, "GetInterferenceCount"))
+            except Exception:  # noqa: BLE001
+                n = 0
+            if n == 0:
+                return {"count": 0, "interferences": []}
+            return {"count": n, "interferences": [], "note": "count only — GetInterferences returned no objects on this install"}
+        for i, inter in enumerate(inters):
+            if i >= 50:
+                break
+            try:
+                comps = sw_get(inter, "Components") or []
+                out.append({
+                    "pair": [sw_get(c, "Name2") for c in comps],
+                    "volume_mm3": round(units.m3_to_mm3(sw_get(inter, "Volume")), 3),
+                })
+            except Exception:  # noqa: BLE001
+                continue
+    finally:
+        # P127: release the manager — an armed IDM makes the NEXT detection return stale results
+        try:
+            mgr.Done()
+        except Exception:  # noqa: BLE001
+            pass
     return {"count": len(out), "interferences": out}
 
 
@@ -141,7 +172,7 @@ def get_custom_properties(ctx: Context):
     names = sw_get(mgr, "GetNames") or []
     props = {}
     for n in names:
-        r = mgr.Get5(n, False)  # arg-taking method; -> (valOut, resolvedOut, wasResolved, ...) depends on version
+        r = mgr.Get5(n, False)
         val = ""
         if isinstance(r, tuple):
             val = (r[1] or r[0]) if len(r) > 1 else r[0]
@@ -149,11 +180,11 @@ def get_custom_properties(ctx: Context):
     return {"count": len(props), "properties": props}
 
 
-@tool("measure_selection", "Measure the currently selected entities (distance/length/area, etc.) — select entities in SolidWorks first",
+@tool("measure_selection", "Measure the currently selected entities (distance/length/area, etc.) — select entities in SolidWorks first (or use select_entities)",
       params={}, category="query")
 def measure_selection(ctx: Context):
     if ctx.selected_count() < 1:
-        raise SWError("please select entities to measure in SolidWorks first.")
+        raise SWError("please select entities to measure in SolidWorks first (or call select_entities).")
     m = ctx.model.Extension.CreateMeasure()
     if m is None or not m.Calculate(None):
         raise SWError("measurement failed.")

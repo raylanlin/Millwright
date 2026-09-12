@@ -208,7 +208,13 @@ def extrude(ctx: Context, depth: float, both_dir: bool = False, flip: bool = Fal
         raise SWError("extrude failed: make sure there is a closed sketch.")
     ctx.scratch["last_feature"] = feat.Name
     ctx.record_feature_map(feat)  # P99: snapshot the topology this feature created
-    return {"feature": feat.Name, "depth_mm": depth}
+    out = {"feature": feat.Name, "depth_mm": depth}
+    try:
+        box = ctx.model.GetPartBox(True)
+        out["part_box_mm"] = [round(float(v) * 1000, 3) for v in box[:6]]
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 @tool(
@@ -527,6 +533,14 @@ def fillet_edges(ctx: Context, radius: float, edges: str = "vertical", feature: 
         ctx.feat_mgr, ("FeatureFillet3", "FeatureFillet2", "FeatureFillet"), args, errors,
         min_args=7, verify=lambda: _new_feature_of(ctx, before, "Fillet"),
     )
+    # P127: on SW 2025+ some fillet entry points return an int status (1 = ok) instead of the
+    # feature; .Name on it raises and the tool "failed" after the fillet was built. Resolve via
+    # the tree diff whenever the return is not a feature object.
+    if created is not None and not hasattr(created, "Name"):
+        created = _new_feature_of(ctx, before, "Fillet") if created else None
+    if created is not None:
+        ctx.scratch["last_feature"] = sw_get(created, "Name")
+        ctx.record_feature_map(created)
     if created is None:
         raise SWError(
             f"fillet failed on {picked} {edges} edge(s) — the radius may be too large for the "
@@ -569,10 +583,14 @@ def chamfer(ctx: Context, distance: float):
     # passed angle 0 and could never produce valid geometry), 2 = DISTANCE-DISTANCE.
     # Equal-distance chamfer: type 2, Width=d, Angle=0, OtherDist=d.
     # VERIFY: slot order (Type, PropagationFlag, Width, Angle, OtherDist, Vc1, Vc2, Vc3)
+    before = _feature_names(ctx)
     feat = ctx.feat_mgr.InsertFeatureChamfer(2, 1, d, 0, d, 0, 0, 0)
+    if feat is not None and not hasattr(feat, "Name"):
+        feat = _new_feature_of(ctx, before, "Chamfer") if feat else None
     if feat is None:
-        raise SWError("chamfer failed: make sure the selected edges are valid.")
-    return {"feature": feat.Name, "distance_mm": distance}
+        raise SWError("chamfer failed: make sure the selected edges are valid (use list_edges + select_entities to pick them by index).")
+    ctx.scratch["last_feature"] = sw_get(feat, "Name")
+    return {"feature": sw_get(feat, "Name"), "distance_mm": distance}
 
 
 @tool(

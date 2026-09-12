@@ -100,6 +100,11 @@ class _RecordingFeatMgr:
         class F:  # minimal feature stub
             Name = "Chamfer1"
         return F()
+    def GetFeatures(self, _top_only):
+        # P127: chamfer now diffs the feature tree to resolve int-return entry points;
+        # return an empty list — the stub's InsertFeatureChamfer returns a real feature
+        # object so the diff path is not taken.
+        return []
 
 class _Dim:
     def __init__(self):
@@ -122,6 +127,8 @@ class _ChamferCtx:
         self.feat_mgr = _RecordingFeatMgr()
         self._dim = _Dim()
         self.model = _Model(self._dim)
+        # P127: chamfer and fillet both write last_feature into ctx.scratch; mock it.
+        self.scratch = {}
     def selected_count(self):
         return 1
     def rebuild(self, top_only=False):

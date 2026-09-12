@@ -43,6 +43,23 @@ function parseBody(name: string, result?: string): string {
   return body;
 }
 
+// P127: extract _verified / _duplicate / code from the tool result string so the row can show
+// a compact evidence badge. Returns {} when the body is not parseable JSON.
+interface Evidence { ok?: boolean; checked?: boolean; checks?: string[]; dup?: boolean; code?: string; sv?: number }
+
+function evidenceOf(name: string, result?: string): Evidence {
+  if (!result) return {};
+  const m = result.match(/^❌\s*\S+\s*failed:\s*\[([A-Z_]+)\]/);
+  if (m) return { code: m[1] };
+  const body = parseBody(name, result).trim();
+  if (body[0] !== '{') return {};
+  try {
+    const j = JSON.parse(body);
+    const v = j?._verified;
+    return { ok: v?.ok, checked: v?.checked, checks: v?.checks, dup: !!j?._duplicate, sv: j?._sv };
+  } catch { return {}; }
+}
+
 /** Short target hint from params: a name/path/value, path basenamed and truncated. */
 function targetOf(step: AgentStep): string {
   const p = step.params || {};
@@ -126,6 +143,21 @@ export function ToolCallGroup({ steps, t }: { steps: AgentStep[]; t: ThemeTokens
                 >
                   <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: DOT[s.status ?? 'running'] }} />
                   <span style={{ fontSize: 12 }}>{toolLabel(name, lc)}</span>
+                  {(() => {
+                    const ev = evidenceOf(name, s.result);
+                    if (ev.code) return <span style={badge(t.dangerText)}>{ev.code}</span>;
+                    if (ev.dup) return <span style={badge(t.textMuted)}>{lc === 'zh' ? '重复调用·已复用' : 'duplicate'}</span>;
+                    if (ev.checked) {
+                      const delta = (ev.checks || []).find((c) => /体积|volume/i.test(c));
+                      return (
+                        <span style={badge(ev.ok ? '#22c55e' : '#ef4444')}>
+                          {ev.ok ? (lc === 'zh' ? '已验证' : 'verified') : (lc === 'zh' ? '验证失败' : 'unverified')}
+                          {delta ? ` · ${delta.replace(/^体积\s*/, 'ΔV ')}` : ''}
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
                   {target && <span style={{ fontSize: 11.5, color: t.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{target}</span>}
                   <span style={{ fontFamily: "'Consolas', monospace", fontSize: 10, color: t.textMuted, marginLeft: 'auto', flexShrink: 0 }}>{name}</span>
                   {hasDetail && <span style={{ fontSize: 9, color: t.textMuted, flexShrink: 0 }}>{rowOpen ? '▲' : '▼'}</span>}
@@ -139,6 +171,15 @@ export function ToolCallGroup({ steps, t }: { steps: AgentStep[]; t: ThemeTokens
                       </>
                     )}
                     <div style={{ fontSize: 10, color: t.textMuted, margin: '6px 0 3px' }}>{tr.result}</div>
+                    {(() => {
+                      const ev = evidenceOf(name, s.result);
+                      if (!ev.checked || !ev.checks?.length) return null;
+                      return (
+                        <ul style={{ margin: '4px 0 6px', paddingLeft: 16, fontSize: 11, color: ev.ok ? t.textMuted : t.dangerText }}>
+                          {ev.checks.map((c, k) => <li key={k}>{c}</li>)}
+                        </ul>
+                      );
+                    })()}
                     <pre style={{ ...preStyle(t), color: s.status === 'error' ? t.dangerText : t.codeText }}>{body || tr.empty}</pre>
                   </div>
                 )}
@@ -153,4 +194,8 @@ export function ToolCallGroup({ steps, t }: { steps: AgentStep[]; t: ThemeTokens
 
 function preStyle(t: ThemeTokens): React.CSSProperties {
   return { margin: 0, fontFamily: "'Consolas', monospace", fontSize: 11, lineHeight: 1.55, color: t.codeText, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 260, overflow: 'auto' };
+}
+
+function badge(color: string): React.CSSProperties {
+  return { fontSize: 10, padding: '1px 6px', borderRadius: 999, border: `1px solid ${color}`, color, flexShrink: 0, whiteSpace: 'nowrap' };
 }
