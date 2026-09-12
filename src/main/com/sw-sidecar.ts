@@ -3,30 +3,43 @@
 // Long-lived Python sidecar client. Spawns the sidecar via `_bootstrap.py`
 // (falling back to `-m sw_agent`) and exchanges line-delimited JSON-RPC over stdio.
 //
-// P14: bundled Python is the *embeddable* distribution, whose `._pth` prevents cwd
-// from being added to sys.path — so `python -m sw_agent` raised ModuleNotFoundError
-// and the sidecar died before handshake, silently falling back to VBS (no suppress /
-// analyze_view). We now launch `_bootstrap.py` by path (it inserts its own dir on
-// sys.path, then runpy-runs sw_agent), and surface the real stderr on failure.
-//
-// P10 fix — "边车未运行" instead of VBS fallback:
-//   When the python process failed to spawn (no python) or exited immediately
-//   (no pywin32 / missing sidecar dir), cleanup() unblocked the pending start()
-//   waiters by RESOLVING them — start() returned success, handlers marked the
-//   sidecar ready and skipped the VBS fallback, and the first RPC then failed
-//   with "边车未运行" which surfaced as an agent error. The designed fallback
-//   never fired. cleanup() now REJECTS pending start() waiters, and start()
-//   correctly joins an in-flight handshake instead of returning early.
+// P14: launch `_bootstrap.py` by path (embeddable Python's ._pth drops cwd from sys.path).
+// P10: cleanup() REJECTS pending start() waiters so a dead sidecar never looks "ready".
+// P125 (protocol v2, backward compatible):
+//   - every call carries an `op_id` (uuid) → the sidecar dedupes retries (`_duplicate:true`)
+//   - errors carry a `code` enum (NO_CONNECTION / NO_DOCUMENT / WRONG_DOC_TYPE / UNKNOWN_TOOL /
+//     BAD_ARGS / STALE_STATE / COM_ERROR / TOOL_FAILED) alongside the human `error` string
+//   - `health()` is a read-only probe (never triggers a connect); `stateVersion()` reads the
+//     sidecar's mutation counter
+//   - the ready handshake exposes `protocol` so callers can feature-detect
 
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { resolvePythonPath, resolveSidecarCwd } from '../python-path';
 
+export type SidecarErrorCode =
+  | 'NO_CONNECTION' | 'NO_DOCUMENT' | 'WRONG_DOC_TYPE' | 'UNKNOWN_TOOL'
+  | 'BAD_ARGS' | 'STALE_STATE' | 'COM_ERROR' | 'TOOL_FAILED';
+
 export interface SidecarResult<T = any> {
   ok: boolean;
   data?: T;
+  error?: string;
+  /** P125: machine-readable error class (undefined on older sidecars) */
+  code?: SidecarErrorCode | string;
+}
+
+export interface SidecarHealth {
+  connected: boolean;
+  state_version: number;
+  tool_count: number;
+  year?: number;
+  revision?: string;
+  active_document?: string | null;
+  dead_connection?: boolean;
   error?: string;
 }
 
@@ -42,11 +55,8 @@ interface ReadyWaiter {
 }
 
 export interface SidecarOptions {
-  /** Python executable; defaults are inferred from the current platform */
   pythonPath?: string;
-  /** Directory that contains the sidecar package (must contain `sw_agent/`); defaults to `resources/sidecar` */
   cwd?: string;
-  /** Per-call timeout in milliseconds */
   callTimeoutMs?: number;
   onLog?: (line: string) => void;
 }
@@ -58,7 +68,9 @@ export class SWSidecar {
   private nextId = 1;
   private ready = false;
   private readyWaiters: ReadyWaiter[] = [];
-  private lastStderr: string[] = [];  // ring buffer of recent stderr, surfaced on failure
+  private lastStderr: string[] = [];
+  /** P125: capabilities announced in the ready handshake */
+  private protocol: { op_id?: boolean; state_version?: boolean; codes?: boolean } = {};
   private opts: Required<Omit<SidecarOptions, 'onLog'>> & { onLog?: (l: string) => void };
 
   constructor(opts: SidecarOptions = {}) {
@@ -70,17 +82,9 @@ export class SWSidecar {
     };
   }
 
-  /**
-   * Start the sidecar process and wait for the `ready` handshake.
-   * Safe to call repeatedly: already-ready → resolves immediately; handshake
-   * in flight → joins it; dead/never started → (re)spawns.
-   * REJECTS when the process cannot start or dies before the handshake —
-   * callers rely on this to decide the VBS fallback.
-   */
   async start(): Promise<void> {
     if (this.proc && this.ready) return;
     if (!this.proc) this.spawnProc();
-    // Join the (possibly just-started) handshake
     await new Promise<void>((resolve, reject) => {
       if (this.ready) return resolve();
       if (!this.proc) return reject(new Error('Python 组件未能启动'));
@@ -102,7 +106,6 @@ export class SWSidecar {
 
   private spawnProc(): void {
     this.lastStderr = [];
-    // P14: prefer the bootstrap script (embeddable-Python safe); fall back to -m for dev trees without it
     const bootstrap = path.join(this.opts.cwd, '_bootstrap.py');
     const args = fs.existsSync(bootstrap) ? [bootstrap] : ['-m', 'sw_agent'];
     const proc = spawn(this.opts.pythonPath, args, {
@@ -122,7 +125,7 @@ export class SWSidecar {
     });
     proc.on('exit', (code) => {
       this.opts.onLog?.(`[sidecar] 退出 code=${code}`);
-      if (this.proc === proc) this.proc = null; // allow a future start() to respawn (crash self-heal)
+      if (this.proc === proc) this.proc = null;
       this.cleanup(new Error(`Python 组件已退出 (code=${code})${this.stderrTail()}`));
     });
     proc.on('error', (e) => {
@@ -131,7 +134,6 @@ export class SWSidecar {
     });
   }
 
-  /** Last stderr lines, trimmed to a short tail — makes ModuleNotFoundError etc. visible in the error message. */
   private stderrTail(): string {
     const tail = this.lastStderr.join('').trim().replace(/\s+/g, ' ').slice(-400);
     return tail ? ` — ${tail}` : '';
@@ -144,12 +146,12 @@ export class SWSidecar {
     try {
       msg = JSON.parse(s);
     } catch {
-      this.opts.onLog?.(`[sidecar:log] ${s}`); // treat non-JSON lines as log output
+      this.opts.onLog?.(`[sidecar:log] ${s}`);
       return;
     }
-    // Handshake
     if (msg.id == null && msg.data && msg.data.ready) {
       this.ready = true;
+      this.protocol = msg.data.protocol ?? {};
       this.readyWaiters.splice(0).forEach((w) => w.resolve());
       return;
     }
@@ -157,25 +159,24 @@ export class SWSidecar {
     if (!p) return;
     this.pending.delete(msg.id);
     clearTimeout(p.timer);
-    p.resolve({ ok: !!msg.ok, data: msg.data, error: msg.error });
+    p.resolve({ ok: !!msg.ok, data: msg.data, error: msg.error, code: msg.code });
   }
 
   private rpc(method: string, params?: any): Promise<SidecarResult> {
     if (!this.proc || !this.proc.stdin.writable) {
-      return Promise.resolve({ ok: false, error: 'Python 组件未运行——请安装 Python + pywin32，或忽略此错误（将自动使用内置 VBS 引擎）' });
+      return Promise.resolve({ ok: false, code: 'NO_CONNECTION', error: 'Python 组件未运行——请安装 Python + pywin32，或忽略此错误（将自动使用内置 VBS 引擎）' });
     }
     const id = this.nextId++;
     return new Promise<SidecarResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        resolve({ ok: false, error: `Python 组件调用超时：${method}` });
+        resolve({ ok: false, code: 'COM_ERROR', error: `Python 组件调用超时：${method}` });
       }, this.opts.callTimeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.proc!.stdin.write(JSON.stringify({ id, method, params: params ?? {} }) + '\n');
     });
   }
 
-  /** Fetch the tool catalog (OpenAI function schema). Internal tools (e.g. `capture_view`) are filtered out. */
   async listTools(includeInternal = false): Promise<any[]> {
     const r = await this.rpc('list_tools');
     if (!r.ok) throw new Error(r.error || 'list_tools failed');
@@ -183,9 +184,15 @@ export class SWSidecar {
     return includeInternal ? tools : tools.filter((t) => !t.x_meta?.internal);
   }
 
-  /** Invoke a tool and return its structured result. */
-  call(name: string, args?: Record<string, any>): Promise<SidecarResult> {
-    return this.rpc('call', { name, args: args ?? {} });
+  /** Invoke a tool. `opId` defaults to a fresh uuid; pass the SAME id when retrying a
+   *  call whose response was lost so the sidecar returns the cached result instead of
+   *  re-running the mutation. `expectState` (optional) asks the sidecar to refuse with
+   *  STALE_STATE if the document moved on since that state_version. */
+  call(name: string, args?: Record<string, any>, opts?: { opId?: string; expectState?: number }): Promise<SidecarResult> {
+    const params: any = { name, args: args ?? {} };
+    if (this.protocol.op_id !== false) params.op_id = opts?.opId ?? randomUUID();
+    if (opts?.expectState != null) params.expect_state = opts.expectState;
+    return this.rpc('call', params);
   }
 
   ping(): Promise<SidecarResult> {
@@ -194,6 +201,21 @@ export class SWSidecar {
 
   reconnect(): Promise<SidecarResult> {
     return this.rpc('reconnect');
+  }
+
+  /** P125: read-only probe — never triggers a connect. Falls back to ping on old sidecars. */
+  async health(): Promise<SidecarResult<SidecarHealth>> {
+    const r = await this.rpc('health');
+    if (!r.ok && /unknown method/.test(r.error ?? '')) {
+      const p = await this.ping();
+      return { ok: p.ok, data: { connected: p.ok, state_version: 0, tool_count: 0 } as SidecarHealth, error: p.error };
+    }
+    return r as SidecarResult<SidecarHealth>;
+  }
+
+  async stateVersion(): Promise<number> {
+    const r = await this.rpc('state');
+    return r.ok ? Number(r.data?.state_version ?? 0) : 0;
   }
 
   isRunning(): boolean {
@@ -212,10 +234,9 @@ export class SWSidecar {
     this.rl = null;
     for (const [, p] of this.pending) {
       clearTimeout(p.timer);
-      p.resolve({ ok: false, error: err.message });
+      p.resolve({ ok: false, code: 'NO_CONNECTION', error: err.message });
     }
     this.pending.clear();
-    // P10: REJECT pending start() calls — a dead sidecar must not look "ready"
     this.readyWaiters.splice(0).forEach((w) => w.reject(err));
   }
 }

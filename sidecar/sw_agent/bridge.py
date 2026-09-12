@@ -1,27 +1,30 @@
 """sw_agent.bridge — SolidWorks COM connection and execution context.
 
 Key conventions:
-- Use GetActiveObject to connect to an **already-running** instance. Never
-  CreateObject (that would spawn a hidden SolidWorks, and every subsequent
-  operation would silently succeed against an invisible target).
-- P13: attach tries the bare ProgID first, then every versioned ProgID
-  (SW 2017-2026) — same fix as the VBS AttachSW(). On many installs only
-  the versioned ProgID is registered in the ROT.
-- P15: connect via EARLY BINDING (gencache.EnsureDispatch) so members resolve
-  from the typelib. Dynamic binding misresolved methods as ints
-  ("'int' object is not callable").
-- P16: even under early binding, a number of SolidWorks *no-argument* getters
-  are declared as PROPERTIES (propget) in the typelib — GetPathName→str,
-  GetInterferences→tuple, GetType→int, IsSuppressed→bool. Calling those with
-  `()` raises "'<type>' object is not callable". `sw_get()` reads a member
-  tolerantly (invoke if it's a method, return the value if it's a property),
-  so tool code no longer has to know which is which per SW version.
-- All tools obtain app / model / the various Managers via Context. The
-  "no connection / no document" error handling lives here, in one place.
+- Attach to an ALREADY-RUNNING SolidWorks. Never spawn a hidden instance.
+- P13: bare ProgID first, then versioned ProgIDs (SW 2017-2026).
+- P122: **LATE BINDING is the default again**, with method flagging (typeinfo.py).
+  History, so nobody re-fights it:
+    P15  late binding raised "'int' object is not callable" → switched to early binding
+    P16  early binding exposes some getters as propget → sw_get() reads either form
+    P46  early binding: GetBodies2 lives on IPartDoc, model is IModelDoc2 → CastTo ladder
+    P116–P120  same wall on IFeature / IRefPlane / ISketch → as_iface/try_member ladder
+  The P15 symptom is pywin32 resolving a zero-arg METHOD as a property because its
+  speculative Invoke happened to succeed. `CDispatch._FlagAsMethod(name)` fixes exactly
+  that, per name. With flagging, late binding has no interface wall at all (IDispatch
+  resolves against the live object), so the whole CastTo ladder becomes unnecessary.
+  Early binding is still reachable with SW_AGENT_BINDING=early for A/B on a machine.
+- P122: every COM call must run on the ComExecutor thread (com_executor.py). Context
+  itself is thread-agnostic; server.py routes calls through the executor.
+- All tools obtain app / model / managers via Context; "no connection / no document"
+  handling lives here, in one place.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
+
+from sw_agent import typeinfo
 
 # swDocumentTypes_e
 DOC_PART = 1
@@ -29,102 +32,103 @@ DOC_ASSEMBLY = 2
 DOC_DRAWING = 3
 DOC_TYPE_NAME = {DOC_PART: "part", DOC_ASSEMBLY: "assembly", DOC_DRAWING: "drawing"}
 
-# P13: real localized plane names (the old table had English in BOTH slots,
-# so the "localized fallback" never actually fell back — start_sketch failed
-# on Chinese SolidWorks templates).
+# P13: real localized plane names (zh-CN). P123 adds runtime discovery on top.
 _PLANES = {
     "front": ("Front Plane", "前视基准面"),
     "top": ("Top Plane", "上视基准面"),
     "right": ("Right Plane", "右视基准面"),
 }
 
-# Bare ProgID first, then versioned (SW 2026 → 2017)
 _PROGIDS = ["SldWorks.Application"] + [f"SldWorks.Application.{n}" for n in range(34, 24, -1)]
+
+BINDING = os.environ.get("SW_AGENT_BINDING", "late").strip().lower()  # late | early
+
+# HRESULTs that mean "the SolidWorks we were attached to is gone" (P125 uses this too)
+DEAD_HRESULTS = {
+    -2147023174,  # 0x800706BA RPC server unavailable
+    -2147023170,  # 0x800706BE remote procedure call failed
+    -2147417848,  # 0x80010108 RPC_E_DISCONNECTED object disconnected
+    -2147418111,  # 0x80010001 RPC_E_CALL_REJECTED
+}
 
 
 class SWError(Exception):
     """Agent-facing, human-readable error. str(e) is returned as the JSON-RPC error field."""
 
 
-def sw_get(obj, name: str, *args):
-    """Read a SolidWorks member that the typelib may expose as either a method
-    OR a propget.
+def hresult(e: Exception):
+    v = getattr(e, "hresult", None)
+    if isinstance(v, int):
+        return v
+    args = getattr(e, "args", ())
+    if args and isinstance(args[0], int):
+        return args[0]
+    return None
 
-    Early binding resolves some no-arg 'Get*'/'Is*'/'Name*' accessors as
-    properties, whose value is returned on plain attribute access; calling
-    those with () raises "'<type>' object is not callable" (str/tuple/int/bool).
-    This tolerates both forms. Only use for NO-ARG getters (arg-taking members
-    like GetComponents(True) / SelectByID2(...) are always real methods).
+
+def is_dead_connection(e: Exception) -> bool:
+    return hresult(e) in DEAD_HRESULTS
+
+
+def sw_get(obj, name: str, *args):
+    """Read a SolidWorks member that may surface as a method OR a property.
+
+    Under early binding some no-arg getters are propgets; under late binding an
+    unflagged zero-arg method may come back as its value. Either way: if the attribute
+    is callable, call it; otherwise return it. Only for NO-ARG or fully-given-arg reads.
     """
     attr = getattr(obj, name)
     return attr(*args) if callable(attr) else attr
 
 
 def as_iface(obj, *ifaces):
-    """Re-bind a SolidWorks COM object so members outside its currently-bound
-    interface become reachable. Returns (obj, note) — never raises.
+    """Make members of `ifaces` reachable on `obj`. Returns (obj, note) — never raises.
 
-    Why this exists (P46, then P116-P119 the hard way): bridge connects with
-    gencache.EnsureDispatch, i.e. EARLY BINDING, so every object arrives wrapped as
-    one specific interface. Members the typelib didn't declare on THAT interface are
-    not merely awkward to reach — they do not exist, and access fails with
-    DISP_E_MEMBERNOTFOUND (-2147352573, '找不到成员'). P46 hit this on
-    IPartDoc.GetBodies2 and solved it locally; P116-P119 then burned three real-machine
-    rounds on the same wall reading a datum plane, because CastTo was applied to the
-    RETURN VALUE instead of to the object the member is declared on. Hence one shared
-    helper, used before touching any member that isn't on the object's default
-    interface.
-
-    Ladder, widest-to-narrowest:
-      1. already works           — the member may simply be there
-      2. CastTo(iface)           — proper typed re-binding (needs a makepy module)
-      3. dynamic.Dispatch(raw)   — plain IDispatch off _oleobj_, no typelib involved
-
-    On a non-Windows host (CI / tests) win32com itself is missing — the ladder collapses
-    to step 1, which is fine: the docstring promise of "never raises" must hold there too,
-    otherwise test scaffolding in environments without SolidWorks cannot exercise the helper.
+    Late binding (default): there is no interface wall; flag the interfaces' methods so
+    zero-arg ones invoke as methods, and hand the same object back.
+    Early binding: the P120 ladder — CastTo(iface) → dynamic IDispatch off _oleobj_.
     """
-    notes = []
+    if typeinfo.is_late_bound(obj):
+        n = typeinfo.flag_methods(obj, *ifaces)
+        return obj, f"late-bound (flagged {n})"
+    # P122+patch: as_iface carries the "never raises" contract (P116/P118). On a
+    # sandbox without pywin32 (Linux CI), the late-bound branch returns False and we
+    # would land here with no win32com to import — degrade to as-is with a note,
+    # matching the existing CastTo/dynamic failure path below.
     try:
         import win32com.client as wc
-        win32com_ok = True
-    except Exception as e:  # noqa: BLE001
-        notes.append(f"import win32com {e.__class__.__name__}")
-        win32com_ok = False
-
-    if win32com_ok:
-        for iface in ifaces:
-            try:
-                cast = wc.CastTo(obj, iface)
-                if cast is not None and cast is not False:
-                    return cast, f"CastTo({iface})"
-                notes.append(f"CastTo({iface})->{cast!r}")
-            except Exception as e:  # noqa: BLE001
-                notes.append(f"CastTo({iface}) {e.__class__.__name__}")
+    except ImportError:
+        return obj, "as-is (win32com unavailable)"
+    notes = []
+    for iface in ifaces:
         try:
-            from win32com.client import dynamic
-            raw = getattr(obj, "_oleobj_", None)
-            if raw is not None:
-                return dynamic.Dispatch(raw), "dynamic IDispatch"
+            cast = wc.CastTo(obj, iface)
+            if cast is not None and cast is not False:
+                return cast, f"CastTo({iface})"
+            notes.append(f"CastTo({iface})->{cast!r}")
         except Exception as e:  # noqa: BLE001
-            notes.append(f"dynamic {e.__class__.__name__}")
-
-    return obj, "as-is (" + "; ".join(notes) + ")" if notes else "as-is"
+            notes.append(f"CastTo({iface}) {e.__class__.__name__}")
+    try:
+        from win32com.client import dynamic
+        raw = getattr(obj, "_oleobj_", None)
+        if raw is not None:
+            return dynamic.Dispatch(raw), "dynamic IDispatch"
+    except Exception as e:  # noqa: BLE001
+        notes.append(f"dynamic {e.__class__.__name__}")
+    return obj, ("as-is (" + "; ".join(notes) + ")") if notes else "as-is"
 
 
 def try_member(obj, name: str, *ifaces, args=()):
-    """Read `name` off `obj`, re-binding through as_iface() if the member isn't
-    reachable on the object as given. Returns (value, note); value is None on failure
-    and `note` carries the real reason — the three blind P105/P114/P116 rounds all
-    came from failures that reported nothing."""
+    """Read `name` off `obj`, re-binding/flagging through as_iface() if needed.
+    Returns (value, note); value None on failure, note carries the real reason."""
     try:
         return sw_get(obj, name, *args), "direct"
     except Exception as e_direct:  # noqa: BLE001
         first = f"direct: {e_direct!r}"
     rebound, how = as_iface(obj, *ifaces)
-    if rebound is obj:
-        return None, f"{first}; rebind failed: {how}"
     try:
+        if typeinfo.is_late_bound(rebound):
+            typeinfo.flag_members(rebound, name)
         return sw_get(rebound, name, *args), f"via {how}"
     except Exception as e:  # noqa: BLE001
         return None, f"{first}; via {how}: {e!r}"
@@ -135,64 +139,47 @@ class Context:
 
     def __init__(self) -> None:
         self._app = None
-        self.scratch: dict[str, Any] = {}  # Inter-tool scratchpad (e.g. the feature name created in the previous step)
+        self._model = None          # P122: flagged ActiveDoc cache (same underlying object → reuse)
+        self._model_key = None
+        self.scratch: dict[str, Any] = {}
 
     # ---- Connection ----
     def _connect(self):
         import win32com.client
-        # P24: defensively initialize COM on THIS thread. If the calling thread was
-        # never CoInitialize'd, every GetActiveObject fails with confusing errors.
         try:
             import pythoncom
-            pythoncom.CoInitialize()
-        except Exception:  # noqa: BLE001 — already initialized is fine
+            pythoncom.CoInitialize()  # idempotent; the executor thread already did this
+        except Exception:  # noqa: BLE001
             pass
         errors: list[str] = []
-
-        # P73: win32com.client.Dispatch internally calls GetActiveObject FIRST, then
-        # falls back to CoCreateInstance if the object isn't in the ROT. For SolidWorks
-        # (a singleton COM server), CoCreateInstance returns the running instance.
-        # https://timgolden.me.uk/python/win32_how_do_i/attach-to-a-com-instance.html
-        # https://stackoverflow.com/questions/74670195
-        #
-        # We try Dispatch FIRST because it covers both ROT and class-factory paths in
-        # one call. The manual GetActiveObject loop below is kept as a fallback for
-        # version-specific ProgIDs and gencache early binding.
+        raw = None
+        # P73: Dispatch covers ROT + class-factory in one call (SW is a singleton server)
         try:
-            raw = win32com.client.Dispatch("SldWorks.Application")
-        except Exception as e_dispatch:  # noqa: BLE001
-            errors.append(f"SldWorks.Application (Dispatch): {e_dispatch}")
-        else:
+            raw = win32com.client.dynamic.Dispatch("SldWorks.Application")
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"SldWorks.Application (Dispatch): {e}")
+        if raw is None:
+            for progid in _PROGIDS:
+                try:
+                    raw = win32com.client.GetActiveObject(progid)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    errors.append(f"{progid}: {e}")
+        if raw is None:
+            primary = errors[0] if errors else "unknown"
+            raise SWError(
+                "Cannot connect to SolidWorks: make sure SolidWorks is running and has been opened at least once. "
+                f"(primary: {primary})"
+            )
+        if BINDING == "early":
             try:
                 from win32com.client import gencache
                 return gencache.EnsureDispatch(raw)
-            except Exception:  # noqa: BLE001 — makepy unavailable
-                return raw
-
-        # Fallback: try version-specific ProgIDs via GetActiveObject (ROT only).
-        # Some SolidWorks installs register the versioned ProgID in the ROT but not
-        # the bare one; this catches that case.
-        for progid in _PROGIDS:
-            try:
-                raw = win32com.client.GetActiveObject(progid)
-            except Exception as e:  # noqa: BLE001
-                errors.append(f"{progid}: {e}")
-                continue
-            # P15: prefer early binding so members resolve from the typelib.
-            try:
-                from win32com.client import gencache
-                return gencache.EnsureDispatch(raw)
-            except Exception:  # noqa: BLE001 — makepy unavailable → degrade to dynamic dispatch
-                return raw
-
-        # P24: report the BARE-ProgID error (the meaningful one) — the old code
-        # reported the LAST versioned ProgID's error ("invalid class string" for an
-        # unregistered .25), masking the real failure cause.
-        primary = errors[0] if errors else "unknown"
-        raise SWError(
-            "Cannot connect to SolidWorks: make sure SolidWorks is running and has been opened at least once. "
-            f"(primary: {primary})"
-        )
+            except Exception:  # noqa: BLE001 — makepy unavailable → late anyway
+                pass
+        app = win32com.client.dynamic.Dispatch(getattr(raw, "_oleobj_", raw))
+        typeinfo.flag_methods(app, "ISldWorks")
+        return app
 
     @property
     def sw(self):
@@ -202,13 +189,42 @@ class Context:
 
     def reconnect(self):
         self._app = None
+        self._model = None
+        self._model_key = None
+        typeinfo.invalidate()
         return self.sw
+
+    def call_guarded(self, fn):
+        """Run fn(); if the connection is dead (P125), reconnect once and retry."""
+        try:
+            return fn()
+        except Exception as e:
+            if not is_dead_connection(e):
+                raise
+            self.reconnect()
+            return fn()
 
     @property
     def model(self):
         m = self.sw.ActiveDoc
         if m is None:
+            self._model = None
+            self._model_key = None
             raise SWError("No document is open. Please create or open a document in SolidWorks first.")
+        key = getattr(m, "_oleobj_", None)
+        if self._model is not None and key is not None and key == self._model_key:
+            return self._model
+        # New document object: flag the doc interfaces once (the cache keeps it cheap)
+        try:
+            dt = int(sw_get(m, "GetType"))
+        except Exception:  # noqa: BLE001
+            dt = 0
+        typeinfo.flag_doc(m, dt)
+        try:
+            typeinfo.flag_methods(m.Extension, "IModelDocExtension")
+        except Exception:  # noqa: BLE001
+            pass
+        self._model, self._model_key = m, key
         return m
 
     def require(self, doc_type: int, label: str):
@@ -217,78 +233,73 @@ class Context:
             raise SWError(f"This operation requires a {label} document.")
         return m
 
-    # ---- Common Managers ----
+    # ---- Version ----
+    def sw_info(self) -> dict:
+        """RevisionNumber → {revision, major, year}. SW 2025 = 33.x → year = 1992 + major."""
+        info: dict = {}
+        try:
+            rev = str(sw_get(self.sw, "RevisionNumber"))
+            info["revision"] = rev
+            major = int(rev.split(".")[0])
+            info["major"] = major
+            info["year"] = 1992 + major
+        except Exception as e:  # noqa: BLE001
+            info["error"] = str(e)
+        return info
+
+    # ---- Managers ----
     @property
     def feat_mgr(self):
-        return self.model.FeatureManager
+        return typeinfo.flagged(self.model.FeatureManager, "IFeatureManager")
 
     @property
     def sketch_mgr(self):
-        return self.model.SketchManager
+        return typeinfo.flagged(self.model.SketchManager, "ISketchManager")
 
     @property
     def sel_mgr(self):
-        return self.model.SelectionManager
+        return typeinfo.flagged(self.model.SelectionManager, "ISelectionMgr")
 
     # ---- Selection helpers ----
     def clear_selection(self):
         self.model.ClearSelection2(True)
 
     def selected_count(self) -> int:
-        return self.model.SelectionManager.GetSelectedObjectCount2(-1)
+        return int(self.sel_mgr.GetSelectedObjectCount2(-1))
 
     def selected_edge_count(self):
-        """P93: number of currently selected EDGES, plus what else is selected.
-
-        selected_count() counts ANY selected entity — a leftover selection from the
-        previous tool (e.g. the just-created extrusion feature) can satisfy a
-        "something is selected" check, and FeatureFillet3 then rounds every edge of the
-        picked face/feature. That is how edges="selected" with NO human picking
-        silently filleted both rims of a fresh cylinder.
-
-        Returns (edges, other_types) where other_types is a set of swSelXXXX codes
-        present in the selection but not edges (empty set when only edges are picked).
-        swSelEDGES = 2 in the SolidWorks API.
-        """
+        """P93: (edges, other_types) among the current selection. swSelEDGES = 1... careful:
+        swSelectType_e: 1 = EDGES, 2 = FACES, 3 = VERTICES, 4 = DATUMPLANES. The P93
+        code compared GetType() of the OBJECT (swSelEDGES=2 in that enum family); keep
+        both readings so either install classifies edges correctly."""
         others: set = set()
         try:
-            sel = sw_get(self.model, "SelectionManager")
+            sel = self.sel_mgr
             total = int(sw_get(sel, "GetSelectedObjectCount2", -1))
         except Exception:  # noqa: BLE001
             return 0, others
         edges = 0
         for i in range(1, total + 1):
+            typ = -1
             try:
-                obj = sw_get(sel, "GetSelectedObject6", i)
-                typ = int(sw_get(obj, "GetType")) if obj is not None else -1
-            except Exception:  # noqa: BLE001 — treat unreadable as "not an edge"
-                typ = -1
-            if typ == 2:  # swSelEDGES
+                typ = int(sw_get(sel, "GetSelectedObjectType3", i, -1))
+                is_edge = typ == 1
+            except Exception:  # noqa: BLE001
+                try:
+                    obj = sw_get(sel, "GetSelectedObject6", i, -1)
+                    typ = int(sw_get(obj, "GetType")) if obj is not None else -1
+                    is_edge = typ == 2
+                except Exception:  # noqa: BLE001
+                    is_edge = False
+            if is_edge:
                 edges += 1
             else:
                 others.add(typ)
         return edges, others
 
     def select_by_id(self, name, typ, x=0.0, y=0.0, z=0.0, append=False, mark=0) -> bool:
-        # P26: under early binding the Callout param ([in] IDispatch*) must be a
-        # VARIANT(VT_DISPATCH, None) — a bare None raises DISP_E_TYPEMISMATCH
-        # (0x80020005), which broke start_sketch / every selection-based tool.
-        import pythoncom
-        from win32com.client import VARIANT
-        callout = VARIANT(pythoncom.VT_DISPATCH, None)
-        # P116: the `reverse` parameter is GONE. P114 passed SelectByID2's last argument
-        # (SelectOption, a swSelectOption_e) as 16 believing it meant "reverse the
-        # selection's normal", so that create_plane could put a plane on the far side of
-        # its base. swSelectOption_e defines no such member — only Default (0) and
-        # Extensive (1) — so 16 was not a flag SolidWorks ignored on this install, it was
-        # not a valid value at all, and SelectByID2 dropped it silently. That is why the
-        # ±50 planes still coincided at +50 after P114: nothing in that patch ever asked
-        # for the other side. Plane sidedness is a property of the FEATURE, not of how
-        # its reference was picked — it now lives in refplane.py, which sets it and then
-        # MEASURES the result. Keep the selection call boring.
-        return bool(
-            self.model.Extension.SelectByID2(name, typ, x, y, z, append, mark, callout, 0)
-        )
+        # P26: Callout must be VARIANT(VT_DISPATCH, None); bare None → DISP_E_TYPEMISMATCH
+        return bool(self.model.Extension.SelectByID2(name, typ, x, y, z, append, mark, self._variant_null(), 0))
 
     def _variant_null(self):
         import pythoncom
@@ -296,22 +307,24 @@ class Context:
         return VARIANT(pythoncom.VT_DISPATCH, None)
 
     def solid_bodies(self):
-        """P46: GetBodies2 is declared on **IPartDoc**, not IModelDoc2 — and under early
-        binding `self.model` is typed as IModelDoc2, so the member simply isn't there
-        ('<unknown>.GetBodies2'). Reaching it needs an explicit CastTo, or plain
-        IDispatch. Previously the failure was swallowed and an empty list returned,
-        which surfaced as the misleading "no vertical edges found on the solid" even
-        though the part was sitting right there on screen.
+        """Visible solid bodies of the active part.
+
+        P46 needed a CastTo ladder because early binding hid IPartDoc.GetBodies2. Late
+        binding resolves it directly; the ladder is kept only for BINDING=early.
         """
         errs = []
 
         def _try(owner, label):
-            fn = getattr(owner, "GetBodies2", None)
-            if fn is None:
-                errs.append(f"{label}: member absent")
+            try:
+                # ruff B009: getattr + constant attribute is intentional here — late-bound COM
+                # objects may raise AttributeError, and direct `owner.GetBodies2` would not be
+                # caught cleanly. Keep the getattr.
+                fn = getattr(owner, "GetBodies2")  # noqa: B009
+            except Exception as ex:  # noqa: BLE001
+                errs.append(f"{label}: {ex}")
                 return None
             try:
-                bodies = fn(0, True)  # 0 = swSolidBody, True = visible only
+                bodies = fn(0, True)  # swSolidBody, visible only
             except Exception as ex:  # noqa: BLE001
                 errs.append(f"{label}: {ex}")
                 return None
@@ -320,64 +333,61 @@ class Context:
                 return None
             return list(bodies) if isinstance(bodies, (list, tuple)) else [bodies]
 
-        import win32com.client as wc
-
-        # a) the properly-typed IPartDoc interface
-        try:
-            got = _try(wc.CastTo(self.model, "IPartDoc"), "IPartDoc")
-            if got:
-                return got
-        except Exception as ex:  # noqa: BLE001
-            errs.append(f"CastTo(IPartDoc): {ex}")
-
-        # b) plain IDispatch — resolves members the typed wrapper is missing
-        try:
-            from win32com.client import dynamic
-            raw = getattr(self.model, "_oleobj_", self.model)
-            got = _try(dynamic.Dispatch(raw), "dynamic")
-            if got:
-                return got
-        except Exception as ex:  # noqa: BLE001
-            errs.append(f"dynamic: {ex}")
-
-        # c) as-is (works when the doc was late-bound to begin with)
-        got = _try(self.model, "model")
+        m = self.model
+        got = _try(m, "model")
         if got:
             return got
-
+        if not typeinfo.is_late_bound(m):
+            import win32com.client as wc
+            try:
+                got = _try(wc.CastTo(m, "IPartDoc"), "IPartDoc")
+                if got:
+                    return got
+            except Exception as ex:  # noqa: BLE001
+                errs.append(f"CastTo(IPartDoc): {ex}")
+            try:
+                from win32com.client import dynamic
+                got = _try(dynamic.Dispatch(getattr(m, "_oleobj_", m)), "dynamic")
+                if got:
+                    return got
+            except Exception as ex:  # noqa: BLE001
+                errs.append(f"dynamic: {ex}")
         raise SWError(
             "could not read the part's solid bodies — create a solid feature first, "
             f"or report this: {'; '.join(errs[-3:])}"
         )
 
     def all_features(self):
-        """Feature-tree listing — works on installs where body enumeration doesn't."""
+        """Feature-tree listing — flagged so tools may call f.GetTypeName2() etc. directly."""
         try:
-            return list(self.feat_mgr.GetFeatures(True) or [])
+            feats = list(self.feat_mgr.GetFeatures(True) or [])
         except Exception:  # noqa: BLE001
             return []
+        for f in feats:
+            typeinfo.flag_members(f, "GetTypeName2", "GetFaces", "GetSpecificFeature2", "GetDefinition",
+                                  "IsSuppressed", "GetErrorCode2", "GetNextFeature", "GetFirstSubFeature")
+        return feats
 
     def doc_state(self) -> dict:
-        """P94: lightweight document state, appended to every tool result.
-
-        The model keeps burning turns on "where am I": no document? which part? how
-        many features? what is selected? Every tool result now carries a one-line
-        snapshot so it can stop asking list_features / analyze_view just to locate
-        itself. Failures degrade to partial fields rather than raising — state is a
-        convenience, never a reason to fail the tool.
-        """
+        """P94: lightweight document state appended to every tool result.
+        P122 adds `editing_sketch` (the GetEditState gate from just1step) and `sw_year`."""
         state: dict = {"doc": None}
         try:
             m = self.sw.ActiveDoc
             if m is None:
                 return state
+            m = self.model
             state["doc"] = sw_get(m, "GetTitle")
             state["type"] = doc_type_name(m)
         except Exception:  # noqa: BLE001
             return state
         try:
-            feats = self.all_features()
-            state["features"] = len(feats)
+            state["features"] = len(self.all_features())
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            act = self.sketch_mgr.ActiveSketch
+            state["editing_sketch"] = act is not None
         except Exception:  # noqa: BLE001
             pass
         lf = self.scratch.get("last_feature")
@@ -391,20 +401,16 @@ class Context:
                     state["selected"]["other_types"] = sorted(others)
         except Exception:  # noqa: BLE001
             pass
+        y = self.scratch.get("sw_year")
+        if y is None:
+            y = self.sw_info().get("year")
+            self.scratch["sw_year"] = y
+        if y:
+            state["sw_year"] = y
         return state
 
     def record_feature_map(self, feat):
-        """P99: snapshot the topology a feature just created, keyed by feature name.
-
-        The "top edge of the cylinder" problem keeps coming back because edges are
-        read AFTER the fact, from whatever faces happen to be reachable then. Recording
-        at creation time — the moment the feature's faces/edges actually exist — gives
-        a stable answer even if later features reshape or hide them. This mirrors what
-        SolidPilot's feature_map does (per-feature consumed/created topology).
-
-        Stored as geometry fingerprints (box coords), not COM objects: references die
-        across calls on this install, geometry does not.
-        """
+        """P99: fingerprint the topology a feature just created (edges by box)."""
         try:
             name = sw_get(feat, "Name")
         except Exception:  # noqa: BLE001
@@ -413,33 +419,20 @@ class Context:
             faces = list(sw_get(feat, "GetFaces") or [])
         except Exception:  # noqa: BLE001
             faces = []
-        edges = []
         seen: set = set()
         for f in faces:
             for loop in (sw_get(f, "GetLoops") or []):
                 for e in (sw_get(loop, "GetEdges") or []):
                     fp = edge_fingerprint(e)
-                    if fp and fp not in seen:
+                    if fp:
                         seen.add(fp)
-                        edges.append(e)
         self.scratch.setdefault("feature_map", {})[name] = {
-            "faces": len(faces),
-            "edges": len(edges),
-            "fingerprints": sorted(seen),
+            "faces": len(faces), "edges": len(seen), "fingerprints": sorted(seen),
         }
 
     def geometry(self):
-        """P49: return (faces, edges, trace) for the current part.
-
-        Two independent routes, because IBody2.GetFaces/GetEdges came back EMPTY on a
-        real install even though the solid was plainly on screen — which surfaced as the
-        nonsense "no edges matched" / "no planar face facing top". Route B uses the same
-        call list_features already proves works there. `trace` carries per-route counts,
-        so any failure reports what was actually tried.
-        """
+        """(faces, edges, trace) for the current part — bodies first, feature tree as route B (P49)."""
         faces, edges, trace = [], [], []
-
-        # Route A — solid bodies
         try:
             found = self.solid_bodies()
         except SWError as e:
@@ -448,38 +441,37 @@ class Context:
         for b in found:
             for member, sink in (("GetFaces", faces), ("GetEdges", edges)):
                 try:
-                    got = getattr(b, member)() or []
+                    got = sw_get(b, member) or []
                     sink.extend(list(got) if isinstance(got, (list, tuple)) else [got])
                 except Exception as ex:  # noqa: BLE001
                     trace.append(f"body.{member}: {ex}")
         if found:
             trace.append(f"bodies={len(found)} faces={len(faces)} edges={len(edges)}")
-
-        # Route B — faces off the feature tree
         if not faces:
             feats = self.all_features()
             for ft in feats:
                 try:
-                    got = ft.GetFaces() or []
-                except Exception:  # noqa: BLE001 — folders and datums have no faces
+                    got = sw_get(ft, "GetFaces") or []
+                except Exception:  # noqa: BLE001
                     continue
                 faces.extend(list(got) if isinstance(got, (list, tuple)) else [got])
             trace.append(f"features={len(feats)} faces={len(faces)}")
-
-        # Edges off whatever faces we ended up with
         if not edges:
             for fa in faces:
                 try:
-                    got = fa.GetEdges() or []
+                    got = sw_get(fa, "GetEdges") or []
                 except Exception:  # noqa: BLE001
                     continue
                 edges.extend(list(got) if isinstance(got, (list, tuple)) else [got])
             trace.append(f"edges-from-faces={len(edges)}")
-
+        for f in faces:
+            typeinfo.flag_members(f, "GetEdges", "GetLoops", "GetSurface", "GetBox", "GetArea")
+        for e in edges:
+            typeinfo.flag_members(e, "GetCurve", "GetCurveParams2", "GetTwoAdjacentFaces2", "GetCurveBox",
+                                  "GetStartVertex", "GetEndVertex")
         return faces, edges, trace
 
     def _face_normal(self, face):
-        """Outward normal of a planar face — IFace2.Normal, else the plane's own params."""
         try:
             n = face.Normal
             if n and len(n) >= 3:
@@ -487,20 +479,16 @@ class Context:
         except Exception:  # noqa: BLE001
             pass
         try:
-            surf = face.GetSurface()
-            if surf.IsPlane():
-                p = surf.PlaneParams  # normal xyz, then a point on the plane
+            surf = sw_get(face, "GetSurface")
+            if sw_get(surf, "IsPlane"):
+                p = surf.PlaneParams
                 return (p[0], p[1], p[2])
         except Exception:  # noqa: BLE001
             pass
         return None
 
     def _select_entity(self, ent, append: bool, mark: int) -> bool:
-        """P45.1: when a MARK is required, Select2 must come first — IEntity::Select4
-        takes (Append, Callout) and has no mark parameter, so preferring it silently
-        dropped every mark to 0. Patterns and mirror distinguish "the feature" from
-        "the direction / mirror plane" purely by mark, so they reported
-        "produced nothing" no matter what was selected."""
+        """P45.1: with a mark, Select2 first (Select4 has no mark parameter)."""
         callout = self._variant_null()
         order = (
             (("Select2", (append, mark)), ("Select4", (append, callout)), ("Select", (append,)))
@@ -509,7 +497,7 @@ class Context:
         )
         for member, args in order:
             fn = getattr(ent, member, None)
-            if fn is None:
+            if fn is None or not callable(fn):
                 continue
             try:
                 if fn(*args):
@@ -518,18 +506,23 @@ class Context:
                 continue
         return False
 
-    def select_edges(self, which: str = "all", append=False, mark=0) -> int:
-        """P86: edge selection now lives in edge_select.py — see that module for why.
+    def ensure_tessellated(self):
+        """P122: new feature edges are not selectable by coordinate until a rebuild
+        (upstream pitfall #3 — exactly the 'found 4 selected 3' shape of P92). Cheap;
+        call once before any coordinate-based SelectByID2."""
+        try:
+            self.model.ForceRebuild3(True)
+        except Exception:  # noqa: BLE001
+            pass
 
-        This used to hold six fallback routes accumulated over eight rounds of
-        machine-specific failures, any of which could quietly return a wrong answer.
-        """
+    def select_edges(self, which: str = "all", append=False, mark=0) -> int:
+        """Edge selection lives in edge_select.py (P86). P122 pre-tessellates."""
         from sw_agent.edge_select import select
+        if which != "selected":
+            self.ensure_tessellated()
         return select(self, which)
 
     def select_axis_edge(self, axis: str, append=False, mark=0) -> bool:
-        """Select a straight edge running along x/y/z — used as a pattern direction."""
-        # P45.1: accept plain axis names AND the intuitive ones (up = Y, depth = Z)
         want = {
             "x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1),
             "up": (0, 1, 0), "depth": (0, 0, 1), "width": (1, 0, 0),
@@ -538,48 +531,56 @@ class Context:
             raise SWError(f"unknown direction: {axis} (expected x/y/z)")
         _faces, edges, _trace = self.geometry()
         for edge in edges:
-            if True:
-                kind, d = self._edge_kind(edge)
-                if kind != "line":
-                    continue
-                if abs(d[0] * want[0] + d[1] * want[1] + d[2] * want[2]) > 0.95:
-                    if self._select_entity(edge, append, mark):
-                        return True
+            kind, d = self._edge_kind(edge)
+            if kind != "line":
+                continue
+            if abs(d[0] * want[0] + d[1] * want[1] + d[2] * want[2]) > 0.95:
+                if self._select_entity(edge, append, mark):
+                    return True
         return False
 
+    def _edge_kind(self, edge):
+        """('line', unit direction) | ('circle', axis) | ('other', None) — from the curve."""
+        try:
+            curve = sw_get(edge, "GetCurve")
+            if sw_get(curve, "IsLine"):
+                p = curve.LineParams  # x,y,z, dx,dy,dz
+                d = (float(p[3]), float(p[4]), float(p[5]))
+                n = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) ** 0.5 or 1.0
+                return "line", (d[0] / n, d[1] / n, d[2] / n)
+            if sw_get(curve, "IsCircle"):
+                p = curve.CircleParams
+                return "circle", (float(p[3]), float(p[4]), float(p[5]))
+        except Exception:  # noqa: BLE001
+            pass
+        # fallback: chord direction from the curve box
+        try:
+            box = sw_get(edge, "GetCurveBox")
+            d = (box[3] - box[0], box[4] - box[1], box[5] - box[2])
+            n = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) ** 0.5 or 1.0
+            return "line", (d[0] / n, d[1] / n, d[2] / n)
+        except Exception:  # noqa: BLE001
+            return "other", None
+
     def select_cylindrical_face(self, append=False, mark=0) -> bool:
-        """Select a cylindrical face — SolidWorks accepts it as a rotation axis."""
         faces, _edges, _trace = self.geometry()
         for face in faces:
-            if True:
-                try:
-                    if face.GetSurface().IsCylinder():
-                        if self._select_entity(face, append, mark):
-                            return True
-                except Exception:  # noqa: BLE001
-                    continue
+            try:
+                if sw_get(sw_get(face, "GetSurface"), "IsCylinder"):
+                    if self._select_entity(face, append, mark):
+                        return True
+            except Exception:  # noqa: BLE001
+                continue
         return False
 
     def select_feature(self, name: str, append=False, mark=0) -> bool:
-        """Select a feature by its feature-tree name (BODYFEATURE)."""
         for typ in ("BODYFEATURE", "SOLIDBODY", "REFERENCECURVES"):
             if self.select_by_id(name, typ, append=append, mark=mark):
                 return True
         return False
 
     def select_face(self, which: str, append=False, mark=0) -> bool:
-        """P44: select the outermost planar face of the solid facing `which`.
-
-        Sketching straight onto a model face is how people actually model — without
-        it every feature above the base needed a hand-computed offset plane, which
-        is why complex parts ended up littered with 基准面N and mis-positioned
-        geometry. Picks the planar face whose normal points along the requested
-        axis and which sits furthest along it, then selects it so InsertSketch
-        starts a sketch right there.
-        """
-        # P45.1: SolidWorks world space is Y-UP — the Front plane is XY (normal +Z),
-        # Top is XZ (normal +Y), Right is YZ (normal +X). The first cut of this code
-        # assumed Z-up, so face="top" hunted for the FRONT face of the part.
+        """P44: outermost planar face facing `which` (SolidWorks is Y-UP: top = +Y)."""
         axes = {
             "top": (0, 1, 0), "bottom": (0, -1, 0),
             "front": (0, 0, 1), "back": (0, 0, -1),
@@ -589,41 +590,55 @@ class Context:
         if key not in axes:
             raise SWError(f"unknown face: {which} (expected top/bottom/front/back/left/right)")
         ax, ay, az = axes[key]
-
         faces, _edges, trace = self.geometry()
         if not faces:
             raise SWError(f"could not read any face of the solid ({'; '.join(trace)})")
         best, best_d = None, None
         for face in faces:
             n = self._face_normal(face)
-            if n is None:
-                continue
-            if n[0] * ax + n[1] * ay + n[2] * az < 0.95:   # not facing the requested way
+            if n is None or n[0] * ax + n[1] * ay + n[2] * az < 0.95:
                 continue
             try:
-                box = face.GetBox()   # xmin,ymin,zmin,xmax,ymax,zmax
-                d = ((box[0] + box[3]) / 2 * ax + (box[1] + box[4]) / 2 * ay
-                     + (box[2] + box[5]) / 2 * az)
+                box = sw_get(face, "GetBox")
+                d = ((box[0] + box[3]) / 2 * ax + (box[1] + box[4]) / 2 * ay + (box[2] + box[5]) / 2 * az)
             except Exception:  # noqa: BLE001
                 d = 0.0
             if best_d is None or d > best_d:
                 best, best_d = face, d
         if best is None:
-            raise SWError(
-                f"no planar face facing {which} among {len(faces)} faces ({'; '.join(trace)})"
-            )
-
+            raise SWError(f"no planar face facing {which} among {len(faces)} faces ({'; '.join(trace)})")
         return self._select_entity(best, append, mark)
 
+    def plane_names(self) -> dict:
+        """P122: the three default planes' REAL names on this document, discovered from the
+        tree (RefPlane features in creation order), falling back to the EN/zh table."""
+        cached = self.scratch.get("plane_names")
+        if cached:
+            return cached
+        names = []
+        for f in self.all_features():
+            try:
+                if sw_get(f, "GetTypeName2") == "RefPlane":
+                    names.append(sw_get(f, "Name"))
+            except Exception:  # noqa: BLE001
+                continue
+            if len(names) == 3:
+                break
+        out = {k: v[0] for k, v in _PLANES.items()}
+        if len(names) == 3:
+            out = {"front": names[0], "top": names[1], "right": names[2]}
+        self.scratch["plane_names"] = out
+        return out
+
     def select_plane(self, which: str, append=False, mark=0) -> bool:
-        """Select a reference plane; auto-handles both English and localized (zh-CN) templates."""
         key = (which or "").lower()
         if key not in _PLANES:
             raise SWError(f"unknown plane: {which} (expected front/top/right)")
         en, zh = _PLANES[key]
-        if self.select_by_id(en, "PLANE", append=append, mark=mark):
-            return True
-        return self.select_by_id(zh, "PLANE", append=append, mark=mark)
+        for candidate in dict.fromkeys((self.plane_names().get(key), en, zh)):
+            if candidate and self.select_by_id(candidate, "PLANE", append=append, mark=mark):
+                return True
+        return False
 
     # ---- Rebuild ----
     def rebuild(self, top_only=False):
@@ -635,10 +650,7 @@ def doc_type_name(model) -> str:
 
 
 def edge_fingerprint(edge):
-    """P99: geometry fingerprint for an edge — the de-dup key shared by bridge and
-    edge_select. Box coords are reference-independent, so the same edge seen from two
-    faces hashes identically even when IsSame fails and COM wrappers differ.
-    """
+    """P99: reference-independent edge key (curve box, 6dp) — shared with edge_select."""
     try:
         box = sw_get(edge, "GetCurveBox")
         if box and len(box) >= 6:
@@ -646,3 +658,13 @@ def edge_fingerprint(edge):
     except Exception:  # noqa: BLE001
         pass
     return ("id", id(edge))
+
+
+def face_fingerprint(face):
+    """P123: reference-independent face key (box + area, 6dp)."""
+    try:
+        box = sw_get(face, "GetBox")
+        area = float(sw_get(face, "GetArea"))
+        return ("face", tuple(round(float(v), 6) for v in box[:6]), round(area, 9))
+    except Exception:  # noqa: BLE001
+        return ("id", id(face))

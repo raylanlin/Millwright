@@ -6,6 +6,50 @@
 
 ## [Unreleased]
 
+## [0.2.126] - 2026-09-12
+
+### Changed (P122–P126 — five-stage rebuild of the execution layer, from a three-project ecosystem review)
+
+Background: `docs/COMPARE-solidpilot.md` + `docs/COMPARE-v2-ecosystem.md` (SolidPilot, SolidworksMCP-python,
+just1step/solidworks-mcp). Half of P15→P121 patched two structural problems — the pywin32 early-binding
+interface wall and coordinate-guessed edge/face selection. Both are removed here, not patched again.
+
+#### P122 — COM foundation
+- **Late binding is the default again** (`dynamic.Dispatch`) with per-interface method flagging
+  (`typeinfo.py`, `CDispatch._FlagAsMethod`) — fixes P15's `'int' object is not callable` at the source,
+  and there is no interface wall (P46 / P116–P120 CastTo ladders become no-ops). `SW_AGENT_BINDING=early` rolls back.
+- **One dedicated STA thread** for all COM work (`com_executor.py`); warmup is the first queued job (retires P17/P23).
+- `ensure_tessellated()` (ForceRebuild3 before coordinate selection); `plane_names()` reads the real default-plane
+  names from the tree; `_edge_kind` restored (referenced since P86 but undefined — linear_pattern direction crashed);
+  `selected_edge_count` uses `GetSelectedObjectType3` (swSelEDGES=1; P93 compared against 2 = FACES).
+- Dead-connection HRESULTs (0x800706BA…) → automatic reconnect + retry.
+
+#### P123 — topology index (`tools/topology.py`)
+- `list_faces` / `list_edges` (index, kind, normal/direction, center/mid, area/length, box, fingerprint; `near/k/axis/kind` filters),
+  `get_selection` (user's GUI pick → same indices), `select_entities` (by index), `sketch_on_face`.
+- `registry.py`: array params emit `items` (strict providers); unknown args rejected with the allowed list.
+
+#### P124 — quantitative verification (`verify.py`, `tools/health.py`)
+- Snapshot gains volume / area / centroid (`GetMassProperties2`), assembly components + transforms, suppressed set.
+- Direction checks: extrude/revolve/pattern ΔV>0, cut/shell ΔV<0 (interior cuts now verifiable), fillet/chamfer |ΔV|>0.
+- `insert_component` / `add_mate` / `delete_feature` / `suppress_feature` / `unsuppress_feature` leave `_SKIP` and are verified.
+- New: `edit_state`, `feature_diagnostics` (swFeatureError_e per feature), `diagnose_document`.
+
+#### P125 — reliability protocol
+- `op_id` idempotency (`_duplicate`), `state_version` (`_sv`, `expect_state` → STALE_STATE), error `code` enum,
+  version `_advisory` (`SW_AGENT_VERIFIED_YEARS`), `health` / `state` RPC methods.
+- Session JSONL log → `export_session(format=json|python)` replay script.
+- `docs/COM-PITFALLS.md` (22 entries) and `sidecar/guidance/modeling-discipline.zh.md`, exposed via
+  `read_guidance(section="pitfalls"|"discipline")` (`guidance_ext.py`).
+- Node: `sw-sidecar.ts` sends op_id, passes `code`, adds `health()`.
+
+#### P126 — MCP + workflows
+- `sidecar/mcp_server.py`: zero-dependency MCP stdio server (tools + guidance resources) for Claude Desktop / Cursor.
+- `cut_face_outline` composite workflow (sketch on face → project outline → cut, verified by ΔV).
+
+### Tests
+- New: test_com_foundation / test_topology / test_verify_quant / test_reliability / test_mcp_server; coverage gate imports 21 tool modules.
+
 ## [0.2.121] - 2026-08-11
 
 ### Fixed (P121 — full-library audit: verify layer was guarding build_part only, the root cause of every "tool that lies" bug)

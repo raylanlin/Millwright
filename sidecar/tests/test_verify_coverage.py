@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from sw_agent import registry, verify
 
-# 触发全部 17 个工具模块的注册 —— 与 server.py 的导入清单一致；漏一个模块，
+# 触发全部 21 个工具模块的注册 —— 与 server.py 的导入清单一致；漏一个模块，
 # 它的工具就不在 registry.TOOLS 里，门禁等于没看它
 from sw_agent.tools import (  # noqa: F401
     assembly,
@@ -22,14 +22,18 @@ from sw_agent.tools import (  # noqa: F401
     export,
     feature,
     guidance,
+    health,
     machine,
     query,
     reference,
     search,
+    session,
     shell,
     sketch,
     status,
+    topology,
     view,
+    workflows,
 )
 
 
@@ -61,8 +65,9 @@ def test_mutating_tools_get_real_verification():
     """MUTATING_KINDS 里的每个工具，verify_step 必须真的检查（checked: True）——
     否则 server 白付两次快照，还给出「已验证」的假印象。用空快照对拍即可：
     这里测的是分支覆盖，不是几何。"""
-    empty = {"features": [], "box": None, "sketch_active": None,
-             "sketch_segments": None, "bodies": None}
+    empty = {"features": [], "suppressed": [], "box": None, "sketch_active": None,
+             "sketch_segments": None, "bodies": None, "volume": None, "area": None, "com": None,
+             "components": None, "transforms": None}
     for name in sorted(registry.TOOLS):
         if verify.classify(name) in verify.MUTATING_KINDS:
             out = verify.verify_step(name, {}, dict(empty), dict(empty))

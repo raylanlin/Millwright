@@ -159,9 +159,13 @@ function clip(s: string): string {
   return s && s.length > TOOL_RESULT_MAX ? s.slice(0, TOOL_RESULT_MAX) + '…(truncated)' : s;
 }
 
-function fmtResult(name: string, r: { ok: boolean; data?: any; error?: string }): string {
+function fmtResult(name: string, r: { ok: boolean; data?: any; error?: string; code?: string }): string {
   if (r.ok) return `✅ ${name}: ${clip(JSON.stringify(r.data ?? {}, null, 0))}`;
-  return `❌ ${name} failed: ${clip(r.error ?? 'unknown error')}`;
+  const code = r.code ? `[${r.code}] ` : '';
+  const hint = r.code === 'NO_DOCUMENT' ? ' → call new_part / open_document first'
+    : r.code === 'STALE_STATE' ? ' → the document changed; re-read with list_features / list_faces before acting'
+    : r.code === 'NO_CONNECTION' ? ' → SolidWorks is not reachable; ask the user to open it' : '';
+  return `❌ ${name} failed: ${code}${clip(r.error ?? 'unknown error')}${hint}`;
 }
 
 /** P5: canonical tool-result message */
@@ -181,6 +185,8 @@ export async function runSidecarAgent(
   let lastHadReasoning = false;
   let finalText = '';
   let backupDone = false;
+  // P125: surface SolidWorks version advisory once per session
+  let advisoryShown = false;
 
   // P19: cache the most recent screenshot so a (pure-text or multimodal) model can
   // ask several follow-up questions about the SAME snapshot without re-capturing.
@@ -472,7 +478,13 @@ export async function runSidecarAgent(
         if (destructive.has(call.name)) await ensureBackup();
 
         opts.onEvent?.({ type: 'tool_start', toolCall: call });
-        const r = await sidecar.call(call.name, call.parameters);
+        // P125: op_id idempotency — same call.id on retry returns the cached result
+        const r = await sidecar.call(call.name, call.parameters, { opId: call.id });
+        // P125: surface unverified SolidWorks version advisory once
+        if (r.ok && r.data?._advisory && !advisoryShown) {
+          advisoryShown = true;
+          opts.onEvent?.({ type: 'text', text: `⚠️ ${r.data._advisory.note}` });
+        }
         const resultText = fmtResult(call.name, r);
         call.result = resultText;
         opts.onEvent?.({ type: 'tool_result', toolCall: call });

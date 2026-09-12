@@ -1,48 +1,37 @@
 """sw_agent.server — stdio JSON-RPC loop.
 
-Reads line-delimited JSON requests from stdin and writes line-delimited
-JSON responses to stdout.
-Methods: ping / list_tools / call.
-Importing tools.* triggers @tool decorator registration.
+Methods: ping / list_tools / call / reconnect / health / state.
 
-P17: after emitting the ready handshake, warm the COM connection path in a BACKGROUND
-thread, so the first real tool call does not pay for the initial connect.
-
-P72: this warmup no longer generates the makepy type-library cache — that took long
-enough to starve the app's own connection probe. See typelib.py.
-
-P23 fix: the warmup thread must NOT share its COM object with the RPC thread.
-COM objects are apartment-threaded — the P17 version cached the warm
-connection into the shared Context, and every later access from the main
-thread (ctx.model → ActiveDoc) failed with a cryptic com_error
-("SldWorks.Application.ActiveDoc"). The warmup now runs CoInitialize in its
-own thread, makes a THROWAWAY connection purely to trigger makepy generation
-(the slow, disk-persisted part), and discards it. The main thread's first
-real call re-connects quickly against the warmed cache.
-
-P121: EVERY mutating tool call is now verified, not just build_part steps.
-The whole family of "the tool reported success but nothing happened" bugs —
-delete_feature claiming deletions it never made (P105), create_plane echoing
-the requested offset while the plane never moved (P105→P120, five rounds),
-fillet selecting 3 of 4 edges and reporting success (P92) — shares one root:
-verification lived only inside build_part, while the agent mostly issues
-single calls. Each bug got a bespoke in-tool check; the class was never
-closed. Now the server snapshots the document before/after every call whose
-verify.classify() kind is mutating and attaches the same `_verified` evidence
-build_part steps carry. Evidence, not a gate: the tool's own result is never
-altered or blocked, but a lying success now arrives with its own refutation.
+P122: all COM work on ONE STA thread (ComExecutor); warmup is the first queued job.
+P121: mutating tools carry `_verified`; P94: every result carries `_state`.
+P125 (this file):
+  - **operation_id idempotency**: `params.op_id` — a repeated id returns the cached
+    result with `_duplicate: true` instead of re-running the tool (stream/retry safety,
+    SolidPilot OperationGuard).
+  - **state_version**: increments after every successful MUTATING call; a caller may
+    send `params.expect_state` and gets error code STALE_STATE if the document moved
+    on (user edited in SW, another call landed) — the model must re-read, not guess.
+  - **error codes**: errors are `{ok:false, error:<str>, code:<ENUM>}`. Codes:
+    NO_CONNECTION · NO_DOCUMENT · WRONG_DOC_TYPE · UNKNOWN_TOOL · BAD_ARGS · STALE_STATE ·
+    COM_ERROR · TOOL_FAILED. `error` stays a plain string for the existing UI.
+  - **version advisory**: on SW releases outside SW_AGENT_VERIFIED_YEARS (default
+    2024,2025) mutating results carry `_advisory` — the approval UI can require
+    confirmation; nothing is blocked here (just1step gates high-risk workflows the same way).
+  - **health**: read-only probe {connected, state_version, sw_year, tool_count}.
+  - **session log**: every call is recorded (session_log.py) → export_session.
 """
 from __future__ import annotations
 
 import json
+import os
 import sys
-import threading
+import time
+from collections import OrderedDict
 
-from sw_agent import registry, verify
-from sw_agent.bridge import Context
-
-# Trigger tool registration (the import order also defines category display order)
-from sw_agent.tools import (  # noqa: F401
+from sw_agent import registry, session_log, verify
+from sw_agent.bridge import Context, SWError, hresult, is_dead_connection
+from sw_agent.com_executor import ComExecutor
+from sw_agent.tools import (  # noqa: F401  (import order = category display order)
     assembly,
     batch,
     diagnose,
@@ -51,15 +40,21 @@ from sw_agent.tools import (  # noqa: F401
     export,
     feature,
     guidance,
+    health,
     machine,
     query,
     reference,
     search,
+    session,
     shell,
     sketch,
     status,
+    topology,
     view,
+    workflows,  # P126
 )
+
+VERIFIED_YEARS = {int(y) for y in os.environ.get("SW_AGENT_VERIFIED_YEARS", "2024,2025").split(",") if y.strip().isdigit()}
 
 
 def _write(obj: dict) -> None:
@@ -67,70 +62,173 @@ def _write(obj: dict) -> None:
     sys.stdout.flush()
 
 
-def _call_verified(ctx: Context, name: str, args: dict):
-    """P121: build_part's per-step snapshot/verify pattern, hoisted to the server.
+class _Guard:
+    """Idempotency cache + state version (single writer: the executor thread)."""
 
-    Only kinds in verify.MUTATING_KINDS pay for the two snapshots; queries, document
-    ops, display ops and self-verifying tools (build_part runs this per step itself;
-    create_plane measures its own plane position) go straight through. Verification
-    must never fail the call: any exception in the evidence path degrades to the
-    bare result, same principle as ctx.doc_state().
-    """
+    def __init__(self, cap: int = 256) -> None:
+        self.done: OrderedDict = OrderedDict()
+        self.cap = cap
+        self.state_version = 0
+
+    def get(self, op_id):
+        if op_id is None:
+            return None
+        return self.done.get(op_id)
+
+    def put(self, op_id, result) -> None:
+        if op_id is None:
+            return
+        self.done[op_id] = result
+        while len(self.done) > self.cap:
+            self.done.popitem(last=False)
+
+    def bump(self) -> int:
+        self.state_version += 1
+        return self.state_version
+
+
+GUARD = _Guard()
+
+
+class CodedError(Exception):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _error_code(e: Exception) -> str:
+    if isinstance(e, CodedError):
+        return e.code
+    s = str(e)
+    if isinstance(e, SWError):
+        if s.startswith("Cannot connect to SolidWorks"):
+            return "NO_CONNECTION"
+        if s.startswith("No document is open"):
+            return "NO_DOCUMENT"
+        if "requires a" in s and "document" in s:
+            return "WRONG_DOC_TYPE"
+        if s.startswith("unknown tool"):
+            return "UNKNOWN_TOOL"
+        if "missing required parameter" in s or "unknown parameter" in s:
+            return "BAD_ARGS"
+        return "TOOL_FAILED"
+    if hresult(e) is not None:
+        return "COM_ERROR"
+    if isinstance(e, TypeError) and "argument" in s:
+        return "BAD_ARGS"
+    return "TOOL_FAILED"
+
+
+def _call_verified(ctx: Context, name: str, args: dict):
+    """P121: snapshot/verify around mutating tools. Evidence, never a gate."""
     kind = verify.classify(name)
     if kind not in verify.MUTATING_KINDS:
-        return registry.call(ctx, name, args)
+        return registry.call(ctx, name, args), False
     try:
         before = verify.snapshot(ctx)
-    except Exception:  # noqa: BLE001 — evidence, not a gate
+    except Exception:  # noqa: BLE001
         before = None
     data = registry.call(ctx, name, args)
     if before is None or not isinstance(data, dict):
-        return data
+        return data, True
     try:
         after = verify.snapshot(ctx)
         check = verify.verify_step(name, args, before, after)
     except Exception:  # noqa: BLE001
-        return data
+        return data, True
     data = dict(data)
     data["_verified"] = check
-    return data
+    return data, True
 
 
-def _warm_up() -> None:
-    """Best-effort makepy warmup on a throwaway, thread-local connection.
+def _advisory(ctx: Context) -> dict | None:
+    y = ctx.scratch.get("sw_year")
+    if y is None:
+        y = ctx.sw_info().get("year")
+        ctx.scratch["sw_year"] = y
+    if not y or y in VERIFIED_YEARS:
+        return None
+    level = "experimental" if y > max(VERIFIED_YEARS, default=y) else "unverified"
+    return {"sw_year": y, "support": level,
+            "note": f"SolidWorks {y} 未在本项目真机验证过（已验证: {sorted(VERIFIED_YEARS)}）。"
+                    "修改类操作建议逐步确认；结果以 _verified 为准。"}
 
-    Never touches the shared Context: COM objects must not cross threads.
-    """
-    try:
-        import pythoncom
-        pythoncom.CoInitialize()
-    except Exception:  # noqa: BLE001
-        return
-    # P72: type-library generation is NO LONGER done here. P69 built the cache on this
-    # thread, and makepy over sldworks.tlb saturates COM and disk for tens of seconds to
-    # minutes — long enough that the separate cscript probe in sw-bridge.ts timed out and
-    # the app reported "SolidWorks is running but COM refused, check privilege levels".
-    # Nothing was misconfigured; the connection was starved by our own optimisation.
-    # The enum values CreateDefinition needs come from the table in typelib.py, so
-    # generating the cache buys nothing that is worth a risk to connectivity.
-    try:
-        Context().sw  # throwaway connect, purely to warm the connection path
-    except Exception:  # noqa: BLE001 — SW may not be running; the real call path reports properly
-        pass
-    finally:
+
+def _call(ctx: Context, name: str, args: dict, op_id=None, expect_state=None):
+    """One tool call on the COM thread. Dead connection → reconnect once and retry."""
+    cached = GUARD.get(op_id)
+    if cached is not None:
+        dup = dict(cached) if isinstance(cached, dict) else {"result": cached}
+        dup["_duplicate"] = True
+        return dup
+    if expect_state is not None and int(expect_state) != GUARD.state_version:
+        raise CodedError("STALE_STATE",
+                         f"document state moved on (expected {expect_state}, now {GUARD.state_version}) — "
+                         "re-read (list_features / list_faces) before acting.")
+    if registry.TOOLS.get(name) is None:
+        raise CodedError("UNKNOWN_TOOL", f"unknown tool: {name}")
+
+    def work():
+        t0 = time.perf_counter()
         try:
-            import pythoncom
-            pythoncom.CoUninitialize()
-        except Exception:  # noqa: BLE001
-            pass
+            data, mutating = _call_verified(ctx, name, args)
+        except Exception as e:
+            session_log.record(name, args, False, (time.perf_counter() - t0) * 1000, error=str(e),
+                               state_version=GUARD.state_version)
+            raise
+        if mutating:
+            GUARD.bump()
+        if isinstance(data, dict):
+            data["_sv"] = GUARD.state_version
+            try:
+                data["_state"] = ctx.doc_state()
+            except Exception:  # noqa: BLE001
+                pass
+            if mutating:
+                adv = _advisory(ctx)
+                if adv:
+                    data["_advisory"] = adv
+        session_log.record(name, args, True, (time.perf_counter() - t0) * 1000,
+                           verified=(data.get("_verified") if isinstance(data, dict) else None),
+                           state_version=GUARD.state_version)
+        GUARD.put(op_id, data)
+        return data
+
+    try:
+        return work()
+    except Exception as e:
+        if not is_dead_connection(e):
+            raise
+        ctx.reconnect()
+        return work()
+
+
+def _health(ctx: Context) -> dict:
+    info: dict = {"connected": False, "state_version": GUARD.state_version, "tool_count": len(registry.TOOLS),
+                  "session_log": str(session_log.session_path()) if session_log._ENABLED else None}
+    try:
+        if ctx._app is not None:
+            ctx.sw.ActiveDoc  # cheap liveness probe on the existing connection only
+            info["connected"] = True
+            info.update({k: v for k, v in ctx.sw_info().items() if k in ("year", "revision")})
+            try:
+                info["active_document"] = ctx.doc_state().get("doc")
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception as e:  # noqa: BLE001
+        info["connected"] = False
+        info["error"] = str(e)
+        info["dead_connection"] = is_dead_connection(e)  # the next call reconnects automatically
+    return info
 
 
 def serve() -> None:
     ctx = Context()
-    # Readiness signal (used by the Node side for handshake) — emit FIRST so warmup never delays it
-    _write({"id": None, "ok": True, "data": {"ready": True, "tool_count": len(registry.TOOLS)}})
-    # P17/P23: warm the makepy cache on a throwaway thread-local connection
-    threading.Thread(target=_warm_up, daemon=True).start()
+    executor = ComExecutor("sw-com")
+    executor.start()
+    _write({"id": None, "ok": True, "data": {"ready": True, "tool_count": len(registry.TOOLS),
+                                             "protocol": {"op_id": True, "state_version": True, "codes": True}}})
+    executor.submit(lambda: _warm(ctx))
     for raw in sys.stdin:
         raw = raw.strip()
         if not raw:
@@ -138,7 +236,7 @@ def serve() -> None:
         try:
             req = json.loads(raw)
         except json.JSONDecodeError:
-            _write({"id": None, "ok": False, "error": "invalid JSON"})
+            _write({"id": None, "ok": False, "error": "invalid JSON", "code": "BAD_ARGS"})
             continue
         rid = req.get("id")
         method = req.get("method")
@@ -149,21 +247,28 @@ def serve() -> None:
             elif method == "list_tools":
                 data = registry.list_tools()
             elif method == "call":
-                # P121: universal verification for mutating tools (see _call_verified)
-                data = _call_verified(ctx, params.get("name"), params.get("args") or {})
-                # P94: attach the lightweight document snapshot to every tool result so
-                # the model never has to burn a list_features/analyze_view turn just to
-                # locate itself. Failure to build the snapshot must not fail the tool.
-                if isinstance(data, dict):
-                    try:
-                        data["_state"] = ctx.doc_state()
-                    except Exception:  # noqa: BLE001 — state is a convenience
-                        pass
+                name, args = params.get("name"), params.get("args") or {}
+                op_id, expect = params.get("op_id"), params.get("expect_state")
+                # ruff B023: lambda captures the locals above (single statement, not in a loop);
+                # the values are bound at lambda creation time, no late-binding hazard.
+                data = executor.run(lambda: _call(ctx, name, args, op_id, expect))  # noqa: B023
             elif method == "reconnect":
-                ctx.reconnect()
+                executor.run(ctx.reconnect)
                 data = {"reconnected": True}
+            elif method == "health":
+                data = executor.run(lambda: _health(ctx))
+            elif method == "state":
+                data = {"state_version": GUARD.state_version}
             else:
-                raise ValueError(f"unknown method: {method}")
+                raise CodedError("UNKNOWN_TOOL", f"unknown method: {method}")
             _write({"id": rid, "ok": True, "data": data})
-        except Exception as e:  # noqa: BLE001 — normalize any tool exception into a structured error for the agent
-            _write({"id": rid, "ok": False, "error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            _write({"id": rid, "ok": False, "error": str(e), "code": _error_code(e)})
+    executor.stop()
+
+
+def _warm(ctx: Context) -> None:
+    try:
+        ctx.sw
+    except Exception:  # noqa: BLE001
+        pass
