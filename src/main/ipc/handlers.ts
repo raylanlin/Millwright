@@ -127,9 +127,18 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     try {
       const sidecar = getSidecar({ onLog: (l) => console.log('[sidecar]', l) });
       await sidecar.start();
+      // P130: a tool is executing on the sidecar's single COM thread — do not queue behind it.
+      // Serve the last known status and say we are busy; the UI shows "working" instead of a
+      // red/green flicker, and the probe can no longer time out in the queue.
+      if (sidecar.runningTool && sidecar.lastStatus) {
+        return { ...sidecar.lastStatus, source: 'sidecar' as const, busy: true, runningTool: sidecar.runningTool };
+      }
       const r = await sidecar.call('sw_status', {});
       if (r.ok && r.data?.connected) {
         return { ...r.data, source: 'sidecar' as const };
+      }
+      if (r.code === 'TIMEOUT' && sidecar.lastStatus) {
+        return { ...sidecar.lastStatus, source: 'sidecar' as const, busy: true, runningTool: sidecar.runningTool };
       }
     } catch {
       // fall through to the legacy probe

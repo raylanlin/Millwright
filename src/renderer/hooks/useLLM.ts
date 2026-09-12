@@ -216,7 +216,9 @@ export function useLLM({ config, initial }: UseLLMOptions) {
           pushToolStep(ev.toolCall);
           break;
         case 'tool_result':
-          resolveToolStep(ev.toolCall);
+          // P130: thread durationMs off the ToolCall onto the AgentStep so the UI card
+          // and the session exporter can show "1.2s" instead of just the result text.
+          resolveToolStep({ ...ev.toolCall, durationMs: ev.toolCall?.durationMs });
           break;
         case 'confirm_request': {
           // P28: inline confirm card instead of window.confirm — push a 'confirm'

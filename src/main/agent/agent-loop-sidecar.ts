@@ -159,12 +159,14 @@ function clip(s: string): string {
   return s && s.length > TOOL_RESULT_MAX ? s.slice(0, TOOL_RESULT_MAX) + '…(truncated)' : s;
 }
 
-function fmtResult(name: string, r: { ok: boolean; data?: any; error?: string; code?: string }): string {
+function fmtResult(name: string, r: { ok: boolean; data?: any; error?: string; code?: string; durationMs?: number }): string {
   if (r.ok) return `✅ ${name}: ${clip(JSON.stringify(r.data ?? {}, null, 0))}`;
   const code = r.code ? `[${r.code}] ` : '';
   const hint = r.code === 'NO_DOCUMENT' ? ' → call new_part / open_document first'
     : r.code === 'STALE_STATE' ? ' → the document changed; re-read with list_features / list_faces before acting'
-    : r.code === 'NO_CONNECTION' ? ' → SolidWorks is not reachable; ask the user to open it' : '';
+    : r.code === 'NO_CONNECTION' ? ' → SolidWorks is not reachable; ask the user to open it'
+    : r.code === 'TIMEOUT' ? ' → the operation may have COMPLETED; call list_features before retrying (a retry would build it twice)'
+    : '';
   return `❌ ${name} failed: ${code}${clip(r.error ?? 'unknown error')}${hint}`;
 }
 
@@ -374,7 +376,7 @@ export async function runSidecarAgent(
       // never asked for — the user then has to type "continue". Nudge once: push the
       // plan into history and tell it to proceed. Only on the first round, and only
       // once, so a genuine "I have a question for you" answer still ends the turn.
-      if (round === 0 && !nudged && (resp.content ?? '').length > 80) {
+      if (round === 0 && !nudged && (resp.content ?? '').length > 80 && !looksLikeQuestion(resp.content ?? '')) {
         nudged = true;
         history.push({
           role: 'assistant',
@@ -478,8 +480,17 @@ export async function runSidecarAgent(
         if (destructive.has(call.name)) await ensureBackup();
 
         opts.onEvent?.({ type: 'tool_start', toolCall: call });
-        // P125: op_id idempotency — same call.id on retry returns the cached result
-        const r = await sidecar.call(call.name, call.parameters, { opId: call.id });
+        // P125: op_id idempotency — same call.id on retry returns the cached result.
+        // P130: onStillRunning callback fires every time the sidecar sends a progress
+        // heartbeat; we surface a "still running" note in the chat so the user knows the
+        // tool is genuinely progressing instead of just hanging.
+        const r = await sidecar.call(call.name, call.parameters, {
+          opId: call.id,
+          onStillRunning: (ms) => opts.onEvent?.({ type: 'text', text: `（${call.name} 已运行 ${Math.round(ms / 1000)} s，SolidWorks 仍在执行，继续等待…）` }),
+        });
+        // P130: stash the wall-clock duration on the call so the UI card and the session
+        // export can show it.
+        (call as any).durationMs = r.durationMs;
         // P125: surface unverified SolidWorks version advisory once
         if (r.ok && r.data?._advisory && !advisoryShown) {
           advisoryShown = true;
@@ -756,5 +767,16 @@ function auditClaimedCalls(
     }
   }
   return claimed;
+}
+
+/** P130: does this reply hand the turn back to the user (a question / a request for parameters)?
+ *  Used by the auto-nudge gate: if the model's first-round reply is a question, we MUST NOT
+ *  push it forward with "proceed" — the 16:15 gear session asked for module/teeth, got
+ *  auto-nudged, and built a gear from the example values the user never confirmed. */
+export function looksLikeQuestion(text: string): boolean {
+  const t = text.trim();
+  if (/[?？]\s*$/.test(t)) return true;                                   // ends with a question mark
+  if ((t.match(/[?？]/g) || []).length >= 2) return true;                 // several questions inside
+  return /(请(告诉|提供|给出|确认|回复|选择)|需要(你|您)?(提供|确认|告诉)|告诉我|你想|您想|哪(一)?(种|个)|多少|几个|which|what (size|module|value|diameter)|please (provide|tell|confirm|specify)|let me know|do you want|would you like|could you (tell|confirm))/i.test(t);
 }
 

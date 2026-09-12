@@ -63,6 +63,9 @@ export interface ToolCall {
   name: string;
   parameters: Record<string, any>;
   result?: string;
+  /** P130: wall-clock duration of the sidecar call (set when the call resolves). The UI
+   *  ToolCallCard and the session exporter both surface it. */
+  durationMs?: number;
 }
 
 export interface ChatMessage {
@@ -202,6 +205,11 @@ export interface SWStatus {
   /** P73: which probe produced this status — the sidecar holds the connection the tools
    *  actually run through, so its verdict outranks the separate cscript probe. */
   source?: 'sidecar' | 'vbs';
+  /** P130: a tool is currently executing on the sidecar's single COM thread. The probe
+   *  served the last known status instead of queueing behind the tool. */
+  busy?: boolean;
+  /** P130: name of the tool currently executing (only set when busy=true). */
+  runningTool?: string;
   version?: string;
   activeDocumentType?: SWDocumentType;
   activeDocumentPath?: string;

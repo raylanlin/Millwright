@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from collections import OrderedDict
 
@@ -56,10 +57,16 @@ from sw_agent.tools import (  # noqa: F401  (import order = category display ord
 
 VERIFIED_YEARS = {int(y) for y in os.environ.get("SW_AGENT_VERIFIED_YEARS", "2024,2025").split(",") if y.strip().isdigit()}
 
+_OUT_LOCK = threading.Lock()
+
 
 def _write(obj: dict) -> None:
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    # P130: heartbeat thread and the main stdin loop both write stdout — lock so JSON frames
+    # never interleave (a partial frame on Node's readline side used to show up as a parse
+    # error and silently drop the heartbeat).
+    with _OUT_LOCK:
+        sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
 
 
 class _Guard:
@@ -203,6 +210,23 @@ def _call(ctx: Context, name: str, args: dict, op_id=None, expect_state=None):
         return work()
 
 
+HEARTBEAT_S = 15.0
+
+
+def _call_with_heartbeat(executor, ctx, rid, name, args, op_id, expect):
+    """P130: while the executor works on this call, tell Node every HEARTBEAT_S seconds that
+    SolidWorks is still busy. Node resets its deadline on each frame (idle timeout), so a long
+    gear/batch/export never trips a flat 60 s timer while the work is genuinely progressing."""
+    fut = executor.submit(lambda: _call(ctx, name, args, op_id, expect))
+    t0 = time.perf_counter()
+    while True:
+        try:
+            return fut.result(timeout=HEARTBEAT_S)
+        except TimeoutError:
+            _write({"id": rid, "progress": True, "tool": name,
+                    "elapsed_ms": round((time.perf_counter() - t0) * 1000)})
+
+
 def _health(ctx: Context) -> dict:
     info: dict = {"connected": False, "state_version": GUARD.state_version, "tool_count": len(registry.TOOLS),
                   "session_log": str(session_log.session_path()) if session_log._ENABLED else None}
@@ -227,9 +251,11 @@ def serve() -> None:
     executor = ComExecutor("sw-com")
     executor.start()
     _write({"id": None, "ok": True, "data": {"ready": True, "tool_count": len(registry.TOOLS),
-                                             "protocol": {"op_id": True, "state_version": True, "codes": True}}})
-    executor.submit(lambda: _warm(ctx))
-    import threading
+                                             "protocol": {"op_id": True, "state_version": True, "codes": True, "progress": True}}})
+    # P130: no startup warm-up. Under the single executor thread (P122) a Dispatch() that
+    # blocks while SolidWorks loads add-ins sits at the HEAD of the queue and delays every
+    # probe behind it — that is how the first sw_status of the 16:15 session timed out.
+    # Connecting lazily costs a few hundred ms on the first real call and blocks nothing.
     def _watchdog():
         # If the parent dies mid-COM-call the stdin loop never sees EOF. Poll the pipe from a
         # helper thread: once stdin is closed, give the current job 5 s and hard-exit.
@@ -266,9 +292,7 @@ def serve() -> None:
             elif method == "call":
                 name, args = params.get("name"), params.get("args") or {}
                 op_id, expect = params.get("op_id"), params.get("expect_state")
-                # ruff B023: lambda captures the locals above (single statement, not in a loop);
-                # the values are bound at lambda creation time, no late-binding hazard.
-                data = executor.run(lambda: _call(ctx, name, args, op_id, expect))  # noqa: B023
+                data = _call_with_heartbeat(executor, ctx, rid, name, args, op_id, expect)
             elif method == "reconnect":
                 executor.run(ctx.reconnect)
                 data = {"reconnected": True}
@@ -285,8 +309,4 @@ def serve() -> None:
     os._exit(0)
 
 
-def _warm(ctx: Context) -> None:
-    try:
-        ctx.sw
-    except Exception:  # noqa: BLE001
-        pass
+

@@ -6,6 +6,67 @@
 
 ## [Unreleased]
 
+## [0.2.129] - 2026-09-12
+
+### Changed (P130 — timeout≠failure)
+
+Per-tool budgets, sidecar heartbeat, retry-with-same-op_id, status probe skips the
+queue, the auto-nudge respects questions, durations flow into logs and exports.
+
+The 16:15 gear session taught us three things at once:
+
+1. **`[TIMEOUT]` ≠ failure.** A long SolidWorks operation that is genuinely progressing
+   tripped a flat 60 s Node-side deadline. P130 makes the deadline idle (resets on every
+   sidecar heartbeat) and gives the caller the cached real result when the deadline
+   does fire, instead of forcing the model to retry — which would have built the gear
+   twice. Sidecar now writes a `progress` JSON frame every 15 s while a call runs; Node
+   consumes it, resets its idle timer, and logs `call:<name> still running (Ns)`. stdout
+   is locked so the heartbeat and the response frame never interleave.
+2. **Auto-nudge swallowed the user's questions.** First-round reply ended with
+   "请告诉我 1. 模数 2. 齿数" — but the nudge gate (`length > 80`) treated it as a plan
+   and pushed the model forward with "proceed". The model then built a gear from
+   example m/z/bore values the user never confirmed. P130 adds `looksLikeQuestion`
+   (question mark, multiple questions, or "please tell me / what module / 告诉我" /
+   "哪一" style phrasing) and blocks the nudge when it fires.
+3. **The first `sw_status` of a session could time out in the queue.** P122 made the
+   sidecar a single-thread executor; the ready-handshake warm-up (a `ctx.sw` ping) sat
+   at the head of the queue while SolidWorks loaded add-ins and every probe behind it
+   waited. P130 drops the warm-up and connects lazily. The `SW_STATUS` IPC handler
+   now serves the last known status + `busy:true` + `runningTool:<name>` when a tool
+   is in flight — the UI dot turns amber with a tooltip naming the tool, no flicker.
+
+### Per-tool budgets (`SLOW_TOOLS` in `sw-sidecar.ts`)
+- Generators (`create_spur_gear` and friends): **5 min**.
+- `build_part` batch: **10 min**.
+- `sw_status`: **20 s** and **no** retry — it is a probe, it should fail fast.
+- Everything else: previous flat 60 s.
+
+When a budget fires, the sidecar returns `code: "TIMEOUT"`; the Node caller follows the
+op_id thread back to the sidecar's idempotency cache and gets the real result if it
+landed in time. If still running, the user sees 「仍在执行，继续等待…」 every 15 s and
+the tool card eventually carries `durationMs`.
+
+### Changed
+- `src/main/com/sw-sidecar.ts` (整文件覆盖) — `SLOW_TOOLS`, `inFlight`, `runningTool`,
+  `lastStatus`, `_history` for duplicate check, per-call `_t0` log, `_budgetMs(name)`.
+- `sidecar/sw_agent/server.py` — `_write` stdout lock, `_call_with_heartbeat` (15 s
+  frame), `serve()` drops the warm-up, ready handshake `protocol.progress = True`,
+  `_warm` removed.
+- `src/main/ipc/handlers.ts` — `SW_STATUS` probes `runningTool`/`lastStatus` first and
+  returns `busy:true`; TIMEOUT also serves the cached status.
+- `src/main/agent/agent-loop-sidecar.ts` — `looksLikeQuestion` blocks the first-round
+  nudge; `sidecar.call` adds `onStillRunning` callback; `ToolCall.durationMs` stashed.
+- `src/shared/types.ts` — `SWStatus.busy` / `SWStatus.runningTool` /
+  `ToolCall.durationMs`.
+- `src/renderer/components/StatusDot.tsx` — amber when `busy`, tooltip names the tool.
+- `src/renderer/hooks/useLLM.ts` — `tool_result` threads `durationMs` onto the step.
+- `src/renderer/session-export.ts` — Markdown `- ✓ \`extrude\` · 1.2s`; JSON steps
+  carry `durationMs`.
+- `src/main/llm/prompts.ts` — "Plan first, then act" §1 exception (ask + end turn on
+  missing dimensions); error-code glossary gains `[TIMEOUT]`.
+- `tests/agent-loop.test.mjs` — `looksLikeQuestion` smoke test.
+- `package.json` — 0.2.129
+
 ## [0.2.128] - 2026-09-12
 
 ### Changed (P129 — the installer is back, and this time it cleans up after itself)

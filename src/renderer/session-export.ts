@@ -48,7 +48,11 @@ function statusMark(status?: string): string {
 
 /** One tool step as an indented Markdown block. */
 function toolToMarkdown(s: AgentStep): string {
-  const lines = [`- ${statusMark(s.status)} \`${s.name ?? 'tool'}\``];
+  // P130: surface wall-clock duration next to the tool name so a long gear/batch is
+  // visible at a glance ("- ✓ `extrude` · 1.2s").
+  const dur = (s as any).durationMs;
+  const durStr = typeof dur === 'number' ? ` · ${(dur / 1000).toFixed(1)}s` : '';
+  const lines = [`- ${statusMark(s.status)} \`${s.name ?? 'tool'}\`${durStr}`];
   if (s.params && Object.keys(s.params).length) {
     lines.push('  ```json', ...JSON.stringify(s.params, null, 2).split('\n').map((l) => '  ' + l), '  ```');
   }
@@ -130,6 +134,8 @@ export function sessionToJSON(messages: ChatMessage[]): string {
                 ...(s.params ? { params: s.params } : {}),
                 ...(s.status ? { status: s.status } : {}),
                 ...(s.result ? { result: s.result } : {}),
+                // P130: persist the wall-clock duration alongside the tool step.
+                ...((s as any).durationMs !== undefined ? { durationMs: (s as any).durationMs } : {}),
               })),
             }
           : {}),
