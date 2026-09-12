@@ -128,8 +128,9 @@ Create Feature → Capture View → Vision Model → Compare With Request → Ne
 
 ### Install
 
-1. Download the installer from [Releases](https://github.com/raylanlin/Millwright/releases) and run it.
+1. Download the **Setup** installer (`Millwright-Setup-*-x64.exe`) from [Releases](https://github.com/raylanlin/Millwright/releases) and run it — progress bar, optional install folder, no silent one-click.
 2. Start SolidWorks, then launch Millwright — the Python runtime is bundled, nothing else to install.
+3. Updates roll in inside the app: a banner appears within ~15 s of a new release, click to download (a sidecar-only release is a few MB), then “Restart & install”. Auto-update is opt-in per click; `autoInstallOnAppQuit` applies it on next quit if you never click.
 
 ### From source
 
@@ -144,6 +145,10 @@ npm run dev
 > UI-only development without SolidWorks: set `SKIP_SW_CONNECT=true`.
 >
 > Without Python the app still runs, falling back to the legacy VBScript engine — but you lose structured results and visual understanding.
+
+### Zip build
+
+A `Millwright-*-x64.zip` is also published alongside the Setup installer for users who can't or won't run an installer. Extract it anywhere and double-click `Millwright.exe`. **The zip build does NOT auto-update** — install the Setup build if you want in-app updates.
 
 ### Configure
 

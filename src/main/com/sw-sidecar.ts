@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import { sessionDir } from '../housekeeping';
 import { resolvePythonPath, resolveSidecarCwd } from '../python-path';
 
 export type SidecarErrorCode =
@@ -111,7 +112,7 @@ export class SWSidecar {
     const proc = spawn(this.opts.pythonPath, args, {
       cwd: this.opts.cwd,
       windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', SW_AGENT_SESSION_DIR: sessionDir() },
     });
     this.proc = proc;
 

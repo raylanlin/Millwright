@@ -20,36 +20,61 @@ files:
   - '!vite.config.ts'
   - '!.env*'
 
-# P3: ship the Python sidecar alongside the installer / portable build.
-# sw-sidecar.ts defaults its cwd to resourcesPath/sidecar (see its constructor).
 extraResources:
   - from: 'sidecar'
     to: 'sidecar'
     filter:
       - '**/*'
-  # P12: ship the bundled Python runtime so users don't have to install Python
-  # + pywin32 themselves. `vendor/python/` is populated by `scripts/prepare-python.ps1`
-  # before `electron-builder` runs (see .github/workflows/build.yml and
-  # package.json's dist script). Path resolution at runtime lives in
-  # src/main/python-path.ts — that's the single source of truth for "where's python".
+      - '!**/__pycache__/**'
+      - '!tests/**'
   - from: 'vendor/python'
     to: 'python'
 
 win:
-  # P110: NSIS setup retired (2026-08-04). Portable single-file .exe (P110 v2)
-  # also retired — slow startup, and users prefer the extract-and-run directory.
-  # Releases now ship a plain .zip containing the full win-unpacked tree.
+  # P129: NSIS is back, alongside the zip. The P110 retreat to a bare zip traded one
+  # class of complaint (installer "unusable") for another (manual delete-and-extract on
+  # every release, no auto-update). The installer problems had identifiable causes —
+  # one-click with no UI on a 200 MB payload, upgrades failing while a stale sidecar
+  # python.exe still held resources/python/*.dll, and the SW Copilot → Millwright rename
+  # leaving two Programs-and-Features entries — all handled in build/installer.nsh.
   target:
+    - target: nsis
+      arch: [x64]
     - target: zip
       arch: [x64]
   icon: assets/icon.ico
   artifactName: '${productName}-${version}-${arch}.${ext}'
+  # unsigned build: electron-updater must not demand a matching publisher certificate
+  verifyUpdateCodeSignature: false
 
-# NSIS installer config removed with the setup build (P110).
+nsis:
+  # assisted installer: the user SEES progress and picks the folder. A one-click install
+  # of a 200 MB payload shows nothing for ~20 s and gets killed as "hung".
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Millwright
+  artifactName: '${productName}-Setup-${version}-${arch}.${ext}'
+  uninstallDisplayName: Millwright
+  # our own uninstaller asks before touching settings / history (see installer.nsh);
+  # electron-builder's flag would delete them unconditionally
+  deleteAppDataOnUninstall: false
+  # blockmap → electron-updater downloads only the changed blocks (a sidecar-only release
+  # is a few MB instead of 200)
+  differentialPackage: true
+  include: build/installer.nsh
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  license: LICENSE
 
 squirrelWindows: null
 
 publish:
   provider: github
   owner: raylanlin
-  repo: millwright
+  repo: Millwright
+  releaseType: release

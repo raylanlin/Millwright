@@ -20,6 +20,7 @@ import { ExportSessionMenu } from './components/ExportSessionMenu';
 import { Automations } from './components/Automations';
 import { ToolsPanel } from './components/ToolsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
+import { UpdateBanner } from './components/UpdateBanner';
 
 export default function App() {
   const { theme, setTheme, toggle, tokens: t } = useTheme();
@@ -246,6 +247,8 @@ export default function App() {
       />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {/* Update banner */}
+        <UpdateBanner t={t} />
         {/* Error banner */}
         {!dismissedError && (
           <ErrorBanner

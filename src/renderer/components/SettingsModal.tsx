@@ -20,6 +20,9 @@ type TestStatus =
   | { kind: 'success' }
   | { kind: 'error'; message: string };
 
+// P129: app version + auto-update availability for the About row
+interface VersionInfo { version: string; updatesEnabled: boolean; justUpdated: boolean; updateFailed: string | null }
+
 interface Props {
   t: ThemeTokens;
   config: LLMConfig;
@@ -40,6 +43,9 @@ export function SettingsModal({
   const [showKey, setShowKey] = useState(false);
   const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
   const [saving, setSaving] = useState(false);
+  // P129: About row needs the app version + auto-update availability
+  const [ver, setVer] = useState<VersionInfo | null>(null);
+  useEffect(() => { window.api.update.version().then(setVer).catch(() => undefined); }, []);
 
   // Re-sync the draft when the external config changes (e.g. after the initial async load).
   useEffect(() => {
@@ -597,6 +603,30 @@ export function SettingsModal({
             />
           </div>
         )}
+
+        {/* About — P129: app version + auto-update availability */}
+        <label style={labelStyle}>{tr('settings.about')}</label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <span>Millwright v{ver?.version ?? '…'}</span>
+          {ver?.updatesEnabled ? (
+            <button
+              onClick={() => window.api.update.check()}
+              style={{
+                padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                border: `1px solid ${t.cardBorder}`, background: 'transparent',
+                color: t.textSecondary, fontSize: 12, fontFamily: 'inherit',
+              }}
+            >
+              {locale === 'zh' ? '检查更新' : 'Check for updates'}
+            </button>
+          ) : (
+            <span style={{ opacity: 0.7, fontSize: 12, color: t.textMuted }}>
+              {locale === 'zh'
+                ? '（zip 解压版不支持自动更新，请安装 Setup 版）'
+                : '(zip build — install the Setup build for auto-update)'}
+            </span>
+          )}
+        </div>
 
         {/* Test status info */}
         {testStatus.kind === 'error' && (

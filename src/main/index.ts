@@ -13,8 +13,15 @@ import { getBridge } from './com/sw-bridge';
 import { getSidecar } from './com/sw-sidecar';
 import { SWHealthMonitor } from './com/health';
 import { IpcChannels } from '../shared/ipc-channels';
+import { initUpdater, stopUpdater } from './updater';
+import { claimSingleInstance, killStaleSidecars, sweepTemp } from './housekeeping';
 
 const isDev = process.env.NODE_ENV === 'development';
+
+// P129: one instance only — a second launch focuses the first window instead of spawning a second sidecar
+if (!claimSingleInstance(() => { const w = mainWindow; if (w) { if (w.isMinimized()) w.restore(); w.focus(); } })) {
+  app.quit();
+}
 
 let mainWindow: BrowserWindow | null = null;
 let healthMonitor: SWHealthMonitor | null = null;
@@ -82,6 +89,9 @@ app.whenReady().then(async () => {
     initNetStack();  // P106: prefer IPv4 answers — broken IPv6 routes surface as EAI_AGAIN
   crashLog(`app ready, electron ${process.versions.electron}`);
 
+  await killStaleSidecars();   // P129: a crashed previous run must not hold resources/python/*.dll
+  sweepTemp();
+
   try {
     crashLog('generators coverage check');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -111,6 +121,8 @@ app.whenReady().then(async () => {
   createMainWindow();
   crashLog('window created');
 
+  initUpdater(getMainWindow);  // P129: electron-updater, GitHub Releases, 15 s after start then every 6 h
+
   if (process.env.SKIP_SW_CONNECT !== 'true') {
     startHealthMonitor();
     getBridge().connect().catch(() => void 0);
@@ -130,6 +142,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  stopUpdater();
   abortAllRequests();
   healthMonitor?.stop();
   getSidecar().stop(); // P3: stop the python sidecar process on quit

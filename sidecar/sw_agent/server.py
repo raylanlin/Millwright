@@ -229,6 +229,23 @@ def serve() -> None:
     _write({"id": None, "ok": True, "data": {"ready": True, "tool_count": len(registry.TOOLS),
                                              "protocol": {"op_id": True, "state_version": True, "codes": True}}})
     executor.submit(lambda: _warm(ctx))
+    import threading
+    def _watchdog():
+        # If the parent dies mid-COM-call the stdin loop never sees EOF. Poll the pipe from a
+        # helper thread: once stdin is closed, give the current job 5 s and hard-exit.
+        try:
+            while not sys.stdin.closed:
+                time.sleep(2)
+                try:
+                    if sys.stdin.buffer.peek(1) == b"":
+                        break
+                except Exception:  # noqa: BLE001 — peek on a closed stdin pipe is the trigger we care about
+                    break
+        except Exception:  # noqa: BLE001 — watchdog must never crash the sidecar itself
+            pass
+        time.sleep(5)
+        os._exit(0)
+    threading.Thread(target=_watchdog, name="stdin-watchdog", daemon=True).start()
     for raw in sys.stdin:
         raw = raw.strip()
         if not raw:
@@ -265,6 +282,7 @@ def serve() -> None:
         except Exception as e:  # noqa: BLE001
             _write({"id": rid, "ok": False, "error": str(e), "code": _error_code(e)})
     executor.stop()
+    os._exit(0)
 
 
 def _warm(ctx: Context) -> None:

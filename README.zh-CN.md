@@ -127,8 +127,9 @@ AI 不应该被允许悄悄破坏 CAD 数据。
 
 ### 安装
 
-1. 从 [Releases](https://github.com/raylanlin/Millwright/releases) 下载安装包并运行。
+1. 从 [Releases](https://github.com/raylanlin/Millwright/releases) 下载 **Setup 安装包**（`Millwright-Setup-*-x64.exe`）并运行——有进度条、可选安装目录，不再是静默一键安装。
 2. 先启动 SolidWorks，再启动 Millwright —— Python 运行时已内置，无需额外安装任何东西。
+3. 之后有新版本时，应用内会弹出横幅提示（发布后约 15 s），点「立即更新」下载（仅改动 sidecar 时只需几 MB blockmap 差量），完成后「重启并安装」。自动更新按点击触发；若你从未点过，下次退出时也会按 `autoInstallOnAppQuit` 自动安装已下载的更新。
 
 ### 从源码运行
 
@@ -143,6 +144,10 @@ npm run dev
 > 纯 UI 开发无需 SolidWorks：设置 `SKIP_SW_CONNECT=true`。
 >
 > 未装 Python 时应用仍可运行，会自动回退到旧的 VBScript 引擎——但会失去结构化结果与视觉理解。
+
+### Zip 解压版
+
+`Millwright-*-x64.zip` 与 Setup 安装包一起发布，给不能/不想跑安装程序的用户。解压到任意目录，双击 `Millwright.exe` 即可运行。**zip 版不包含自动更新**——想要应用内更新请安装 Setup 版。
 
 ### 配置
 

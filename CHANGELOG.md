@@ -6,6 +6,49 @@
 
 ## [Unreleased]
 
+## [0.2.128] - 2026-09-12
+
+### Changed (P129 — the installer is back, and this time it cleans up after itself)
+
+P110 retired the NSIS installer because users found it "unusable" and shipped a bare zip
+instead. That traded one complaint for another: every release meant delete-folder-and-extract,
+and no auto-update was possible. The installer's failures had causes, and each is fixed here:
+
+- **Silent one-click on a 200 MB payload** looked hung → assisted installer (`oneClick:false`)
+  with progress and folder choice.
+- **Upgrades failed with "cannot write file"** because a crashed run's sidecar `python.exe` still
+  held `resources/python/*.dll` → `build/installer.nsh` stops Millwright/python/cscript processes
+  running *from the install dir* before copying; the app itself now kills stale sidecars on start
+  (`housekeeping.killStaleSidecars`), holds a single-instance lock, and the sidecar hard-exits
+  when its stdin closes.
+- **Two "Programs and Features" entries** after the SW Copilot → Millwright rename → `customInit`
+  silently uninstalls `com.swcopilot.app` and drops its registry key.
+- **Folders that would not delete** because Python wrote `__pycache__` after install →
+  `PYTHONDONTWRITEBYTECODE=1` for the sidecar, explicit removal on uninstall.
+- **Residue in %APPDATA% / %LOCALAPPDATA% / %TEMP%** → the uninstaller always removes caches and
+  scratch (`millwright-updater`, `Millwright-update`, `millwright-backups`, `gen_py`, `sw_*`) and
+  *asks* before removing settings, API key and chat history. Session logs (P125) moved from
+  `%LOCALAPPDATA%\Millwright` into userData so one answer covers all user data. The app sweeps
+  day-old `sw_vbs_/sw_com_/sw_macro_/sw_result_/sw_script_` scratch on start.
+
+### Added (in-app updates via electron-updater)
+
+`src/main/updater.ts` checks GitHub Releases (`latest.yml`) 15 s after start and every 6 h;
+downloads only on the user's click (blockmap differential — a sidecar-only release is a few MB);
+`quitAndInstall` runs NSIS silently and relaunches; `autoInstallOnAppQuit` applies a downloaded
+update on the next quit if the user never clicks. `UpdateBanner` shows available / downloading /
+ready / error / "updated to vX"; "skip this version" is remembered. The zip build stays
+downloadable but does not auto-update (Settings says so).
+
+### Changed
+- `electron-builder.yml` (nsis + zip, differentialPackage, verifyUpdateCodeSignature:false)
+- `build/installer.nsh` (new), `src/main/{updater,housekeeping}.ts` (new), `src/main/index.ts`,
+  `src/main/com/sw-sidecar.ts`, `src/preload/index.ts`, `src/shared/ipc-channels.ts`,
+  `src/renderer/App.tsx`, `src/renderer/components/{UpdateBanner,SettingsModal}.tsx`,
+  `sidecar/sw_agent/server.py` (stdin watchdog), `.github/workflows/build.yml`
+  (installer + blockmap + latest.yml published; verify step), `tests/housekeeping.test.mjs`
+- `package.json` — 0.2.128, `electron-updater` dependency
+
 ## [0.2.127] - 2026-09-12
 
 ### Changed (P127 — tool hardening, index-selection prompt, verified badges)

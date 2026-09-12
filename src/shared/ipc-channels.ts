@@ -41,6 +41,15 @@ export const IpcChannels = {
   CHAT_SAVE: 'chat:save',
   CHAT_DELETE: 'chat:delete',
   CHAT_CREATE: 'chat:create',
+
+  // P128: in-app updates (portable zip distribution)
+  APP_VERSION: 'app:version',
+  UPDATE_CHECK: 'update:check',
+  UPDATE_DOWNLOAD: 'update:download',
+  UPDATE_INSTALL: 'update:install',
+  UPDATE_SKIP: 'update:skip',
+  UPDATE_OPEN_RELEASE: 'update:open-release',
+  UPDATE_EVENT: 'update:event',
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];

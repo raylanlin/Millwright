@@ -147,6 +147,20 @@ const api = {
     create: (initialMessages?: ChatMessage[]): Promise<ChatSession> =>
       ipcRenderer.invoke(IpcChannels.CHAT_CREATE, initialMessages),
   },
+  update: {
+    version: (): Promise<{ version: string; updatesEnabled: boolean; justUpdated: boolean; updateFailed: string | null }> =>
+      ipcRenderer.invoke(IpcChannels.APP_VERSION),
+    check: (): Promise<{ ok: boolean; info?: any; error?: string }> => ipcRenderer.invoke(IpcChannels.UPDATE_CHECK),
+    download: (): Promise<{ ok: boolean; version?: string; error?: string }> => ipcRenderer.invoke(IpcChannels.UPDATE_DOWNLOAD),
+    install: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke(IpcChannels.UPDATE_INSTALL),
+    skip: (version: string) => ipcRenderer.invoke(IpcChannels.UPDATE_SKIP, version),
+    openRelease: () => ipcRenderer.invoke(IpcChannels.UPDATE_OPEN_RELEASE),
+    onEvent: (cb: (ev: any) => void) => {
+      const handler = (_e: unknown, ev: any) => cb(ev);
+      ipcRenderer.on(IpcChannels.UPDATE_EVENT, handler);
+      return () => { ipcRenderer.removeListener(IpcChannels.UPDATE_EVENT, handler); };
+    },
+  },
 };
 
 export type PreloadAPI = typeof api;
