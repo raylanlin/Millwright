@@ -23,7 +23,7 @@ import { resolveSystemPrompt } from './prompts';
 import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
 import { parseSSE } from './sse';
-import { splitThinking } from './thinking';
+import { splitThinking, anthropicReasoningParams } from './thinking';
 import type {
   ChatMessage,
   LLMResponse,
@@ -45,6 +45,7 @@ interface AnthropicResponseBody {
   content: AnthropicTextContent[];
   model: string;
   stop_reason: string | null;
+  stop_details?: { category?: string | null } | null;
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -67,19 +68,14 @@ export class AnthropicAdapter extends BaseLLMAdapter {
   }
 
   /**
-   * P53: extended thinking. Anthropic takes a budget, not a level, and requires
-   * budget_tokens < max_tokens. 'auto' sends nothing (model default).
+   * P53: reasoning depth. P131: per-model request surface (see anthropicReasoningParams)
+   * — current Claude models reject `temperature` and `budget_tokens` with a 400, so
+   * sampling and thinking fields are chosen together, by model id.
    */
-  private thinkingExtras(): Record<string, any> {
-    const lv = this.config.reasoningLevel ?? 'auto';
-    if (lv === 'auto' || lv === 'adaptive') return {};  // P54: no Anthropic equivalent of 'adaptive'
-    // P55: the Mythos-class models (Fable 5 / Mythos 5) run always-on adaptive thinking
-    // and reject an attempt to disable it — leave them on the provider default.
-    if (/fable|mythos/i.test(this.config.model ?? '')) return {};
-    if (lv === 'off') return { thinking: { type: 'disabled' } };
-    const budgets: Record<string, number> = { low: 1024, medium: 4096, high: 16384 };
-    const budget = Math.min(budgets[lv] ?? 4096, Math.max(1024, this.maxTokens() - 1024));
-    return { thinking: { type: 'enabled', budget_tokens: budget } };
+  private requestExtras(): Record<string, any> {
+    return anthropicReasoningParams(
+      this.config.reasoningLevel, this.config.model, this.maxTokens(), this.config.temperature,
+    );
   }
 
   private buildBody(messages: ChatMessage[], stream: boolean) {
@@ -91,11 +87,10 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     return {
       model: this.config.model,
       max_tokens: this.maxTokens(),
-      temperature: this.config.temperature ?? 0.3,
       system: systemPrompt,
       stream,
       messages: rest.map((m) => ({ role: m.role, content: m.content })),
-      ...this.thinkingExtras(),
+      ...this.requestExtras(),
     };
   }
 
@@ -120,18 +115,25 @@ export class AnthropicAdapter extends BaseLLMAdapter {
    * P53: POST, and if the gateway rejects the `thinking` field with a 400, retry ONCE
    * without it. An Anthropic-compatible proxy that predates extended thinking should
    * degrade to "no reasoning control", never to a dead request.
+   * P131: same for `output_config` (effort) and for sampling — a model id we don't
+   * recognise yet that has dropped `temperature` should degrade, not die.
    */
   private async post(body: any, signal: AbortSignal): Promise<Response> {
     const url = `${this.getBaseURL()}/v1/messages`;
     const send = (b: any) => llmFetch(url, {
       method: 'POST', headers: this.buildHeaders(), body: JSON.stringify(b), signal,
-    });
+    }, undefined, { connectMs: b.stream ? undefined : 0 });
     const res = await send(body);
-    if (res.status !== 400 || !('thinking' in body)) return res;
+    const optional = ['thinking', 'output_config', 'temperature'].filter((k) => k in body);
+    if (res.status !== 400 || optional.length === 0) return res;
     const text = await res.clone().text();
-    if (!/thinking/i.test(text)) return res;
     const stripped = { ...body };
-    delete stripped.thinking;
+    if (/thinking|budget_tokens|effort|output_config/i.test(text)) {
+      delete stripped.thinking;
+      delete stripped.output_config;
+    }
+    if (/temperature|top_p|top_k|sampling/i.test(text)) delete stripped.temperature;
+    if (optional.every((k) => k in stripped)) return res;  // the 400 is about something else
     return send(stripped);
   }
 
@@ -162,7 +164,8 @@ export class AnthropicAdapter extends BaseLLMAdapter {
         .join('');
 
       // P53: drop any inline <think> block (OSS models behind Anthropic-compatible proxies)
-      return this.finalize(splitThinking(content).answer, data.usage, data.stop_reason);
+      const answer = withRefusal(splitThinking(content).answer, data.stop_reason, data.stop_details);
+      return this.finalize(answer, data.usage, data.stop_reason);
     } catch (err) {
       throw toLLMError(err, 'Anthropic 请求失败');
     } finally {
@@ -180,6 +183,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     let acc = '';
     const usage: { input_tokens?: number; output_tokens?: number } = {};
     let stopReason: string | null = null;
+    let stopDetails: any = null;
 
     try {
       yield { type: 'start', requestId };
@@ -217,6 +221,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
           }
           case 'message_delta': {
             if (payload.delta?.stop_reason) stopReason = payload.delta.stop_reason;
+            if (payload.delta?.stop_details) stopDetails = payload.delta.stop_details;
             if (payload.usage?.output_tokens != null)
               usage.output_tokens = payload.usage.output_tokens;
             break;
@@ -237,6 +242,11 @@ export class AnthropicAdapter extends BaseLLMAdapter {
         }
       }
 
+      const notice = withRefusal(acc, stopReason, stopDetails).slice(acc.length);
+      if (notice) {
+        acc += notice;
+        yield { type: 'delta', requestId, chunk: notice };
+      }
       yield {
         type: 'done',
         requestId,
@@ -325,15 +335,12 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     const body: any = {
       model: this.config.model,
       max_tokens: this.maxTokens(),
-      temperature: this.config.temperature ?? 0.3,
       system: systemPrompt,
       stream,
       messages: wire,
-      ...this.thinkingExtras(),
+      ...this.requestExtras(),
     };
     if (tools && tools.length > 0) body.tools = this.toAnthropicTools(tools);
-    // Extended thinking requires the default temperature
-    if (body.thinking?.type === 'enabled') delete body.temperature;
     return body;
   }
 
@@ -365,7 +372,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       const split = splitThinking(content);
 
       return {
-        content: split.answer,
+        content: withRefusal(split.answer, data.stop_reason, data.stop_details),
         reasoning: [reasoning, split.reasoning].filter(Boolean).join('\n') || undefined,
         toolCalls: toolCalls.length ? toolCalls : undefined,
         finishReason: toolCalls.length ? 'tool_use' : 'stop',
@@ -401,6 +408,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
     let content = '';
     let reasoning = '';
     let stopReason: string | null = null;
+    let stopDetails: any = null;
     const usage: { input_tokens?: number; output_tokens?: number } = {};
 
     try {
@@ -473,6 +481,7 @@ export class AnthropicAdapter extends BaseLLMAdapter {
 
           case 'message_delta':
             if (payload.delta?.stop_reason) stopReason = payload.delta.stop_reason;
+            if (payload.delta?.stop_details) stopDetails = payload.delta.stop_details;
             if (payload.usage?.output_tokens != null) usage.output_tokens = payload.usage.output_tokens;
             break;
 
@@ -485,10 +494,14 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       }
 
       const split = splitThinking(content);
+      const answer = withRefusal(split.answer, stopReason, stopDetails);
+      if (answer.length > split.answer.length) {
+        yield { kind: 'text', chunk: answer.slice(split.answer.length) };
+      }
       yield {
         kind: 'done',
         response: {
-          content: split.answer,
+          content: answer,
           reasoning: [reasoning, split.reasoning].filter(Boolean).join('\n') || undefined,
           toolCalls: toolCalls.length ? toolCalls : undefined,
           finishReason: toolCalls.length ? 'tool_use'
@@ -572,4 +585,16 @@ export class AnthropicAdapter extends BaseLLMAdapter {
       finishReason,
     };
   }
+}
+
+/**
+ * P131: Fable 5.1 / Opus 5.5 run safety classifiers that can decline a turn — HTTP 200,
+ * `stop_reason: 'refusal'`, usually with no text. Without a notice the agent loop
+ * finished the turn with an empty bubble and no explanation.
+ */
+function withRefusal(text: string, stopReason: string | null, details?: { category?: string | null } | null): string {
+  if (stopReason !== 'refusal') return text;
+  const cat = details?.category ? `（${details.category}）` : '';
+  const notice = `⚠️ 模型的安全策略拒绝了这次请求${cat}。可以换个说法重试，或在设置里换用其他模型。`;
+  return text ? `${text}\n\n${notice}` : notice;
 }

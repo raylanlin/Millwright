@@ -50,6 +50,9 @@ export interface AgentEvent {
 
 export interface SidecarAgentOptions {
   requestId?: string;
+  /** P131: model id + the system prompt the adapter sends — truncation budgets for them */
+  model?: string;
+  systemPrompt?: string;
   maxRounds?: number;
   signal?: AbortSignal;
   onEvent?: (ev: AgentEvent) => void;
@@ -189,6 +192,10 @@ export async function runSidecarAgent(
   let backupDone = false;
   // P125: surface SolidWorks version advisory once per session
   let advisoryShown = false;
+  // P131: op_ids are namespaced per run. The sidecar's idempotency cache outlives a chat
+  // session, and some providers restart their tool-call ids every conversation (Kimi's
+  // `functions.<name>:<n>`) — a bare call.id could hand a NEW call an OLD session's result.
+  const runNonce = Math.random().toString(36).slice(2, 10);
 
   // P19: cache the most recent screenshot so a (pure-text or multimodal) model can
   // ask several follow-up questions about the SAME snapshot without re-capturing.
@@ -236,6 +243,8 @@ export async function runSidecarAgent(
     ...VIRTUAL_TOOLS.filter((t) => t.function.name !== 'run_macro' || !!opts.runMacro),
     ...sidecarTools,
   ].filter((t: any) => !off.has(t?.function?.name));
+  // P131: text that rides along with every request besides the history
+  const overhead = (opts.systemPrompt ?? '') + JSON.stringify(tools);
   // P115: every advertised tool name — the audit scans narration for these.
   const toolNames = new Set(tools.map((t: any) => t?.function?.name).filter(Boolean));
   const destructive = new Set(
@@ -291,7 +300,9 @@ export async function runSidecarAgent(
 
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal?.aborted) throw new Error('已取消');
-    history = truncateMessages(history, '', opts.requestId ? String(opts.requestId) : '', opts.contextWindow);
+    // P131: the request also carries the system prompt and every tool schema — count them
+    // (they never were: the prompt slot got '' and the model slot got the request id).
+    history = truncateMessages(history, overhead, opts.model ?? '', opts.contextWindow);
     // Thin guard (block-aware truncation should already prevent this)
     while (history.length > 0 && (history[0].role === 'tool' || (history[0].role === 'system' && history[0].toolCalls?.length))) {
       history.shift();
@@ -484,13 +495,21 @@ export async function runSidecarAgent(
         // P130: onStillRunning callback fires every time the sidecar sends a progress
         // heartbeat; we surface a "still running" note in the chat so the user knows the
         // tool is genuinely progressing instead of just hanging.
+        // P131: one note per minute of waiting (heartbeats arrive every 15 s), and Stop
+        // abandons the wait instead of leaving the run stuck until the app restarts.
+        let lastNote = 0;
         const r = await sidecar.call(call.name, call.parameters, {
-          opId: call.id,
-          onStillRunning: (ms) => opts.onEvent?.({ type: 'text', text: `（${call.name} 已运行 ${Math.round(ms / 1000)} s，SolidWorks 仍在执行，继续等待…）` }),
+          opId: `${runNonce}:${call.id}`,
+          signal: opts.signal,
+          onStillRunning: (ms) => {
+            if (ms - lastNote < 60_000) return;
+            lastNote = ms;
+            opts.onEvent?.({ type: 'text', text: `\n（${call.name} 已运行 ${Math.round(ms / 1000)} s，SolidWorks 仍在执行，继续等待…）\n` });
+          },
         });
         // P130: stash the wall-clock duration on the call so the UI card and the session
         // export can show it.
-        (call as any).durationMs = r.durationMs;
+        call.durationMs = r.durationMs;
         // P125: surface unverified SolidWorks version advisory once
         if (r.ok && r.data?._advisory && !advisoryShown) {
           advisoryShown = true;
@@ -517,7 +536,7 @@ export async function runSidecarAgent(
     // from a path not covered by the per-call guard above), the API rejects the next
     // request with "assistant message with 'tool_calls' must be followed by tool
     // messages". Scan backwards from the tail and answer any orphaned call_ids.
-    history = truncateMessages(history, '', '', opts.contextWindow);
+    history = truncateMessages(history, overhead, opts.model ?? '', opts.contextWindow);
     for (let i = history.length - 1; i >= 0; i--) {
       const m = history[i];
       if (m.role !== 'assistant' || !m.toolCalls?.length) continue;
@@ -536,7 +555,10 @@ export async function runSidecarAgent(
       role: 'system',
       content: '(已达到最大工具调用轮数。请不要再调用工具：总结你已完成的操作、当前模型的状态、以及未完成的部分。)',
     });
-    const summary = await adapter.chatWithTools(history, opts.signal, undefined);
+    // P131: pass the real tool list — Anthropic rejects a history containing tool_use /
+    // tool_result blocks when the request declares no tools, so on every Claude model
+    // this summary 400'd and was silently lost. The system note above forbids calls.
+    const summary = await adapter.chatWithTools(history, opts.signal, tools);
     if (summary.content) {
       finalText = summary.content;
       opts.onEvent?.({ type: 'text', text: summary.content });
@@ -775,8 +797,20 @@ function auditClaimedCalls(
  *  auto-nudged, and built a gear from the example values the user never confirmed. */
 export function looksLikeQuestion(text: string): boolean {
   const t = text.trim();
-  if (/[?？]\s*$/.test(t)) return true;                                   // ends with a question mark
+  if (!t) return false;
+  if (/[?？]\s*[)）"”'」]*\s*$/.test(t)) return true;                     // ends with a question mark
   if ((t.match(/[?？]/g) || []).length >= 2) return true;                 // several questions inside
-  return /(请(告诉|提供|给出|确认|回复|选择)|需要(你|您)?(提供|确认|告诉)|告诉我|你想|您想|哪(一)?(种|个)|多少|几个|which|what (size|module|value|diameter)|please (provide|tell|confirm|specify)|let me know|do you want|would you like|could you (tell|confirm))/i.test(t);
+  // P131: judge the ENDING. The P130 pattern matched generic words anywhere (which / 多少 /
+  // 几个 / 哪个 / 你想), so ordinary plans read as questions and the nudge never fired; and
+  // "我还缺少以下参数…" / "I need a few values from you" were missed.
+  const tail = t.slice(-300);
+  if (PLAN_CLOSE.test(tail)) return false;
+  return ASKS_USER.test(tail);
 }
+
+/** "…Starting now." / "…现在开始执行。" — the reply commits to acting. */
+const PLAN_CLOSE = /(现在开始|开始执行|开始建模|马上开始|立即开始|接下来(我)?(会|将)?(调用|执行|开始)|starting now|let me (start|begin)|i(?:'ll| will) (?:now )?(?:start|begin|proceed)|proceeding now)[^。.!！\n]*[。.!！]?\s*$/i;
+
+/** The reply hands the turn back: it asks for input the user has not given. */
+const ASKS_USER = /(请(告诉|提供|给出|确认|回复|选择|补充|说明)|需要(你|您)?(提供|确认|告诉|补充)|告诉我|还?缺少?(以下|这些|下列)?(参数|尺寸|信息|数值)|需要以下|请问|(你|您)希望|是否需要|please (provide|tell|confirm|specify|let me know)|let me know|i need (a few|some|the following|these|you to|more)|(could|can) you (tell|confirm|provide|specify)|do you want|would you like|what (size|module|value|diameter|dimensions?) (do|would|should))/i;
 

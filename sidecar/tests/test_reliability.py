@@ -15,7 +15,9 @@ from sw_agent.bridge import SWError
 def test_guard_idempotency_and_bump():
     g = server._Guard(cap=2)
     assert g.get(None) is None and g.get("x") is None
-    g.put("a", {"r": 1}); g.put("b", {"r": 2}); g.put("c", {"r": 3})
+    g.put("a", {"r": 1})
+    g.put("b", {"r": 2})
+    g.put("c", {"r": 3})
     assert g.get("a") is None and g.get("c") == {"r": 3}  # LRU cap
     assert g.bump() == 1 and g.bump() == 2
 
@@ -60,3 +62,61 @@ def test_stale_state_raises_coded_error():
         server._call(Ctx(), "extrude", {}, op_id=None, expect_state=3)
     assert ei.value.code == "STALE_STATE"
     server.GUARD.state_version = 0
+
+
+def test_failed_call_is_cached_under_op_id():
+    """P131: a TIMEOUT follow-up with the same op_id must get the failure back, not re-run."""
+    from sw_agent import registry
+
+    runs = []
+
+    def flaky(ctx):
+        runs.append(1)
+        raise SWError("gear body built, then the hole failed")
+
+    registry.TOOLS["_p131_flaky"] = registry.ToolSpec("_p131_flaky", "", {}, "", False, True, flaky)
+    try:
+        for _ in range(2):
+            with pytest.raises(SWError):
+                server._call(object(), "_p131_flaky", {}, op_id="p131-op", expect_state=None)
+        assert len(runs) == 1
+    finally:
+        registry.TOOLS.pop("_p131_flaky", None)
+        server.GUARD.done.pop("p131-op", None)
+
+
+def test_heartbeat_survives_futures_timeout(monkeypatch):
+    """P131: on Python < 3.11 Future.result(timeout) raises concurrent.futures.TimeoutError,
+    which is not the builtin — the first heartbeat tick used to escape as TOOL_FAILED."""
+    from concurrent.futures import Future
+    from concurrent.futures import TimeoutError as FutureTimeout
+
+    frames = []
+    monkeypatch.setattr(server, "_write", frames.append)
+
+    class SlowFuture(Future):
+        ticks = 0
+
+        def result(self, timeout=None):
+            SlowFuture.ticks += 1
+            if SlowFuture.ticks < 3:
+                raise FutureTimeout()  # what 3.9 / 3.10 raise
+            return {"ok": True}
+
+    class Exec:
+        def submit(self, fn):
+            return SlowFuture()
+
+    assert server._call_with_heartbeat(Exec(), None, 7, "slow", {}, None, None) == {"ok": True}
+    assert [f["progress"] for f in frames] == [True, True]
+    assert all(f["id"] == 7 for f in frames)
+
+
+def test_parent_watchdog_uses_pid_not_stdin():
+    """P131: the P129 watchdog peeked stdin from a second thread and stalled requests."""
+    import inspect
+
+    assert server._parent_alive(os.getppid()) is True
+    if os.name != "nt":
+        assert server._parent_alive(os.getppid() + 999_999) is False
+    assert "peek(" not in inspect.getsource(server.serve)

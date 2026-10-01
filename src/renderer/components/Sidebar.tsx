@@ -98,7 +98,7 @@ export function Sidebar({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
-            <StatusDot connected={swStatus.connected} />
+            <StatusDot connected={swStatus.connected} busy={swStatus.busy} runningTool={swStatus.runningTool} />
             <span
               style={{
                 fontSize: 11,

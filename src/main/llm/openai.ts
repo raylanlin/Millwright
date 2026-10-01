@@ -20,7 +20,10 @@ import { extractFirstCodeBlock } from './code-extract';
 import { LLMHttpError, extractErrorMessage, toLLMError } from './errors';
 import { parseSSE } from './sse';
 import { buildOpenAITools } from './tools-schema';
-import { ThinkSplitter, reasoningParams, isReasoningParamError, splitThinking, dropsTemperature, detectDialect } from './thinking';
+import {
+  ThinkSplitter, reasoningParams, isReasoningParamError, splitThinking, dropsTemperature, detectDialect,
+  isOpenAIReasoningModel, isGpt6Family,
+} from './thinking';
 import type {
   ChatMessage,
   LLMResponse,
@@ -54,12 +57,24 @@ interface PartialCall {
 
 export class OpenAIAdapter extends BaseLLMAdapter {
   /** P51: extra body fields for reasoning depth — empty when set to 'auto'. */
-  private reasoningExtras(): Record<string, any> {
-    return reasoningParams(
+  private reasoningExtras(withTools = false): Record<string, any> {
+    const extras = reasoningParams(
       this.config.reasoningLevel,
       this.config.reasoningDialect,
       this.config.baseURL,
     );
+    // P131: GPT-6 on /chat/completions 400s on reasoning_effort + tools, and on the
+    // 'minimal' effort we map 'off' to. Agent turns always carry tools, so they run at
+    // the model's default effort; plain chat gets the closest accepted level.
+    if ('reasoning_effort' in extras && isGpt6Family(this.config.model)) {
+      if (withTools) {
+        const rest = { ...extras };
+        delete rest.reasoning_effort;
+        return rest;
+      }
+      if (extras.reasoning_effort === 'minimal') return { ...extras, reasoning_effort: 'low' };
+    }
+    return extras;
   }
 
   // P54: 8192 truncated answers on reasoning models — the scratchpad is spent from the
@@ -83,11 +98,11 @@ export class OpenAIAdapter extends BaseLLMAdapter {
    * 400 and require `max_completion_tokens`; every other OpenAI-compatible gateway
    * still expects `max_tokens`. Detect by host + model id rather than sending both,
    * because strict gateways reject unknown fields.
+   * P131: the pattern only knew gpt-5 — GPT-6 Astra got max_tokens + temperature and
+   * every request 400'd.
    */
   private isOpenAIReasoner(): boolean {
-    const host = (this.config.baseURL ?? '').toLowerCase();
-    if (!host.includes('openai.com') && !host.includes('azure.com')) return false;
-    return /^(o\d|gpt-5)/i.test(this.config.model ?? '');
+    return isOpenAIReasoningModel(this.config.baseURL, this.config.model);
   }
 
   private tokenCap(): Record<string, any> {
@@ -235,10 +250,12 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       const res = await llmFetch(`${this.getBaseURL()}/chat/completions`, {
         method: 'POST',
         headers: this.buildHeaders(),
+        // P131: reasoning models reject `max_tokens` — "Test connection" failed for
+        // every GPT-5.x / GPT-6 model on api.openai.com even with a valid key.
         body: JSON.stringify({
           model: this.config.model,
           messages: [{ role: 'user', content: 'hi' }],
-          max_tokens: 1,
+          ...(this.isOpenAIReasoner() ? { max_completion_tokens: 32 } : { max_tokens: 1 }),
         }),
         signal: s,
       });
@@ -267,7 +284,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
       tool_choice: 'auto',
       stream,
       ...(stream ? { stream_options: { include_usage: true } } : {}),
-      ...this.reasoningExtras(),
+      ...this.reasoningExtras(true),
     };
   }
 
@@ -358,7 +375,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
     const url = `${this.getBaseURL()}/chat/completions`;
     const send = (b: any) => llmFetch(url, {
       method: 'POST', headers: this.buildHeaders(), body: JSON.stringify(b), signal,
-    });
+    }, undefined, { connectMs: b.stream ? undefined : 0 });
 
     const extras = this.reasoningExtras();
     const res = await send(body);

@@ -13,7 +13,7 @@ import { createAdapter, validateConfig } from '../llm';
 import { truncateMessages } from '../llm/context-window';
 import { resolveSystemPrompt } from '../llm/prompts';
 import { getBridge } from '../com/sw-bridge';
-import { getSidecar } from '../com/sw-sidecar';
+import { getSidecar, type SidecarResult } from '../com/sw-sidecar';
 import { collectDocumentContext, formatContextForPromptAsync, invalidateContextCache } from '../com/context-collector';
 import { ScriptEngine } from '../scripts/engine';
 import { validateScript } from '../scripts/sanitizer';
@@ -120,6 +120,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
     return { ok: true };
   });
 
+  let statusProbe: Promise<SidecarResult> | null = null;
   ipcMain.handle(IpcChannels.SW_STATUS, async () => {
     // P73: the sidecar holds the connection the tools actually run through. If it can read
     // ActiveDoc we ARE connected, whatever the separate cscript probe concludes — and it was
@@ -130,10 +131,16 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       // P130: a tool is executing on the sidecar's single COM thread — do not queue behind it.
       // Serve the last known status and say we are busy; the UI shows "working" instead of a
       // red/green flicker, and the probe can no longer time out in the queue.
-      if (sidecar.runningTool && sidecar.lastStatus) {
-        return { ...sidecar.lastStatus, source: 'sidecar' as const, busy: true, runningTool: sidecar.runningTool };
+      // P131: also when no status was cached yet (a probe would only queue behind the tool),
+      // and always connected — a tool is running through this very connection, whatever
+      // an older probe said.
+      if (sidecar.runningTool) {
+        return { ...(sidecar.lastStatus ?? {}), connected: true, source: 'sidecar' as const, busy: true, runningTool: sidecar.runningTool };
       }
-      const r = await sidecar.call('sw_status', {});
+      // P131: the UI polls every 3 s; while SolidWorks is slow to answer, share the probe in
+      // flight instead of queueing another one behind it each tick.
+      statusProbe ??= sidecar.call('sw_status', {}).finally(() => { statusProbe = null; });
+      const r = await statusProbe;
       if (r.ok && r.data?.connected) {
         return { ...r.data, source: 'sidecar' as const };
       }
@@ -317,6 +324,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
       if (sidecarReady) {
         const text = await runSidecarAgent(adapter, payload.messages, sidecar, {
           requestId,
+          model: enrichedConfig.model,
+          systemPrompt: enrichedConfig.systemPrompt,
           maxRounds: payload.config.maxRounds ?? 24,
           approvalMode: payload.config.approvalMode ?? 'normal',
           // P115: strong-prompt mode — L3 re-injects tool rules every round +
@@ -477,23 +486,20 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null) {
   });
 
   // ===== Theme (kept independent of the LLM config) =====
-  // Reusing the CONFIG_ channel-name convention felt too cramped, so we register
-  // two dedicated handlers here. The channel names piggyback on `config:save/load`
-  // for now; we can split them out later if needed.
-  ipcMain.handle('theme:load', async (): Promise<ThemeName> => {
+  ipcMain.handle(IpcChannels.THEME_LOAD, async (): Promise<ThemeName> => {
     return await loadTheme();
   });
 
-  ipcMain.handle('theme:save', async (_e, theme: ThemeName) => {
+  ipcMain.handle(IpcChannels.THEME_SAVE, async (_e, theme: ThemeName) => {
     await saveTheme(theme);
     return { ok: true };
   });
 
-  ipcMain.handle('locale:load', async (): Promise<LocaleName> => {
+  ipcMain.handle(IpcChannels.LOCALE_LOAD, async (): Promise<LocaleName> => {
     return await loadLocale();
   });
 
-  ipcMain.handle('locale:save', async (_e, locale: LocaleName) => {
+  ipcMain.handle(IpcChannels.LOCALE_SAVE, async (_e, locale: LocaleName) => {
     await saveLocale(locale);
     return { ok: true };
   });

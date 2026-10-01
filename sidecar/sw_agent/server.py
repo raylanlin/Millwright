@@ -28,6 +28,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from concurrent.futures import TimeoutError as FutureTimeout
 
 from sw_agent import registry, session_log, verify
 from sw_agent.bridge import Context, SWError, hresult, is_dead_connection
@@ -97,6 +98,18 @@ class _Guard:
 GUARD = _Guard()
 
 
+class _Failed:
+    """P131: a failed call, cached under its op_id like a result. A retry with the same
+    op_id (Node's TIMEOUT follow-up) must get the failure back — before P131 only
+    successes were cached, so the retry RE-RAN a generator that had built half a gear
+    and then raised."""
+
+    __slots__ = ("exc",)
+
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+
 class CodedError(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -164,6 +177,8 @@ def _advisory(ctx: Context) -> dict | None:
 def _call(ctx: Context, name: str, args: dict, op_id=None, expect_state=None):
     """One tool call on the COM thread. Dead connection → reconnect once and retry."""
     cached = GUARD.get(op_id)
+    if isinstance(cached, _Failed):
+        raise cached.exc
     if cached is not None:
         dup = dict(cached) if isinstance(cached, dict) else {"result": cached}
         dup["_duplicate"] = True
@@ -205,9 +220,14 @@ def _call(ctx: Context, name: str, args: dict, op_id=None, expect_state=None):
         return work()
     except Exception as e:
         if not is_dead_connection(e):
+            GUARD.put(op_id, _Failed(e))
             raise
-        ctx.reconnect()
+    ctx.reconnect()
+    try:
         return work()
+    except Exception as e:
+        GUARD.put(op_id, _Failed(e))
+        raise
 
 
 HEARTBEAT_S = 15.0
@@ -222,7 +242,10 @@ def _call_with_heartbeat(executor, ctx, rid, name, args, op_id, expect):
     while True:
         try:
             return fut.result(timeout=HEARTBEAT_S)
-        except TimeoutError:
+        except (TimeoutError, FutureTimeout):
+            # P131: before Python 3.11 concurrent.futures.TimeoutError is NOT the builtin
+            # TimeoutError — on 3.9/3.10 the first tick escaped as an empty TOOL_FAILED
+            # while the tool kept running (and the agent retried it).
             _write({"id": rid, "progress": True, "tool": name,
                     "elapsed_ms": round((time.perf_counter() - t0) * 1000)})
 
@@ -246,6 +269,27 @@ def _health(ctx: Context) -> dict:
     return info
 
 
+def _parent_alive(ppid: int) -> bool:
+    """P131: is the process that spawned us still running? Checked by PID, never via stdin."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        k32.WaitForSingleObject.restype = wintypes.DWORD
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        h = k32.OpenProcess(0x00100000, False, ppid)  # SYNCHRONIZE
+        if not h:
+            return ctypes.get_last_error() != 87  # ERROR_INVALID_PARAMETER: no such process
+        try:
+            return k32.WaitForSingleObject(h, 0) == 0x102  # WAIT_TIMEOUT: still running
+        finally:
+            k32.CloseHandle(h)
+    return os.getppid() == ppid  # POSIX: an orphan is re-parented
+
+
 def serve() -> None:
     ctx = Context()
     executor = ComExecutor("sw-com")
@@ -256,22 +300,23 @@ def serve() -> None:
     # blocks while SolidWorks loads add-ins sits at the HEAD of the queue and delays every
     # probe behind it — that is how the first sw_status of the 16:15 session timed out.
     # Connecting lazily costs a few hundred ms on the first real call and blocks nothing.
+    # If the parent dies mid-COM-call the stdin loop never sees EOF. A helper thread watches
+    # the parent PID: once it is gone, give the current job 5 s and hard-exit.
+    # P131: the P129 version peeked stdin from this thread. Two readers on one pipe — after
+    # ~2 s idle the peek parked inside the buffered reader, and the request that followed the
+    # next one was not read until more input arrived: back-to-back tool calls stalled into
+    # 60 s timeouts. The watchdog must never touch stdin.
+    ppid = os.getppid()
+
     def _watchdog():
-        # If the parent dies mid-COM-call the stdin loop never sees EOF. Poll the pipe from a
-        # helper thread: once stdin is closed, give the current job 5 s and hard-exit.
         try:
-            while not sys.stdin.closed:
+            while _parent_alive(ppid):
                 time.sleep(2)
-                try:
-                    if sys.stdin.buffer.peek(1) == b"":
-                        break
-                except Exception:  # noqa: BLE001 — peek on a closed stdin pipe is the trigger we care about
-                    break
-        except Exception:  # noqa: BLE001 — watchdog must never crash the sidecar itself
-            pass
+        except Exception:  # noqa: BLE001 — a watchdog bug must never kill a healthy sidecar
+            return
         time.sleep(5)
         os._exit(0)
-    threading.Thread(target=_watchdog, name="stdin-watchdog", daemon=True).start()
+    threading.Thread(target=_watchdog, name="parent-watchdog", daemon=True).start()
     for raw in sys.stdin:
         raw = raw.strip()
         if not raw:

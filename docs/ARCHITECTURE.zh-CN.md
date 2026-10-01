@@ -213,8 +213,8 @@ const DEFAULT_SYSTEM_PROMPT = `你是一个 SolidWorks 自动化专家助手。
 
 | 服务商 | 协议 | Base URL | 模型示例 |
 |--------|------|----------|----------|
-| Anthropic | anthropic | https://api.anthropic.com | claude-sonnet-4-20250514 |
-| OpenAI | openai | https://api.openai.com/v1 | gpt-4o |
+| Anthropic | anthropic | https://api.anthropic.com | claude-opus-5-5 |
+| OpenAI | openai | https://api.openai.com/v1 | gpt-6-astra |
 | 百炼 | openai | https://dashscope.aliyuncs.com/compatible-mode/v1 | qwen-coder-plus |
 | MiniMax | openai | https://api.minimax.chat/v1 | MiniMax-Text-01 |
 | DeepSeek | openai | https://api.deepseek.com | deepseek-chat |

@@ -50,6 +50,12 @@ export const IpcChannels = {
   UPDATE_SKIP: 'update:skip',
   UPDATE_OPEN_RELEASE: 'update:open-release',
   UPDATE_EVENT: 'update:event',
+
+  // Theme / UI language (kept independent of the LLM config)
+  THEME_LOAD: 'theme:load',
+  THEME_SAVE: 'theme:save',
+  LOCALE_LOAD: 'locale:load',
+  LOCALE_SAVE: 'locale:save',
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];

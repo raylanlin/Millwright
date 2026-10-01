@@ -159,7 +159,9 @@ export function ToolCallGroup({ steps, t }: { steps: AgentStep[]; t: ThemeTokens
                     return null;
                   })()}
                   {target && <span style={{ fontSize: 11.5, color: t.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{target}</span>}
-                  <span style={{ fontFamily: "'Consolas', monospace", fontSize: 10, color: t.textMuted, marginLeft: 'auto', flexShrink: 0 }}>{name}</span>
+                  <span style={{ fontFamily: "'Consolas', monospace", fontSize: 10, color: t.textMuted, marginLeft: 'auto', flexShrink: 0 }}>
+                    {name}{typeof s.durationMs === 'number' ? ` · ${(s.durationMs / 1000).toFixed(1)}s` : ''}
+                  </span>
                   {hasDetail && <span style={{ fontSize: 9, color: t.textMuted, flexShrink: 0 }}>{rowOpen ? '▲' : '▼'}</span>}
                 </button>
                 {rowOpen && hasDetail && (

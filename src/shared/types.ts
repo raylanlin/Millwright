@@ -107,6 +107,9 @@ export interface AgentStep {
   status?: 'running' | 'ok' | 'error' | 'rejected';
   /** tool step: formatted result / error message */
   result?: string;
+  /** P131: tool step: wall-clock duration of the sidecar call (P130 computed it, but it
+   *  was dropped before reaching the step, so the UI and exports never showed it) */
+  durationMs?: number;
   /** P28: confirm step's parent agent requestId (for click → IPC 回执) */
   requestId?: string;
   /** P51: 该推理块是否还在流式接收中 */
