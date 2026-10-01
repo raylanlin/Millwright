@@ -4,6 +4,7 @@
 import type { VisionConfig, LocaleName } from '../../shared/types';
 import { toLLMError } from './errors';
 import { llmFetch } from './net';
+import { isOpenAIReasoningModel } from './thinking';
 
 export interface AnalyzeImageInput {
   question: string;        // Question drafted by the main model = image-to-text prompt
@@ -41,11 +42,24 @@ export async function analyzeImage(input: AnalyzeImageInput): Promise<string> {
         ],
       },
     ],
-    temperature: 0.2,
-    max_tokens: 1024,
+    // P131: OpenAI reasoning models (GPT-5.x / GPT-6) as the vision model 400'd on
+    // max_tokens + temperature. Their cap also covers reasoning tokens, so 1024 would
+    // leave an empty caption — give them room.
+    ...(isOpenAIReasoningModel(config.baseURL, config.model)
+      ? { max_completion_tokens: 8192 }
+      : { temperature: 0.2, max_tokens: 1024 }),
     stream: false,
   };
+  // P131: a caption is one non-streamed answer — its headers arrive only when it is done, so
+  // the connect-stage timer must not apply (it killed and re-sent slow captions at 20 s).
+  // VisionConfig.timeoutMs (default 120 s) is the total budget instead.
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) controller.abort(signal.reason);
+  else signal?.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(new Error('视觉模型响应超时')), config.timeoutMs ?? 120_000);
   let res: Response;
+  let text: string;
   try {
     res = await llmFetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -54,12 +68,15 @@ export async function analyzeImage(input: AnalyzeImageInput): Promise<string> {
         Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify(body),
-      signal,
-    });
+      signal: controller.signal,
+    }, undefined, { connectMs: 0 });
+    text = await res.text();
   } catch (err) {
     throw toLLMError(err, '视觉模型网络请求失败');
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
-  const text = await res.text();
   if (!res.ok) {
     throw toLLMError(new Error(text), `视觉模型请求失败 (HTTP ${res.status})`);
   }

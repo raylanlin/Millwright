@@ -213,8 +213,8 @@ const DEFAULT_SYSTEM_PROMPT = `You are a SolidWorks automation specialist.
 
 | Provider | Protocol | Base URL | Example model |
 |---------|----------|----------|----------|
-| Anthropic | anthropic | https://api.anthropic.com | claude-sonnet-4-20250514 |
-| OpenAI | openai | https://api.openai.com/v1 | gpt-4o |
+| Anthropic | anthropic | https://api.anthropic.com | claude-opus-5-5 |
+| OpenAI | openai | https://api.openai.com/v1 | gpt-6-astra |
 | Bailian | openai | https://dashscope.aliyuncs.com/compatible-mode/v1 | qwen-coder-plus |
 | MiniMax | openai | https://api.minimax.chat/v1 | MiniMax-Text-01 |
 | DeepSeek | openai | https://api.deepseek.com | deepseek-chat |

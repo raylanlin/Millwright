@@ -2,6 +2,9 @@
 // Model presets / default URLs / default parameters.
 // P54/P55: preset IDs and contextWindow/maxTokens aligned with current provider docs (2026-07).
 // DeepSeek's old `deepseek-chat` / `deepseek-reasoner` aliases were retired 2026-07-24.
+// P131: GPT-6 Astra (2026-09-03), Claude Opus 5.5 and Claude Fable 5.1 become the
+// recommended OpenAI / Anthropic models. Saved ids that left the list still load — the
+// Settings dropdown shows any non-preset id as "Custom model".
 
 import type { LLMProtocol, ModelPreset, LLMConfig } from './types';
 
@@ -12,8 +15,8 @@ export const DEFAULT_URLS: Record<LLMProtocol, string> = {
 
 export const MODEL_PRESETS: Record<LLMProtocol, ModelPreset[]> = {
   anthropic: [
-    { label: 'Claude Fable 5 (1M ctx, always-on thinking)', value: 'claude-fable-5' },
-    { label: 'Claude Opus 4.8', value: 'claude-opus-4-8' },
+    { label: 'Claude Opus 5.5 (1M ctx, recommended)', value: 'claude-opus-5-5' },
+    { label: 'Claude Fable 5.1 (1M ctx, most capable)', value: 'claude-fable-5-1' },
     { label: 'Claude Sonnet 4.6', value: 'claude-sonnet-4-6' },
     { label: 'Custom model', value: 'custom' },
   ],
@@ -26,6 +29,7 @@ export const MODEL_PRESETS: Record<LLMProtocol, ModelPreset[]> = {
     { label: 'Qwen 3.7 Max (阿里百炼)', value: 'qwen3.7-max' },
     { label: 'GLM-4.6 (智谱)', value: 'glm-4.6' },
     // —— OpenAI official ——
+    { label: 'GPT-6 Astra (1M ctx, recommended)', value: 'gpt-6-astra' },
     { label: 'GPT-5.6 Sol', value: 'gpt-5.6-sol' },
     { label: 'GPT-4.1', value: 'gpt-4.1' },
     { label: 'GPT-4o Mini', value: 'gpt-4o-mini' },
@@ -50,8 +54,8 @@ export const OPENAI_COMPATIBLE_PROVIDERS: Array<{
   /** P54: per-provider recommended max output (tokens). Used as the default in Settings. */
   maxTokens?: number;
 }> = [
-  // OpenAI official — GPT-5.x / o series REQUIRE max_completion_tokens (handled in adapter)
-  { name: 'OpenAI', url: 'https://api.openai.com/v1', supportsTools: true, suggestedModel: 'gpt-5.6-sol', contextWindow: 1_000_000, maxTokens: 32_768 },
+  // OpenAI official — GPT-6 / GPT-5.x / o series REQUIRE max_completion_tokens (handled in adapter)
+  { name: 'OpenAI', url: 'https://api.openai.com/v1', supportsTools: true, suggestedModel: 'gpt-6-astra', contextWindow: 1_050_000, maxTokens: 32_768 },
   { name: 'DeepSeek', url: 'https://api.deepseek.com', supportsTools: true, suggestedModel: 'deepseek-v4-pro', contextWindow: 1_048_576, maxTokens: 32_768 },
   { name: 'Kimi / Moonshot', url: 'https://api.moonshot.cn/v1', supportsTools: true, suggestedModel: 'kimi-k2.5', contextWindow: 262_144, maxTokens: 32_768 },
   { name: 'MiniMax', url: 'https://api.minimax.io/v1', supportsTools: true, suggestedModel: 'minimax-m3', contextWindow: 512_000, maxTokens: 32_768 },

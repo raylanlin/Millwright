@@ -183,6 +183,132 @@ export function reasoningParams(
   }
 }
 
+// ===== P131: model capability detection =====
+
+/**
+ * OpenAI's own reasoning models (o-series, GPT-5.x, GPT-6.x) reject `max_tokens`
+ * (they need `max_completion_tokens`) and reject `temperature` / `top_p`. Only on
+ * OpenAI's / Azure's own hosts — every other OpenAI-compatible gateway still expects
+ * `max_tokens`, and strict gateways reject unknown fields.
+ */
+export function isOpenAIReasoningModel(baseURL?: string, model?: string): boolean {
+  const host = (baseURL ?? '').toLowerCase();
+  if (!host.includes('openai.com') && !host.includes('azure.com')) return false;
+  return /^(o\d|gpt-([5-9]|\d{2,}))/i.test(model ?? '');
+}
+
+/**
+ * P131: GPT-6 (Astra and later) on /chat/completions rejects `reasoning_effort` whenever
+ * `tools` are present ("Function tools with reasoning_effort are not supported …
+ * use /v1/responses"), and rejects the 'none' / 'minimal' efforts outright.
+ */
+export function isGpt6Family(model?: string): boolean {
+  return /^gpt-([6-9]|\d{2,})/i.test(model ?? '');
+}
+
+/** What a Claude model's request surface accepts. */
+export interface ClaudeCaps {
+  /** temperature / top_p / top_k are rejected with a 400 — never send them. */
+  noSampling: boolean;
+  /** Reasoning depth is `thinking: {type:'adaptive'}` + `output_config.effort`;
+   *  `{type:'enabled', budget_tokens}` is removed or deprecated. */
+  adaptive: boolean;
+  /** Thinking runs even when `thinking` is omitted. */
+  thinksByDefault: boolean;
+  /** Thinking cannot be switched off — `{type:'disabled'}` is a 400. */
+  alwaysThinks: boolean;
+}
+
+/**
+ * P131: request-surface capabilities by Claude model id. Matches first-party ids
+ * (`claude-opus-5-5`), dotted proxy ids (`claude-opus-4.8`) and prefixed ids
+ * (`anthropic.claude-fable-5-1`). Unrecognised ids — old dated models, OSS models
+ * behind Anthropic-compatible proxies — get the legacy surface.
+ *
+ *   Fable 5 / 5.1, Mythos   always thinks; sampling + budget_tokens → 400
+ *   Opus 5.5                always thinks; sampling + budget_tokens → 400
+ *   Sonnet 5.5              disabled → 400; non-default sampling → 400
+ *   Opus 5, Sonnet 5        thinks by default; sampling + budget_tokens → 400
+ *   Opus 4.7 / 4.8          adaptive only on-mode (off by default); sampling → 400
+ *   Opus 4.6 / Sonnet 4.6   adaptive recommended; sampling allowed
+ *   older (Haiku 4.5, …)    budget_tokens thinking; sampling allowed
+ */
+export function claudeCaps(model?: string): ClaudeCaps {
+  const legacy: ClaudeCaps = { noSampling: false, adaptive: false, thinksByDefault: false, alwaysThinks: false };
+  const id = (model ?? '').toLowerCase();
+  if (/fable|mythos/.test(id)) {
+    return { noSampling: true, adaptive: true, thinksByDefault: true, alwaysThinks: true };
+  }
+  const m = /(opus|sonnet|haiku)[-_ ]?(\d{1,2})(?!\d)(?:[-.](\d)(?!\d))?/.exec(id);
+  if (!m) return legacy;
+  const family = m[1];
+  const v = Number(m[2]) + Number(m[3] ?? 0) / 10;
+  if (family === 'opus') {
+    if (v >= 5.5) return { noSampling: true, adaptive: true, thinksByDefault: true, alwaysThinks: true };
+    if (v >= 5) return { noSampling: true, adaptive: true, thinksByDefault: true, alwaysThinks: false };
+    if (v >= 4.7) return { noSampling: true, adaptive: true, thinksByDefault: false, alwaysThinks: false };
+    if (v >= 4.6) return { noSampling: false, adaptive: true, thinksByDefault: false, alwaysThinks: false };
+    return legacy;
+  }
+  if (family === 'sonnet') {
+    if (v >= 5.5) return { noSampling: true, adaptive: true, thinksByDefault: true, alwaysThinks: true };
+    if (v >= 5) return { noSampling: true, adaptive: true, thinksByDefault: true, alwaysThinks: false };
+    if (v >= 4.6) return { noSampling: false, adaptive: true, thinksByDefault: false, alwaysThinks: false };
+    return legacy;
+  }
+  return legacy;
+}
+
+/**
+ * P131: Anthropic request fields for reasoning depth + sampling, by model.
+ *
+ * Before P131 every request carried `temperature: 0.3` — a hard 400 on Fable 5 / 5.1,
+ * Opus 4.7+ and Sonnet 5+ (every Claude preset except Sonnet 4.6) — and reasoning
+ * levels were sent as `budget_tokens`, which those models also reject.
+ *
+ * Adaptive-surface models: level → `output_config.effort`; thinking summaries are
+ * requested (`display: 'summarized'`) whenever thinking runs, because the default
+ * ('omitted') streams empty thinking blocks and the UI would show nothing while the
+ * model works. 'off' on a model that cannot stop thinking becomes the lowest effort.
+ */
+export function anthropicReasoningParams(
+  level: ReasoningLevel | undefined,
+  model: string | undefined,
+  maxTokens: number,
+  temperature: number | undefined,
+): Record<string, any> {
+  const lv = level ?? 'auto';
+  const caps = claudeCaps(model);
+  const adaptiveOn = { thinking: { type: 'adaptive', display: 'summarized' } };
+
+  if (caps.adaptive) {
+    let out: Record<string, any>;
+    if (lv === 'off') {
+      out = caps.alwaysThinks ? { ...adaptiveOn, output_config: { effort: 'low' } } : { thinking: { type: 'disabled' } };
+    } else if (lv === 'low' || lv === 'medium' || lv === 'high') {
+      out = { ...adaptiveOn, output_config: { effort: lv } };
+    } else if (lv === 'adaptive' || caps.thinksByDefault) {
+      // 'auto' on a model that thinks anyway: same behaviour, readable summaries.
+      out = { ...adaptiveOn };
+    } else {
+      out = {};  // 'auto' on Opus 4.6–4.8 / Sonnet 4.6: provider default (no thinking)
+    }
+    // Sampling is rejected outright on noSampling models, and incompatible with thinking on.
+    if (!caps.noSampling && (!out.thinking || out.thinking.type === 'disabled')) {
+      out.temperature = temperature ?? 0.3;
+    }
+    return out;
+  }
+
+  // Legacy surface: budget_tokens thinking; temperature only while thinking is off.
+  // P55: an unrecognised Mythos-class id is handled above (always thinks).
+  if (lv === 'auto' || lv === 'adaptive') return { temperature: temperature ?? 0.3 };
+  if (lv === 'off') return { temperature: temperature ?? 0.3, thinking: { type: 'disabled' } };
+  const budgets: Record<string, number> = { low: 1024, medium: 4096, high: 16384 };
+  const budget = Math.min(budgets[lv] ?? 4096, Math.max(1024, maxTokens - 1024));
+  return { thinking: { type: 'enabled', budget_tokens: budget } };
+}
+
 /** P54: providers that ignore sampling params while thinking — we drop them to avoid noise. */
 export function dropsTemperature(
   level: ReasoningLevel | undefined,
@@ -205,7 +331,10 @@ export const REASONING_FIELDS = [
 export function isReasoningParamError(body: string): boolean {
   const b = (body || '').toLowerCase();
   if (!b) return false;
+  // P131: 'not supported' — GPT-6 Astra phrases its tools+reasoning_effort 400 as
+  // "Function tools with reasoning_effort are not supported …", which fell through.
   const complains = b.includes('unknown') || b.includes('unsupported') || b.includes('invalid')
-    || b.includes('not allowed') || b.includes('unrecognized') || b.includes('extra');
+    || b.includes('not allowed') || b.includes('unrecognized') || b.includes('extra')
+    || b.includes('not supported');
   return complains && REASONING_FIELDS.some((f) => b.includes(f));
 }

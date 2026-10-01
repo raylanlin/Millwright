@@ -75,11 +75,27 @@ export function SettingsModal({
   };
 
   const handleProtocol = (p: 'anthropic' | 'openai') => {
+    // P131: pair the default URL with a model that endpoint actually serves. The first
+    // OpenAI-protocol preset is DeepSeek, so switching gave api.openai.com + deepseek-v4-pro.
+    const official = OPENAI_COMPATIBLE_PROVIDERS.find((x) => x.url === DEFAULT_URLS[p]);
     setDraft((d) => ({
       ...d,
       protocol: p,
       baseURL: DEFAULT_URLS[p],
-      model: MODEL_PRESETS[p][0].value,
+      model: official?.suggestedModel ?? MODEL_PRESETS[p][0].value,
+    }));
+    setTestStatus({ kind: 'idle' });
+  };
+
+  // P131: a quick-fill button sets the whole provider, not just its URL — the suggested
+  // model and the per-provider context / output defaults were declared but never applied.
+  const applyProvider = (p: (typeof OPENAI_COMPATIBLE_PROVIDERS)[number]) => {
+    setDraft((d) => ({
+      ...d,
+      baseURL: p.url,
+      ...(p.suggestedModel ? { model: p.suggestedModel } : {}),
+      ...(p.contextWindow ? { contextWindow: p.contextWindow } : {}),
+      ...(p.maxTokens ? { maxTokens: p.maxTokens } : {}),
     }));
     setTestStatus({ kind: 'idle' });
   };
@@ -243,7 +259,7 @@ export function SettingsModal({
         >
           <span style={{ color: t.textSecondary, fontSize: 13 }}>{tr('settings.swConnection')}</span>
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            <StatusDot connected={swStatus.connected} />
+            <StatusDot connected={swStatus.connected} busy={swStatus.busy} runningTool={swStatus.runningTool} />
             <span
               style={{
                 color: swStatus.connected ? '#4caf72' : '#d45454',
@@ -295,7 +311,7 @@ export function SettingsModal({
               {OPENAI_COMPATIBLE_PROVIDERS.map((p) => (
                 <button
                   key={p.name}
-                  onClick={() => update('baseURL', p.url)}
+                  onClick={() => applyProvider(p)}
                   style={{
                     padding: '3px 8px', borderRadius: 4,
                     border: `1px solid ${t.cardBorder}`,
@@ -416,12 +432,12 @@ export function SettingsModal({
 
         {/* P30: Max agent rounds */}
         <label style={labelStyle}>{tr('settings.maxRounds')}</label>
-        <input
-          type="number"
+        <ClampedNumber
           min={4}
           max={100}
+          fallback={24}
           value={draft.maxRounds ?? 24}
-          onChange={(e) => update('maxRounds', Math.max(4, Math.min(100, Number(e.target.value) || 24)))}
+          onCommit={(v) => update('maxRounds', v)}
           style={{ ...fieldStyle, marginBottom: 4, width: 120 }}
         />
         <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 16px 1px' }}>{tr('settings.maxRoundsHint')}</p>
@@ -503,13 +519,13 @@ export function SettingsModal({
 
         {/* P54: Context window + max output tokens — a matched pair, so show them together */}
         <label style={labelStyle}>{tr('settings.contextWindow')}</label>
-        <input
-          type="number"
+        <ClampedNumber
           min={4096}
           max={2000000}
           step={4096}
+          fallback={128000}
           value={draft.contextWindow ?? 128000}
-          onChange={(e) => update('contextWindow', Math.max(4096, Math.min(2000000, Number(e.target.value) || 128000)))}
+          onCommit={(v) => update('contextWindow', v)}
           style={{ ...fieldStyle, marginBottom: 4, width: 160 }}
         />
         <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 14px 1px' }}>
@@ -518,13 +534,13 @@ export function SettingsModal({
 
         {/* P51: Max output tokens */}
         <label style={labelStyle}>{tr('settings.maxTokens')}</label>
-        <input
-          type="number"
+        <ClampedNumber
           min={1024}
           max={512000}
           step={1024}
+          fallback={32768}
           value={draft.maxTokens ?? 32768}
-          onChange={(e) => update('maxTokens', Math.max(1024, Math.min(512000, Number(e.target.value) || 32768)))}
+          onCommit={(v) => update('maxTokens', v)}
           style={{ ...fieldStyle, marginBottom: 4, width: 140 }}
         />
         <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 18px 1px' }}>
@@ -703,5 +719,42 @@ export function SettingsModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * P131: a number field that clamps when editing ends (blur / Enter), not on every keystroke.
+ * Clamping per keystroke snapped a half-typed "2" to the minimum, so a value such as 200000
+ * could not be typed at all.
+ */
+function ClampedNumber({ value, min, max, step, fallback, onCommit, style }: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  fallback: number;
+  onCommit: (v: number) => void;
+  style?: React.CSSProperties;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { setText(String(value)); }, [value]);
+  const commit = () => {
+    const n = Number(text);
+    const v = Math.max(min, Math.min(max, text.trim() !== '' && Number.isFinite(n) ? Math.round(n) : fallback));
+    setText(String(v));
+    if (v !== value) onCommit(v);
+  };
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+      style={style}
+    />
   );
 }

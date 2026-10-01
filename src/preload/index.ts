@@ -28,12 +28,12 @@ const api = {
     save: (config: LLMConfig) => ipcRenderer.invoke(IpcChannels.CONFIG_SAVE, config),
   },
   theme: {
-    load: (): Promise<ThemeName> => ipcRenderer.invoke('theme:load'),
-    save: (theme: ThemeName) => ipcRenderer.invoke('theme:save', theme),
+    load: (): Promise<ThemeName> => ipcRenderer.invoke(IpcChannels.THEME_LOAD),
+    save: (theme: ThemeName) => ipcRenderer.invoke(IpcChannels.THEME_SAVE, theme),
   },
   locale: {
-    load: (): Promise<LocaleName> => ipcRenderer.invoke('locale:load'),
-    save: (locale: LocaleName) => ipcRenderer.invoke('locale:save', locale),
+    load: (): Promise<LocaleName> => ipcRenderer.invoke(IpcChannels.LOCALE_LOAD),
+    save: (locale: LocaleName) => ipcRenderer.invoke(IpcChannels.LOCALE_SAVE, locale),
   },
   sw: {
     connect: (): Promise<{ ok: boolean; status: SWStatus }> =>

@@ -78,7 +78,10 @@ async function fetchWithConnectTimeout(
   connectMs = 20_000,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error('connect timeout')), connectMs);
+  // P131: connectMs <= 0 → no connect-stage timer (see LlmFetchOptions.connectMs)
+  const timer = connectMs > 0
+    ? setTimeout(() => controller.abort(new Error('connect timeout')), connectMs)
+    : undefined;
   const onAbort = () => controller.abort(signal?.reason);
   if (signal) {
     if (signal.aborted) controller.abort(signal.reason);
@@ -95,6 +98,18 @@ async function fetchWithConnectTimeout(
   }
 }
 
+export interface LlmFetchOptions {
+  /**
+   * P131: connect-stage timeout. The P109 premise — "headers arrive fast, the body is the
+   * outer timeout's job" — holds only for STREAMING. A non-streaming server sends headers
+   * when the whole answer is done, so 20 s became a total timeout for vision captions and
+   * non-streamed turns, and the abort counted as transient: the finished-but-slow request
+   * was re-sent (and billed) up to 3× per stack. Pass 0 for non-streaming requests; the
+   * caller's own total timeout governs them.
+   */
+  connectMs?: number;
+}
+
 /**
  * Fetch that respects the OS system proxy (via Electron's Chromium stack) and
  * retries transient network errors. Same signature as global fetch.
@@ -103,6 +118,7 @@ export async function llmFetch(
   url: string,
   init: RequestInit = {},
   retries = 2,
+  opts: LlmFetchOptions = {},
 ): Promise<Response> {
   let lastErr: unknown;
 
@@ -116,7 +132,7 @@ export async function llmFetch(
 
     // 1) Undici path — no proxy, direct DNS.
     try {
-      return await fetchWithConnectTimeout(fetch, url, init, init.signal ?? undefined);
+      return await fetchWithConnectTimeout(fetch, url, init, init.signal ?? undefined, opts.connectMs);
     } catch (err) {
       lastErr = err;
       if (!isTransient(err)) {
@@ -130,7 +146,7 @@ export async function llmFetch(
     if (typeof net !== 'undefined' && typeof net.fetch === 'function') {
       try {
         return await fetchWithConnectTimeout(
-          (u, i) => net.fetch(u, i as any), url, init, init.signal ?? undefined,
+          (u, i) => net.fetch(u, i as any), url, init, init.signal ?? undefined, opts.connectMs,
         );
       } catch (err) {
         lastErr = err;

@@ -25,6 +25,10 @@ export interface StoredConfig {
 
 const SCHEMA_VERSION = 1;
 
+// P131: the API key currently supplied by the environment (.env / process.env). It is used,
+// never persisted — saveConfig drops it so a later save cannot copy it into the store.
+let envSourcedKey = '';
+
 // P107: live approval-mode cache — updated on every saveConfig so an in-flight agent
 // session can re-read it per tool call (issue #1: settings changes should apply to
 // the running conversation immediately).
@@ -99,7 +103,18 @@ export async function loadConfig(): Promise<LLMConfig> {
       console.info(
         `[Millwright] 使用 .env fallback 配置: protocol=${envFallback.protocol}, model=${envFallback.model}`,
       );
-      return envFallback;
+      // P131: take only the CONNECTION from the environment. Returning the env config whole
+      // threw away every saved preference (approval mode, disabled tools, context window…),
+      // and the next save then encrypted the env key into the store.
+      envSourcedKey = envFallback.apiKey;
+      return {
+        ...DEFAULT_CONFIG,
+        ...llm,
+        protocol: envFallback.protocol,
+        baseURL: envFallback.baseURL,
+        model: envFallback.model,
+        apiKey: envFallback.apiKey,
+      };
     }
   }
 
@@ -119,7 +134,7 @@ export async function saveConfig(config: LLMConfig): Promise<void> {
   const { apiKey, ...rest } = config;
 
   let encryptedApiKey = '';
-  if (apiKey) {
+  if (apiKey && apiKey !== envSourcedKey) {
     if (safeStorage.isEncryptionAvailable()) {
       encryptedApiKey = safeStorage.encryptString(apiKey).toString('base64');
     } else {

@@ -126,10 +126,10 @@ export function truncateMessages(
         ? MODEL_TOKEN_BUDGETS[budgetKey]
         : DEFAULT_BUDGET) - OUTPUT_RESERVE;
 
-  let availableTokens = totalBudget - estimateTokens(systemPrompt);
-  if (availableTokens <= 0) {
-    return messages.slice(-1);
-  }
+  // P131: an overhead larger than the budget used to return `messages.slice(-1)`, which can
+  // be a lone tool result (a 400). Fall through instead: the hard floor below keeps the last
+  // whole block.
+  let availableTokens = Math.max(0, totalBudget - estimateTokens(systemPrompt));
 
   const blocks = toBlocks(messages);
   const kept: ChatMessage[][] = [];

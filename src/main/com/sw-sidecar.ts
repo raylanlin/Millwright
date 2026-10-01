@@ -16,6 +16,16 @@
 //       sidecar's idempotency cache hands back the true result when the job finishes
 //     - `inFlight` + `lastStatus` let the UI probe skip the queue while a tool is running
 //     - every rpc logs its duration so the next report carries numbers, not guesses
+//
+// P131 — what P130 left broken:
+//     - heartbeats prove PYTHON is alive, not that SolidWorks progresses: a COM call blocked
+//       on a modal dialog heartbeated forever and nothing timed out. Each call now also has
+//       an absolute cap (3× its budget; sw_status none — the probe must fail fast).
+//     - the sidecar reads stdin one request at a time, so a request queued behind a slow
+//       call burned its budget before it was even read, timed out, and its retry re-ran the
+//       tool. Requests are now sent one at a time; a budget starts when its request is sent.
+//     - `onStillRunning` fired only after a timeout that heartbeats prevented — it now fires
+//       on every heartbeat. A `signal` lets Stop abandon the wait (code CANCELLED).
 
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import { randomUUID } from 'crypto';
@@ -27,7 +37,7 @@ import { resolvePythonPath, resolveSidecarCwd } from '../python-path';
 
 export type SidecarErrorCode =
   | 'NO_CONNECTION' | 'NO_DOCUMENT' | 'WRONG_DOC_TYPE' | 'UNKNOWN_TOOL'
-  | 'BAD_ARGS' | 'STALE_STATE' | 'COM_ERROR' | 'TOOL_FAILED' | 'TIMEOUT';
+  | 'BAD_ARGS' | 'STALE_STATE' | 'COM_ERROR' | 'TOOL_FAILED' | 'TIMEOUT' | 'CANCELLED';
 
 export interface SidecarResult<T = any> {
   ok: boolean;
@@ -54,18 +64,32 @@ export interface CallOptions {
   expectState?: number;
   /** Idle budget for this call (ms). Defaults: SLOW_TOOLS table, then callTimeoutMs. */
   timeoutMs?: number;
-  /** Fired when the first budget expires and we keep waiting on the same op_id. */
+  /** Fired on every sidecar heartbeat while the call is still running. */
   onStillRunning?: (elapsedMs: number) => void;
+  /** P131: abort → resolve CANCELLED at once. The sidecar finishes the job regardless and
+   *  caches the outcome under the op_id. */
+  signal?: AbortSignal;
+}
+
+interface RpcOptions {
+  /** Idle budget (ms) — heartbeats reset it. */
+  budget?: number;
+  /** P131: absolute deadline (ms) that heartbeats do NOT extend. Defaults to `budget`. */
+  hardCapMs?: number;
+  onProgress?: (elapsedMs: number) => void;
+  signal?: AbortSignal;
 }
 
 interface Pending {
   resolve: (v: SidecarResult) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  hardTimer?: ReturnType<typeof setTimeout>;
   budget: number;
   startedAt: number;
   label: string;
   onTimeout: () => void;
+  onProgress?: (elapsedMs: number) => void;
 }
 
 interface ReadyWaiter { resolve: () => void; reject: (e: Error) => void }
@@ -108,6 +132,8 @@ export class SWSidecar {
   lastStatus: any = null;
   /** P130: name of the tool currently executing (first in-flight `call`), for the UI */
   runningTool: string | null = null;
+  /** P131: requests go out one at a time — the sidecar reads stdin serially anyway */
+  private tail: Promise<unknown> = Promise.resolve();
 
   constructor(opts: SidecarOptions = {}) {
     this.opts = {
@@ -187,11 +213,14 @@ export class SWSidecar {
     if (msg.progress) {
       clearTimeout(p.timer);
       p.timer = setTimeout(p.onTimeout, p.budget);
-      this.opts.onLog?.(`[sidecar] ${p.label} still running (${Math.round((msg.elapsed_ms ?? 0) / 1000)}s)`);
+      const elapsed = Date.now() - p.startedAt;
+      this.opts.onLog?.(`[sidecar] ${p.label} still running (${Math.round(elapsed / 1000)}s)`);
+      try { p.onProgress?.(elapsed); } catch { /* a UI callback must never break the RPC */ }
       return;
     }
     this.pending.delete(msg.id);
     clearTimeout(p.timer);
+    clearTimeout(p.hardTimer);
     this.updateRunning();
     const durationMs = Date.now() - p.startedAt;
     this.opts.onLog?.(`[sidecar] ${p.label} ${durationMs}ms ok=${!!msg.ok}${msg.code ? ' code=' + msg.code : ''}`);
@@ -199,27 +228,53 @@ export class SWSidecar {
   }
 
   private updateRunning(): void {
-    const first = [...this.pending.values()].find((p) => p.label.startsWith('call:'));
+    // sw_status is the UI's own probe — never report it as "a tool is running"
+    const first = [...this.pending.values()].find((p) => p.label.startsWith('call:') && p.label !== 'call:sw_status');
     this.runningTool = first ? first.label.slice(5) : null;
   }
 
-  private rpc(method: string, params?: any, budget?: number): Promise<SidecarResult> {
+  /** P131: queue behind whatever is outstanding; resolve CANCELLED as soon as `signal`
+   *  aborts (a request not yet sent is then never sent). */
+  private rpc(method: string, params?: any, o: RpcOptions = {}): Promise<SidecarResult> {
+    return new Promise<SidecarResult>((resolve) => {
+      let settled = false;
+      const settle = (r: SidecarResult) => {
+        if (settled) return;
+        settled = true;
+        o.signal?.removeEventListener('abort', onAbort);
+        resolve(r);
+      };
+      const onAbort = () => settle({ ok: false, code: 'CANCELLED', error: '已取消' });
+      if (o.signal?.aborted) return onAbort();
+      o.signal?.addEventListener('abort', onAbort, { once: true });
+      const turn = this.tail.then(() => (settled ? undefined : this.send(method, params, o).then(settle)));
+      this.tail = turn.catch(() => undefined);
+    });
+  }
+
+  private send(method: string, params: any, o: RpcOptions): Promise<SidecarResult> {
     if (!this.proc || !this.proc.stdin.writable) {
       return Promise.resolve({ ok: false, code: 'NO_CONNECTION', error: 'Python 组件未运行——请安装 Python + pywin32，或忽略此错误（将自动使用内置 VBS 引擎）' });
     }
     const id = this.nextId++;
     const label = method === 'call' ? `call:${params?.name ?? '?'}` : method;
-    const b = budget ?? this.opts.callTimeoutMs;
+    const b = o.budget ?? this.opts.callTimeoutMs;
+    const cap = Math.max(o.hardCapMs ?? b, b);
     return new Promise<SidecarResult>((resolve, reject) => {
       const startedAt = Date.now();
       const onTimeout = () => {
+        const p = this.pending.get(id);
+        if (!p) return;
+        clearTimeout(p.timer);
+        clearTimeout(p.hardTimer);
         this.pending.delete(id);
         this.updateRunning();
-        this.opts.onLog?.(`[sidecar] ${label} TIMEOUT after ${Date.now() - startedAt}ms (budget ${b}ms, pending=${this.pending.size}, running=${this.runningTool ?? '-'})`);
+        this.opts.onLog?.(`[sidecar] ${label} TIMEOUT after ${Date.now() - startedAt}ms (budget ${b}ms, cap ${cap}ms, pending=${this.pending.size}, running=${this.runningTool ?? '-'})`);
         resolve({ ok: false, code: 'TIMEOUT', error: `Python 组件调用超时：${label}`, durationMs: Date.now() - startedAt });
       };
       const timer = setTimeout(onTimeout, b);
-      this.pending.set(id, { resolve, reject, timer, budget: b, startedAt, label, onTimeout });
+      const hardTimer = cap > b ? setTimeout(onTimeout, cap) : undefined;
+      this.pending.set(id, { resolve, reject, timer, hardTimer, budget: b, startedAt, label, onTimeout, onProgress: o.onProgress });
       this.updateRunning();
       this.proc!.stdin.write(JSON.stringify({ id, method, params: params ?? {} }) + '\n');
     });
@@ -233,7 +288,8 @@ export class SWSidecar {
   }
 
   /** Invoke a tool. A timeout is retried once with the SAME op_id (P125 idempotency cache):
-   *  if the sidecar finished the job meanwhile, we get the real result, not a re-run. */
+   *  if the sidecar finished the job meanwhile, we get the real result, not a re-run
+   *  (P131: failures are cached too, so a half-built generator is never re-run). */
   async call(name: string, args?: Record<string, any>, opts?: CallOptions): Promise<SidecarResult> {
     const opId = opts?.opId ?? randomUUID();
     const params: any = { name, args: args ?? {} };
@@ -241,25 +297,33 @@ export class SWSidecar {
     if (opts?.expectState != null) params.expect_state = opts.expectState;
     const budget = opts?.timeoutMs ?? SLOW_TOOLS[name] ?? this.opts.callTimeoutMs;
     const t0 = Date.now();
-    let r = await this.rpc('call', params, budget);
+    const o: RpcOptions = {
+      budget,
+      // P131: heartbeats may stretch a call to 3× its budget, never further; the probe not at all
+      hardCapMs: name === 'sw_status' ? budget : budget * 3,
+      onProgress: opts?.onStillRunning ? () => opts.onStillRunning!(Date.now() - t0) : undefined,
+      signal: opts?.signal,
+    };
+    let r = await this.rpc('call', params, o);
     if (!r.ok && r.code === 'TIMEOUT' && name !== 'sw_status') {
       opts?.onStillRunning?.(Date.now() - t0);
-      r = await this.rpc('call', params, budget);   // same op_id → cached result when the job lands
+      // same op_id → cached result when the job lands; one more budget, no extension
+      r = await this.rpc('call', params, { ...o, hardCapMs: budget });
       if (!r.ok && r.code === 'TIMEOUT') {
         r.error = `工具 ${name} 执行超过 ${Math.round((Date.now() - t0) / 1000)} s 仍未返回。SolidWorks 可能在重建、加载插件或弹出了对话框；`
           + `操作可能已经完成——请先用 list_features 核对，不要重复执行。`;
       }
     }
     if (name === 'sw_status' && r.ok) this.lastStatus = r.data;
-    if (r.durationMs == null) r.durationMs = Date.now() - t0;
+    r.durationMs = Date.now() - t0;   // P131: the whole wait, including a follow-up
     return r;
   }
 
-  ping(): Promise<SidecarResult> { return this.rpc('ping', undefined, 10_000); }
-  reconnect(): Promise<SidecarResult> { return this.rpc('reconnect', undefined, 30_000); }
+  ping(): Promise<SidecarResult> { return this.rpc('ping', undefined, { budget: 10_000 }); }
+  reconnect(): Promise<SidecarResult> { return this.rpc('reconnect', undefined, { budget: 30_000 }); }
 
   async health(): Promise<SidecarResult<SidecarHealth>> {
-    const r = await this.rpc('health', undefined, 10_000);
+    const r = await this.rpc('health', undefined, { budget: 10_000 });
     if (!r.ok && /unknown method/.test(r.error ?? '')) {
       const p = await this.ping();
       return { ok: p.ok, data: { connected: p.ok, state_version: 0, tool_count: 0 } as SidecarHealth, error: p.error };
@@ -268,7 +332,7 @@ export class SWSidecar {
   }
 
   async stateVersion(): Promise<number> {
-    const r = await this.rpc('state', undefined, 10_000);
+    const r = await this.rpc('state', undefined, { budget: 10_000 });
     return r.ok ? Number(r.data?.state_version ?? 0) : 0;
   }
 
@@ -286,6 +350,7 @@ export class SWSidecar {
     this.rl = null;
     for (const [, p] of this.pending) {
       clearTimeout(p.timer);
+      clearTimeout(p.hardTimer);
       p.resolve({ ok: false, code: 'NO_CONNECTION', error: err.message });
     }
     this.pending.clear();

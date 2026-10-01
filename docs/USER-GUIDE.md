@@ -42,7 +42,7 @@ If you have an Anthropic API key:
 | API Protocol | Anthropic |
 | Base URL | https://api.anthropic.com |
 | API Key | Your `sk-ant-...` key |
-| Model | `claude-sonnet-4-20250514` (recommended) |
+| Model | `claude-opus-5-5` (recommended) or `claude-fable-5-1` (most capable) |
 
 Get your API key by signing up at console.anthropic.com and creating a key.
 
@@ -53,7 +53,7 @@ Get your API key by signing up at console.anthropic.com and creating a key.
 | API Protocol | OpenAI-compatible |
 | Base URL | https://api.openai.com/v1 |
 | API Key | Your `sk-...` key |
-| Model | `gpt-4o` |
+| Model | `gpt-6-astra` (recommended) |
 
 ### Option 3: Bailian (Alibaba Cloud)
 

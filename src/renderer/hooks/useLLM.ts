@@ -135,11 +135,11 @@ export function useLLM({ config, initial }: UseLLMOptions) {
       for (let i = steps.length - 1; i >= 0; i--) {
         const s = steps[i];
         if (s.kind === 'tool' && (s.id === key || s.name === tc?.name) && s.status === 'running') {
-          steps[i] = { ...s, status, result: tc?.result, params: s.params ?? tc?.parameters };
+          steps[i] = { ...s, status, result: tc?.result, params: s.params ?? tc?.parameters, durationMs: tc?.durationMs };
           return { ...m, steps };
         }
       }
-      steps.push({ kind: 'tool', id: key, name: tc?.name, params: tc?.parameters, status, result: tc?.result });
+      steps.push({ kind: 'tool', id: key, name: tc?.name, params: tc?.parameters, status, result: tc?.result, durationMs: tc?.durationMs });
       return { ...m, steps };
     });
   }, [updateAssistant]);

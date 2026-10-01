@@ -35,8 +35,17 @@ export default function App() {
 
   // —— Config ——
   const [config, setConfig] = useState<LLMConfig>(DEFAULT_CONFIG);
+  const configLoaded = useRef(false);
   useEffect(() => {
-    window.api.config.load().then(setConfig);
+    window.api.config.load()
+      .then((c) => { configLoaded.current = true; setConfig(c); })
+      .catch((err) => console.error('[config] load failed', err));
+  }, []);
+  // P131: never persist before the stored config has loaded — an approval or tools toggle
+  // in that window saved DEFAULT_CONFIG over the real one and wiped the API key.
+  const persistConfig = useCallback((next: LLMConfig) => {
+    setConfig(next);
+    if (configLoaded.current) void window.api.config.save(next);
   }, []);
 
   // —— SolidWorks status ——
@@ -322,11 +331,7 @@ export default function App() {
               onCancel={cancel}
               isGenerating={isGenerating}
               approvalMode={config.approvalMode ?? 'normal'}
-              onApprovalChange={(m) => {
-                const next = { ...config, approvalMode: m };
-                setConfig(next);
-                void window.api.config.save(next);
-              }}
+              onApprovalChange={(m) => persistConfig({ ...config, approvalMode: m })}
               placeholder={
                 !config.apiKey
                   ? tr('input.placeholderNoKey')
@@ -343,11 +348,7 @@ export default function App() {
           <ToolsPanel
             t={t}
             disabled={config.disabledTools ?? []}
-            onChange={(next) => {
-              const cfg = { ...config, disabledTools: next };
-              setConfig(cfg);
-              window.api.config.save(cfg);
-            }}
+            onChange={(next) => persistConfig({ ...config, disabledTools: next })}
           />
         )}
       </main>

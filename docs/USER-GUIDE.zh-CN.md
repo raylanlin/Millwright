@@ -42,7 +42,7 @@
 | API 协议 | Anthropic |
 | Base URL | https://api.anthropic.com |
 | API Key | 你的 sk-ant-... 密钥 |
-| 模型 | claude-sonnet-4-20250514（推荐） |
+| 模型 | `claude-opus-5-5`（推荐）或 `claude-fable-5-1`（最强） |
 
 获取 API Key：前往 console.anthropic.com 注册并创建密钥。
 
@@ -53,7 +53,7 @@
 | API 协议 | OpenAI 兼容 |
 | Base URL | https://api.openai.com/v1 |
 | API Key | 你的 sk-... 密钥 |
-| 模型 | gpt-4o |
+| 模型 | `gpt-6-astra`（推荐） |
 
 ### 方式三：使用百炼（阿里云）
 

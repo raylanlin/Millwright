@@ -6,6 +6,103 @@
 
 ## [Unreleased]
 
+## [0.2.130] - 2026-10-01
+
+### Fixed (P131 — current models, and what P129/P130 broke)
+
+**Every current Claude model was unusable.** The Anthropic adapter sent `temperature: 0.3`
+on every request. Fable 5 / 5.1, Opus 4.7+ and Sonnet 5+ reject sampling parameters with a
+400, and the retry only fired for errors that mentioned `thinking`. So every agent turn
+failed on two of the three Claude presets. Reasoning levels were sent as `budget_tokens`,
+which those models also reject (`off` sent `thinking.disabled`, a 400 on Opus 5.5).
+- **Per-model request surface:** `thinking.ts` gains `claudeCaps()` /
+  `anthropicReasoningParams()`. These models now get no sampling fields, and reasoning
+  level maps to `thinking: {type:'adaptive', display:'summarized'}` + `output_config.effort`.
+  `off` on an always-thinking model becomes `effort: low`.
+- **Broader retry:** a 400 naming temperature / thinking / effort is retried once without
+  those fields, so a model id we don't know yet degrades instead of dying.
+- **Refusals:** `stop_reason: "refusal"` now shows a notice instead of an empty reply.
+
+**GPT-6 Astra was unusable on api.openai.com.**
+- The reasoning-model check only matched `gpt-5`, so `gpt-6-astra` got `max_tokens` +
+  `temperature`, both 400s.
+- On `/chat/completions` it also rejects `reasoning_effort` together with tools, and
+  rejects the `minimal` effort. Agent turns now omit the effort (model default), and plain
+  chat maps `off` → `low`.
+- The fallback detector now recognises "… are not supported" errors.
+- "Test connection" sent `max_tokens` to every OpenAI reasoning model, so it failed for
+  GPT-5.x too. It now uses `max_completion_tokens`.
+- The vision path had the same `max_tokens` / `temperature` problem.
+
+**Sidecar stalls (since P129).** The stdin watchdog called `peek()` on stdin from a helper
+thread. After ~2 s idle, the request that followed the next one was not read until more
+input arrived, so back-to-back tool calls stalled into 60 s timeouts. That is likely the
+real source of the "timed out but it finished" reports P130 worked around. The watchdog now
+checks the parent PID and never touches stdin.
+
+**P130 timeout ≠ failure, finished properly.**
+- **Absolute cap:** heartbeats prove Python is alive, not that SolidWorks progresses. A COM
+  call stuck on a modal dialog heartbeated forever, and Stop could not break it (every new
+  message got AGENT_BUSY). Each call now has an absolute cap of 3× its budget (`sw_status`
+  has none), and `call()` takes the abort signal (code `CANCELLED`).
+- **One request at a time:** a request queued behind a slow call burned its budget unread,
+  timed out, and its same-op_id retry re-ran a tool whose first run had failed (only
+  successes were cached). Requests now go out one at a time, budgets start when sent, and
+  failures are cached under their op_id too.
+- **Namespaced op_ids:** op_ids are scoped per agent run. Providers that restart tool-call
+  ids per conversation (Kimi's `functions.<name>:<n>`) could otherwise receive an older
+  session's cached result.
+- **Python 3.9 / 3.10:** `concurrent.futures.TimeoutError` is not the builtin before 3.11,
+  so the first heartbeat tick escaped as an empty TOOL_FAILED.
+- **"Still running" note:** `onStillRunning` only fired after a timeout that heartbeats
+  prevented, so the note never appeared. It now fires on heartbeats, once a minute in chat.
+- **Durations:** tool durations were dropped before reaching the step. They now show on the
+  tool row and in exports.
+- **Amber busy dot:** the busy state never reached `StatusDot`. It is wired through now and
+  serves `connected:true` while a tool runs; concurrent status probes share one request.
+- **`looksLikeQuestion`:** it now judges the reply's ending. Plans mentioning
+  which / 几个 / 哪个 / 多少 no longer read as questions, and
+  「我还缺少以下参数…」 / "I need a few values" no longer get auto-nudged.
+
+**Settings and config**
+- **Protocol switch:** switching to the OpenAI protocol paired `api.openai.com` with
+  `deepseek-v4-pro`. It now uses that endpoint's suggested model.
+- **Quick-fill buttons:** they now apply the provider's model, context window and max
+  output. Those defaults were declared in `presets.ts` but never used.
+- **Number fields:** they clamp on blur, not per keystroke. Typing "2" used to snap to 4096,
+  so values like 200000 could not be entered.
+- **Env-fallback config:** an env-sourced config no longer replaces the saved preferences,
+  and the env key is never persisted to the store.
+- **Config load:** saving before the stored config loaded overwrote it with the defaults
+  and wiped the API key.
+- **Non-streaming timeout:** the 20 s connect-stage timeout no longer acts as a total timeout
+  for non-streaming requests (vision captions), and no longer re-sends finished-but-slow
+  requests up to 3×.
+- **Truncation:** agent-loop truncation now counts the system prompt and tool schemas, and
+  never returns a lone tool result. The max-rounds summary turn passes the tool list, since
+  Anthropic 400s on tool blocks without tools.
+- **IPC channels:** theme / locale channels moved into `ipc-channels.ts`.
+- **CI:** `sidecar/tests/test_reliability.py` failed ruff E702, so the next CI run would
+  have been red.
+
+### Changed
+- **Recommended models:** GPT-6 Astra (`gpt-6-astra`, 1.05M context) for OpenAI;
+  Claude Opus 5.5 (`claude-opus-5-5`) and Claude Fable 5.1 (`claude-fable-5-1`) for
+  Anthropic.
+- **Where they changed:** presets, provider defaults, README / README.zh-CN, USER-GUIDE,
+  ARCHITECTURE, `.env.example`. Saved model ids that left the preset list still load as
+  "Custom model".
+
+### Tests
+- **`tests/llm-request.test.mjs`:** the request bodies each adapter sends, per model, plus
+  truncation and `llmFetch`.
+- **`tests/sidecar-client.test.mjs`:** the Node client against the real sidecar server with
+  fake tools: queueing, failure caching, cap + progress, cancel, and the idle-gap stall.
+  It fails 5/5 on 0.2.129.
+- **Python:** failure caching, the futures timeout on <3.11, and the PID watchdog.
+- **`looksLikeQuestion`:** plan and question cases.
+- **Totals:** 191 JS + 58 Python tests.
+
 ## [0.2.129] - 2026-09-12
 
 ### Changed (P130 — timeout≠failure)
