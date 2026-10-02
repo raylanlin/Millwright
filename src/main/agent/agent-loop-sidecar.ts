@@ -192,6 +192,8 @@ export async function runSidecarAgent(
   let backupDone = false;
   // P125: surface SolidWorks version advisory once per session
   let advisoryShown = false;
+  // P133: "a second, hidden SolidWorks was started" notice — once per session
+  let connectionShown = false;
   // P131: op_ids are namespaced per run. The sidecar's idempotency cache outlives a chat
   // session, and some providers restart their tool-call ids every conversation (Kimi's
   // `functions.<name>:<n>`) — a bare call.id could hand a NEW call an OLD session's result.
@@ -510,6 +512,12 @@ export async function runSidecarAgent(
         // P130: stash the wall-clock duration on the call so the UI card and the session
         // export can show it.
         call.durationMs = r.durationMs;
+        // P133: the sidecar is driving a SolidWorks instance the user did not open (COM
+        // started a hidden second one) — tell the user once, in plain words
+        if (r.data?._connection && !connectionShown) {
+          connectionShown = true;
+          opts.onEvent?.({ type: 'text', text: `\n⚠️ ${r.data._connection}\n` });
+        }
         // P125: surface unverified SolidWorks version advisory once
         if (r.ok && r.data?._advisory && !advisoryShown) {
           advisoryShown = true;

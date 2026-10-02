@@ -6,6 +6,41 @@
 
 ## [Unreleased]
 
+## [0.2.132] - 2026-10-02
+
+### Fixed (P133 — tools built the part in a SolidWorks the user could not see)
+
+**What the user saw:** a full session reported every step built and verified (the
+`build_part` volume matched, faces were listed, a screenshot was taken), yet the user's
+SolidWorks window stayed empty.
+
+**Cause:** the sidecar connects with `Dispatch("SldWorks.Application")`. That attaches to the
+running SolidWorks only when COM can reach it. When it cannot, COM silently **starts a new,
+invisible SolidWorks** and every tool runs there. The usual reason COM cannot reach it is that
+Millwright and SolidWorks run at different privilege levels, e.g. one of them "Run as
+administrator" (the running-object table is separate per integrity level). Nothing ever set
+`Visible`, so the user could not see it.
+
+**Fix:**
+- **On connect:** if the instance is not visible, the sidecar shows it (`Visible`,
+  `UserControl`), checks the SLDWORKS.exe process list before and after to tell "started a
+  second instance" from "SolidWorks was not running", and records a note that names the
+  likely cause and the fix. The note also says whether Millwright itself is elevated.
+- **Where the note appears:** the sidecar attaches it to tool results as `_connection`, and
+  the chat shows it once per session.
+
+**`mass_properties` "CreateMassProperty/2 unavailable":** a COM object is always callable
+(`__call__` forwards to its default member). Under late binding, `getattr(ext,
+"CreateMassProperty")` already returns the MassProperty object, and the code then called it
+again. `sw_get` now returns a COM object instead of calling it, which fixes the same trap
+for every object-returning member read through it. `mass_properties` uses `sw_get`.
+
+### Tests
+- **`sidecar/tests/test_p133_visibility.py`:** `sw_get` with late-bound objects,
+  `mass_properties` with a late-bound `CreateMassProperty`, a hidden second instance shown
+  and reported, and a hidden only instance shown. Fails 5/5 on 0.2.131.
+- **Totals:** 197 JS + 63 Python tests.
+
 ## [0.2.131] - 2026-10-02
 
 ### Changed (P132 — providers × protocols, installer on the run page)
