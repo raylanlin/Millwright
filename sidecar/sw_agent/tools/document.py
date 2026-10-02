@@ -249,10 +249,91 @@ def save_as(ctx: Context, path: str):
     category="document",
 )
 def set_material(ctx: Context, material: str, database: str = ""):
+    """P133: SetMaterialPropertyName2 returns nothing, and an unknown name is silently
+    ignored — a Chinese SolidWorks has 「合金钢」, not "Alloy Steel". The tool used to report
+    success while the tree still said 材质 <未指定> and every mass came out at water
+    density. Now each candidate (the given name, then its zh/en alias) is applied and
+    VERIFIED by reading the density back; nothing taking is an error, not a success."""
     part = ctx.require(DOC_PART, "part")
-    db = database or "SOLIDWORKS Materials"
-    part.SetMaterialPropertyName2("", db, material)
-    return {"material": material, "database": db}
+    dbs = [database] if database else ["SOLIDWORKS Materials", "solidworks materials"]
+    names = _material_candidates(material)
+    before = _density(ctx)
+    tried = []
+    for db in dbs:
+        for name in names:
+            tried.append(f"{db}/{name}")
+            try:
+                part.SetMaterialPropertyName2("", db, name)
+            except Exception:  # noqa: BLE001 — try the next spelling
+                continue
+            try:
+                ctx.model.ForceRebuild3(False)
+            except Exception:  # noqa: BLE001
+                pass
+            after = _density(ctx)
+            if after is None:   # cannot read back on this install — report, do not claim
+                return {"material": name, "database": db, "verified": False}
+            if _changed(before, after):
+                return {"material": name, "database": db, "verified": True,
+                        "density_kg_m3": round(after, 3)}
+            if before is not None and not _changed(_NO_MATERIAL_DENSITY, before):
+                continue        # still the no-material density: the name did not take
+            # the part already had a material of this density — re-applying the same one,
+            # or a name SolidWorks ignored; the density cannot tell which
+            return {"material": name, "database": db, "verified": False,
+                    "density_kg_m3": round(after, 3),
+                    "note": "density unchanged — either this material was already applied, or "
+                            "the name was not recognised; check the material in the feature tree"}
+    raise SWError(
+        f"material '{material}' was not applied — SolidWorks did not recognise the name "
+        f"(tried {', '.join(tried)}; density still {before} kg/m³). Use the exact name from "
+        "SolidWorks' material dialog — a Chinese install names them e.g. 合金钢 / 普通碳钢 / 6061 合金.")
+
+
+# P133: English ↔ Chinese names of SolidWorks' standard materials (+ generic words)
+_MATERIAL_ALIASES: list[tuple[str, ...]] = [
+    ("Alloy Steel", "合金钢"),
+    ("Plain Carbon Steel", "普通碳钢"),
+    ("Cast Carbon Steel", "铸造碳钢"),
+    ("Cast Alloy Steel", "铸造合金钢"),
+    ("1060 Alloy", "1060 合金"),
+    ("6061 Alloy", "6061 合金"),
+    ("Plain Carbon Steel", "普通碳钢", "steel", "钢"),
+    ("6061 Alloy", "6061 合金", "aluminum", "aluminium", "铝", "铝合金"),
+]
+
+_NO_MATERIAL_DENSITY = 1000.0   # SolidWorks' density for a part with no material assigned
+
+
+def _material_candidates(material: str) -> list[str]:
+    m = material.strip()
+    low = m.lower()
+    out = [m]
+    for group in _MATERIAL_ALIASES:
+        if low in (g.lower() for g in group):
+            out += [g for g in group[:2] if g not in out]
+    return out
+
+
+def _density(ctx) -> float | None:
+    """kg/m³ from IMassProperty, or None when it cannot be read."""
+    try:
+        ext = ctx.model.Extension
+        for maker in ("CreateMassProperty", "CreateMassProperty2"):
+            try:
+                mp = sw_get(ext, maker)
+            except Exception:  # noqa: BLE001
+                continue
+            if mp is not None:
+                return float(sw_get(mp, "Density"))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def _changed(before: float | None, after: float) -> bool:
+    ref = _NO_MATERIAL_DENSITY if before is None else before
+    return abs(after - ref) > 1e-6
 
 
 @tool("rebuild_model", "Force a full model rebuild, i.e. Ctrl+Q (= Rebuild; ForceRebuild3)", params={}, category="document")

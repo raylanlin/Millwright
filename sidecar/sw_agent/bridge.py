@@ -145,7 +145,11 @@ def ensure_visible(app, pids_before: set[int] | None) -> str | None:
     after = _sw_pids()
     second = bool(pids_before) and after is not None and bool(after - pids_before)
     if not second:
-        return ("SolidWorks 之前没有可见窗口，已启动/显示 SolidWorks；之后的建模都在这个窗口里进行。")
+        if pids_before:   # attached to a SolidWorks already running in the background
+            return ("连接到的是一个在后台运行、没有窗口的 SolidWorks（可能是之前残留的进程），已把它显示出来，"
+                    "之后的建模都在这个窗口里。如果你还开着另一个 SolidWorks 窗口，请以这个新显示的为准，"
+                    "或关掉多余的那个。")
+        return "SolidWorks 之前没有运行，已为你启动并显示，之后的建模都在这个窗口里。"
     note = ("你已打开的 SolidWorks 无法被连接，系统因此新启动了一个 SolidWorks 实例（现已显示出来），"
             "模型会建在这个新窗口里，而不是你原来的窗口。通常原因是两者权限级别不同——其中一个是"
             "「以管理员身份运行」的。")
