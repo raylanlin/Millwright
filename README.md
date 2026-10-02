@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.133-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.134-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
@@ -248,7 +248,7 @@ Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especi
 
 - [x] **v0.1** — MVP: Electron shell, LLM adapters, COM bridge, first tool set
 - [x] **v0.2** — Python sidecar, agentic tool loop, dual-engine fallback, vision feedback, confirmation cards, Apache-2.0 open source
-- [x] **v0.2.4 → v0.2.133** — Extensive hardening against real SolidWorks installs ← *current*: the sketch → feature → cut → visual-verification loop now runs end to end on real hardware
+- [x] **v0.2.4 → v0.2.134** — Extensive hardening against real SolidWorks installs ← *current*: the sketch → feature → cut → visual-verification loop now runs end to end on real hardware
 - [ ] **v0.3** — Streaming tool calls, sketching on model faces (not just reference planes), hole wizard, sheet metal, drawing annotations, remaining `#VERIFY` parameters confirmed
 - [ ] **v1.0** — MCP server, multi-CAD support
 

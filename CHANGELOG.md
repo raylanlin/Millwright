@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+## [0.2.134] - 2026-10-02
+
+### Fixed
+
+- **Windows build failed in `npm test`.** The `sidecar-client` test deleted its temp folder
+  right after stopping the Python sidecar. On Windows, `kill()` returns before the process
+  has exited, and a live process's working folder cannot be removed, so cleanup failed with
+  `EBUSY` and stopped the installer build. The test now waits for the process to exit. It
+  retries the delete, and a leftover temp folder only logs a warning. The app itself is
+  unchanged.
+
 ## [0.2.133] - 2026-10-02
 
 ### Fixed (P134 — material that never took, macros that could not fail)

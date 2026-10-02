@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.133-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.134-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
@@ -247,7 +247,7 @@ SolidWorks
 
 - [x] **v0.1** — MVP：Electron 骨架、LLM 适配器、COM 桥接、首批工具
 - [x] **v0.2** — Python 边车、agent 工具循环、双引擎降级、视觉反馈、确认卡片，Apache-2.0 开源
-- [x] **v0.2.4 → v0.2.133** — 大量真机加固 ← *当前*：草图 → 特征 → 切除 → 视觉核验的完整闭环已在真机上端到端跑通
+- [x] **v0.2.4 → v0.2.134** — 大量真机加固 ← *当前*：草图 → 特征 → 切除 → 视觉核验的完整闭环已在真机上端到端跑通
 - [ ] **v0.3** — 流式工具调用、在模型面上画草图（而非仅基准面）、孔向导、钣金、工程图标注、剩余 `# VERIFY` 参数完成核验
 - [ ] **v1.0** — MCP server、多 CAD 支持
 

@@ -68,7 +68,20 @@ before(async () => {
   sc = new SWSidecar({ pythonPath: PY, cwd: tmp });
   await sc.start();
 });
-after(() => { sc?.stop(); fs.rmSync(tmp, { recursive: true, force: true }); });
+after(async () => {
+  const proc = sc?.proc;   // private in TS, reachable from JS
+  sc?.stop();
+  // Windows refuses to remove the working directory of a live process (EBUSY), and kill()
+  // returns before the process is gone: wait for the exit before cleaning up.
+  if (proc && proc.exitCode === null && proc.signalCode === null) {
+    await new Promise((r) => { proc.once('exit', r); setTimeout(r, 5000).unref(); });
+  }
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (e) {
+    console.warn(`# left ${tmp} behind: ${e.message}`);   // a stray temp dir is not a test failure
+  }
+});
 
 const opts = { skip: !PY && 'python3 not available' };
 
