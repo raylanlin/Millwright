@@ -64,4 +64,75 @@ def test_hidden_only_instance_is_shown(monkeypatch):
     app = _App(False)
     note = bridge.ensure_visible(app, set())    # SolidWorks was not running before
     assert app.Visible is True
-    assert "新启动" not in note
+    assert "没有运行" in note
+
+
+def test_hidden_background_instance_is_shown(monkeypatch):
+    monkeypatch.setattr(bridge, "_sw_pids", lambda: {100})
+    app = _App(False)
+    note = bridge.ensure_visible(app, {100})     # same process, it just had no window
+    assert app.Visible is True
+    assert "后台" in note
+
+
+# ---- set_material: verified by density, zh/en aliases ----
+
+_DENSITY = {"合金钢": 7700.0, "普通碳钢": 7800.0, "6061 合金": 2700.0}
+
+
+class _MatPart:
+    """A Chinese SolidWorks: only Chinese names exist; unknown names are silently ignored."""
+
+    def __init__(self, material=None):
+        self.material = material
+        self.calls = []
+
+    def SetMaterialPropertyName2(self, cfg, db, name):
+        self.calls.append(name)
+        if name in _DENSITY:
+            self.material = name
+
+    def ForceRebuild3(self, _):
+        return True
+
+
+def _mat_ctx(part):
+    class Mp:
+        _oleobj_ = object()
+
+        @property
+        def Density(self):
+            return _DENSITY.get(part.material, 1000.0)
+
+    class Ext:
+        _oleobj_ = object()
+        CreateMassProperty = Mp()
+
+    class Ctx:
+        model = part
+        def require(self, *_):
+            return part
+    part.Extension = Ext()
+    return Ctx()
+
+
+def test_set_material_falls_back_to_the_chinese_name_and_verifies():
+    from sw_agent.tools import document
+    part = _MatPart()
+    out = document.set_material(_mat_ctx(part), "Alloy Steel")
+    assert part.material == "合金钢"
+    assert out["material"] == "合金钢" and out["verified"] is True and out["density_kg_m3"] == 7700.0
+
+
+def test_set_material_that_never_takes_is_an_error():
+    import pytest
+    from sw_agent.bridge import SWError
+    from sw_agent.tools import document
+    with pytest.raises(SWError, match="not applied"):
+        document.set_material(_mat_ctx(_MatPart()), "Unobtainium")
+
+
+def test_set_material_unknown_name_on_a_part_with_material_is_not_claimed():
+    from sw_agent.tools import document
+    out = document.set_material(_mat_ctx(_MatPart("普通碳钢")), "Unobtainium")
+    assert out["verified"] is False and "unchanged" in out["note"]

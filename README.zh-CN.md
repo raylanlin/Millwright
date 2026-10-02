@@ -27,12 +27,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.132-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.133-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
   <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white" alt="python" />
-  <img src="https://img.shields.io/badge/tests-197_JS_%2B_63_Python-brightgreen" alt="tests" />
+  <img src="https://img.shields.io/badge/tests-201_JS_%2B_67_Python-brightgreen" alt="tests" />
   <img src="https://img.shields.io/badge/license-Apache_2.0-orange" alt="license" />
 </p>
 
@@ -85,7 +85,7 @@ Millwright：
 - **Agent 工具循环。** 观察 → 推理 → 执行。模型串联多次工具调用，读取每次返回的结构化 JSON，出错能自愈而不是静默失败。
 - **视觉理解。** 可翻转、旋转、截屏，再做分析——既支持多模态主模型，也支持独立视觉模型。
 - **常驻执行引擎。** 常驻 Python 边车在一整个多步任务中复用同一条 COM 连接。
-- **开发者友好。** 197 个 TS/Node 单元测试，另有独立的 Python 测试套件（`pytest sidecar/tests`），类型化 IPC 边界，`SKIP_SW_CONNECT` 纯 UI 开发模式（无需 SolidWorks）。
+- **开发者友好。** 201 个 TS/Node 单元测试，另有独立的 Python 测试套件（`pytest sidecar/tests`），类型化 IPC 边界，`SKIP_SW_CONNECT` 纯 UI 开发模式（无需 SolidWorks）。
 
 ## 跨版本兼容
 
@@ -247,7 +247,7 @@ SolidWorks
 
 - [x] **v0.1** — MVP：Electron 骨架、LLM 适配器、COM 桥接、首批工具
 - [x] **v0.2** — Python 边车、agent 工具循环、双引擎降级、视觉反馈、确认卡片，Apache-2.0 开源
-- [x] **v0.2.4 → v0.2.132** — 大量真机加固 ← *当前*：草图 → 特征 → 切除 → 视觉核验的完整闭环已在真机上端到端跑通
+- [x] **v0.2.4 → v0.2.133** — 大量真机加固 ← *当前*：草图 → 特征 → 切除 → 视觉核验的完整闭环已在真机上端到端跑通
 - [ ] **v0.3** — 流式工具调用、在模型面上画草图（而非仅基准面）、孔向导、钣金、工程图标注、剩余 `# VERIFY` 参数完成核验
 - [ ] **v1.0** — MCP server、多 CAD 支持
 

@@ -6,6 +6,52 @@
 
 ## [Unreleased]
 
+## [0.2.133] - 2026-10-02
+
+### Fixed (P134 — material that never took, macros that could not fail)
+
+Seen in a real session: the part was built correctly and was visible. But the tree still
+said 材质 <未指定> after `set_material` "succeeded", every mass came out at water density, and
+the agent then spent about ten `run_macro` calls on macros that all "completed" without
+doing anything.
+
+**`set_material` reported success when nothing was applied.**
+- **Why:** `SetMaterialPropertyName2` returns nothing, and SolidWorks silently ignores a name
+  it does not know. A Chinese install has 「合金钢」, not "Alloy Steel".
+- **Fix:** the tool now applies each candidate — the given name, then its zh/en alias (Alloy
+  Steel ↔ 合金钢, Plain Carbon Steel ↔ 普通碳钢, 6061 Alloy ↔ 6061 合金, …; "steel" /
+  "钢" / "aluminum" / "铝" map to a standard grade) — in both database spellings, and
+  verifies each one by reading the density back.
+- **Result:** if nothing takes, the tool raises an error naming what it tried. If the
+  density is unchanged on a part that already has a material, it returns `verified:false`
+  with a note instead of claiming success.
+
+**`run_macro` bound nothing.** The tool description promised that `swApp` and `Part` are
+bound, but nothing assigned them, so every macro touching SolidWorks died on its first
+statement. The entry `Sub` now binds `swApp` / `Part` / `swModel` (only when the macro uses
+them).
+
+**`run_macro` reported success after a runtime error.** An error inside the entry `Sub`
+reached the runner with `Err` already clear, so a macro that stopped on its first broken
+line came back "脚本执行完成".
+- **Fix:** the entry `Sub` is instrumented. Before each statement it records the line number
+  and text (no marker after a ` _` continuation or between `Select Case` and its first
+  `Case`), and it sets a completion flag on its last line and on every `Exit Sub`.
+- **Result:** a macro that did not reach the end is reported as failed, with the line it
+  stopped on.
+
+**Connection note:** it is now attached to the first result only (it was repeated on every
+result), and it distinguishes "SolidWorks was not running" from "a background instance
+without a window was shown" from "a second instance was started".
+
+### Tests
+- **`tests/vba-macro-writer.test.mjs`:** binding, completion flag and line reporting, no
+  marker where VBScript forbids a statement, Functions-only scripts.
+- **`sidecar/tests/test_p133_visibility.py`:** `set_material` falls back to the Chinese
+  name and verifies; a material that never takes is an error; an ambiguous case is not
+  claimed; the background-instance note.
+- **Totals:** 201 JS + 67 Python tests.
+
 ## [0.2.132] - 2026-10-02
 
 ### Fixed (P133 — tools built the part in a SolidWorks the user could not see)

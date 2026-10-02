@@ -136,7 +136,10 @@ const VIRTUAL_TOOLS = [
         + 'accepts, pick faces and edges by meaning, and report the REAL error instead of '
         + 'silently doing nothing. A static check runs first and REFUSES code that passes '
         + 'millimetres to metre-based APIs or opens with On Error Resume Next. '
-        + 'Write the body only — swApp and Part are already bound, no Sub main() wrapper.',
+        + 'Write the body only — no Sub main() wrapper. swApp (the SolidWorks application), '
+        + 'Part and swModel (both = the active document) are bound for you. A runtime error '
+        + 'stops the macro and is reported with the line it stopped on; a macro has no other '
+        + 'way to return data than WScript.Echo, which comes back as the tool output.',
       parameters: {
         type: 'object',
         properties: {

@@ -207,9 +207,10 @@ def _call(ctx: Context, name: str, args: dict, op_id=None, expect_state=None):
             except Exception:  # noqa: BLE001
                 pass
             # P133: we are driving a SolidWorks the user did not open (see
-            # bridge.ensure_visible) — say so on every result until the session reconnects
+            # bridge.ensure_visible) — say so ONCE, on the first result after connecting
             if getattr(ctx, "connect_note", None):
                 data["_connection"] = ctx.connect_note
+                ctx.connect_note = None
             if mutating:
                 adv = _advisory(ctx)
                 if adv:

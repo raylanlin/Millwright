@@ -168,3 +168,36 @@ test('checkVbsCompatibility 合法代码无误报', () => {
   const issues = checkVbsCompatibility(WRAPPED_VBA);
   assert.equal(issues.length, 0, `不应有兼容性问题: ${issues.join(', ')}`);
 });
+
+// P133: run_macro promised "swApp and Part are already bound" — nothing bound them, and a
+// runtime error inside the entry Sub still ended as "脚本执行完成".
+test('P133: swApp / Part / swModel are bound when the macro uses them', () => {
+  const vbs = vbaToVbs('Debug = Part.GetTitle', { resultFilePath: 'C:\\r.json' });
+  assert.match(vbs, /Set swApp = SWCP_ConnectSW\(\)\n\s*Set Part = swApp\.ActiveDoc\n\s*Set swModel = Part/);
+  const plain = vbaToVbs('x = 1 + 1', { resultFilePath: 'C:\\r.json' });
+  assert.doesNotMatch(plain, /Set Part = /, 'no SolidWorks connection for a macro that does not touch it');
+});
+
+test('P133: completion flag + failing line are reported', () => {
+  const vbs = vbaToVbs('a = 1\nb = Part.GetTitle', { resultFilePath: 'C:\\r.json' });
+  assert.match(vbs, /SWCP_DONE = False/);
+  assert.match(vbs, /SWCP_LN = 2: SWCP_AT = "b = Part\.GetTitle"\n\s*b = Part\.GetTitle/);
+  assert.match(vbs, /SWCP_DONE = True\nEnd Sub/);
+  assert.match(vbs, /If Not SWCP_DONE Then\n\s*SWCP_Fail/);
+});
+
+test('P133: no marker where VBScript allows no statement; Exit Sub still completes', () => {
+  const vbs = vbaToVbs(
+    'Select Case k\n  Case 1\n    y = 1\nEnd Select\ns = "a" & _\n  "b"\nIf z Then Exit Sub',
+    { resultFilePath: 'C:\\r.json' },
+  );
+  assert.match(vbs, /Select Case k\n\s*Case 1/, 'nothing between Select Case and the first Case');
+  assert.match(vbs, /s = "a" & _\n\s*"b"/, 'a continued line is not split');
+  assert.match(vbs, /If z Then SWCP_DONE = True: Exit Sub/);
+});
+
+test('P133: a script with only Functions is not marked as unfinished', () => {
+  const vbs = vbaToVbs('Function f()\n  f = 1\nEnd Function', { resultFilePath: 'C:\\r.json' });
+  assert.match(vbs, /SWCP_DONE = True\n/);
+  assert.doesNotMatch(vbs, /SWCP_DONE = False/);
+});

@@ -136,6 +136,11 @@ export function vbaToVbs(vbaCode: string, opts?: { resultFilePath?: string }): s
   }
   // 只有 Function 没有 Sub 的罕见情形: 顶层代码原样执行,entry 留空
 
+  // 9b. P133: 给入口 Sub 打桩 —— 预绑定 swApp/Part/swModel,逐行记录位置,末尾置完成标志。
+  const usesSw = /\b(swApp|Part|swModel)\b/i.test(vbaCode);
+  const instrumented = entry ? instrumentEntry(code, entry, usesSw) : null;
+  if (instrumented) code = instrumented;
+
   // 10. 组装完整 VBS
   const resultPath = opts?.resultFilePath ?? '';
   // VBS 字符串没有反斜杠转义,路径直接嵌入;只需防御性处理双引号
@@ -148,6 +153,10 @@ export function vbaToVbs(vbaCode: string, opts?: { resultFilePath?: string }): s
 Dim SWCP_RESULT_PATH
 SWCP_RESULT_PATH = "${resultPathLiteral}"
 Dim SWCP_APP
+Dim SWCP_LN, SWCP_AT, SWCP_DONE
+SWCP_LN = 0
+SWCP_AT = ""
+SWCP_DONE = ${instrumented ? 'False' : 'True'}
 `;
 
   const runner = entry
@@ -160,7 +169,13 @@ If Err.Number <> 0 Then
     Dim SWCP_ERRDESC
     SWCP_ERRDESC = Err.Description
     If SWCP_ERRDESC = "" Then SWCP_ERRDESC = "未知错误 (代码 " & Err.Number & ")"
-    SWCP_Fail "脚本执行出错: " & SWCP_ERRDESC
+    SWCP_Fail "脚本执行出错" & SWCP_Where() & ": " & SWCP_ERRDESC
+End If
+' P133: a runtime error inside the entry Sub can reach here with Err already clear — the
+' macro then "succeeded" while it had stopped at its first broken line. The completion
+' flag set by the instrumented last line is the evidence that it ran to the end.
+If Not SWCP_DONE Then
+    SWCP_Fail "脚本没有执行到最后一行" & SWCP_Where() & "。这是 VBScript 运行时错误（常见原因：对象为空/未绑定、方法或属性不存在、参数个数不对）。"
 End If
 On Error GoTo 0
 SWCP_WriteResult True, "脚本执行完成"
@@ -198,6 +213,15 @@ Function SWCP_ConnectSW()
     Err.Clear
     On Error GoTo 0
     Set SWCP_ConnectSW = SWCP_APP
+End Function
+
+' P133: 出错位置(入口 Sub 内第几行 + 该行代码)
+Function SWCP_Where()
+    If SWCP_LN > 0 Then
+        SWCP_Where = ",停在第 " & SWCP_LN & " 行: " & SWCP_AT
+    Else
+        SWCP_Where = ""
+    End If
 End Function
 
 ' 写执行结果 JSON。Unicode=True → UTF-16LE+BOM,中文消息不乱码。
@@ -244,6 +268,54 @@ End Function
 ' ===== 用户脚本主体 =====
 ${code}
 ${runner}${supportLib}`;
+}
+
+/**
+ * P133: instrument the entry Sub.
+ *   - swApp / Part / swModel are bound first when the macro uses them — the run_macro tool
+ *     promised they were, but nothing assigned them, so every macro touching SolidWorks
+ *     died on its first statement.
+ *   - Before each statement: SWCP_LN / SWCP_AT record where we are, so a failure names the
+ *     line. Skipped where VBScript allows no statement: continuation lines (previous line
+ *     ends in " _") and the first line after "Select Case".
+ *   - Last line (and every Exit Sub): SWCP_DONE = True — proof the body ran to the end.
+ * Returns null when the entry Sub cannot be located (the runner then trusts Err alone).
+ */
+function instrumentEntry(code: string, entry: string, bindSw: boolean): string | null {
+  const lines = code.split('\n');
+  const head = new RegExp(`^\\s*Sub\\s+${entry}\\s*\\(`, 'i');
+  const start = lines.findIndex((l) => head.test(l));
+  if (start < 0) return null;
+  let end = -1;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\s*End\s+Sub\b/i.test(lines[i])) { end = i; break; }
+  }
+  if (end < 0) return null;
+
+  const out: string[] = [];
+  if (bindSw) {
+    out.push('    Set swApp = SWCP_ConnectSW()', '    Set Part = swApp.ActiveDoc', '    Set swModel = Part');
+  }
+  let n = 0;
+  let prev = '';
+  for (const line of lines.slice(start + 1, end)) {
+    const t = line.trim();
+    const significant = t !== '' && !t.startsWith("'") && !/^rem\b/i.test(t);
+    if (significant) {
+      n++;
+      const afterContinuation = /\s_\s*$/.test(prev);
+      const afterSelect = /^\s*Select\s+Case\b/i.test(prev);
+      if (!afterContinuation && !afterSelect) {
+        const indent = /^\s*/.exec(line)![0];
+        const text = t.length > 120 ? t.slice(0, 117) + '...' : t;
+        out.push(`${indent}SWCP_LN = ${n}: SWCP_AT = "${text.replace(/"/g, '""')}"`);
+      }
+      prev = line;
+    }
+    out.push(line.replace(/\bExit\s+Sub\b/gi, 'SWCP_DONE = True: Exit Sub'));
+  }
+  out.push('    SWCP_DONE = True');
+  return [...lines.slice(0, start + 1), ...out, ...lines.slice(end)].join('\n');
 }
 
 /**
