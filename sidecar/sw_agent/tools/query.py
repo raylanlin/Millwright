@@ -19,10 +19,8 @@ def mass_properties(ctx: Context):
     mp = None
     for maker in ("CreateMassProperty", "CreateMassProperty2"):
         try:
-            fn = getattr(ext, maker, None)
-            if fn is None:
-                continue
-            mp = fn() if callable(fn) else fn
+            # P133: sw_get — the late-bound getattr may already BE the MassProperty object
+            mp = sw_get(ext, maker)
             if mp is not None:
                 break
         except Exception:  # noqa: BLE001 — try the next API name (version differences)

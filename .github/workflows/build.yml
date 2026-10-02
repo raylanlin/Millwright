@@ -3,7 +3,10 @@ name: Build Windows Installer
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:  # 允许手动触发
+  # P132: a manual "Run workflow" now builds the same Setup installer + zip and attaches
+  # them to the run (no Release). Before, the packaging steps were tag-only, so a manual
+  # run produced nothing to download.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -70,19 +73,18 @@ jobs:
       # vendor/python/ before electron-builder runs. Idempotent — safe to re-run.
       # This is a build-time network op; end users have no network requirement.
       - name: Prepare bundled Python runtime
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: ./scripts/prepare-python.ps1
 
       - name: Build
         run: npm run build
 
-      # P110: NSIS setup retired (2026-08-04) — users found the installer repeatedly
-      # unusable, so tag builds now ship ONLY the portable single-file exe.
-      # npm run dist = prepare-python + build + electron-builder (target: portable
-      # from electron-builder.yml) → release/Millwright-Portable-<ver>-x64.exe
-      - name: Package (portable / 免安装版)
-        if: startsWith(github.ref, 'refs/tags/')
+      # npm run dist = prepare-python + build + electron-builder (targets from
+      # electron-builder.yml, P129): release/Millwright-Setup-<ver>-x64.exe (NSIS
+      # installer, auto-update) + release/Millwright-<ver>-x64.zip (extract-and-run).
+      - name: Package (Setup installer + zip)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         run: npm run dist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -93,13 +95,15 @@ jobs:
       # that class of accident impossible. It also confirms the installer filename carries
       # the version from package.json (the old electron-builder cache bug).
       - name: Verify packaged payload
-        if: startsWith(github.ref, 'refs/tags/')
+        id: verify
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $res = 'release/win-unpacked/resources'
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           Write-Host "package.json version: ${version}"
+          "version=${version}" >> $env:GITHUB_OUTPUT
 
           $required = @(
             "$res/sidecar/sw_agent/server.py",
@@ -151,16 +155,24 @@ jobs:
           if ($y -notmatch [regex]::Escape($version)) { Write-Host "::error::latest.yml version mismatch"; exit 1 }
           Write-Host "installer + latest.yml: OK"
 
-      # P110 v3: extract-and-run zip (nsis + portable exe both retired).
-      # npm run dist with the zip target produces release/*.zip containing the
-      # full win-unpacked tree — download, extract, run Millwright.exe.
-
-      - name: Upload artifact (portable directory)
-        if: startsWith(github.ref, 'refs/tags/')
+      # P132: the run page offers the INSTALLER. The old artifact was release/win-unpacked/**,
+      # which GitHub serves as one zip that extracts to a bare app folder — easy to mistake
+      # for "the build has no installer". archive:false uploads each file as-is, so the
+      # artifact downloads as the .exe / .zip itself (the artifact is named after the file).
+      - name: Upload artifact (Setup installer)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
-          name: Millwright
-          path: release/win-unpacked/**
+          path: release/Millwright-Setup-${{ steps.verify.outputs.version }}-x64.exe
+          archive: false
+          retention-days: 30
+
+      - name: Upload artifact (zip, extract-and-run)
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/Millwright-${{ steps.verify.outputs.version }}-x64.zip
+          archive: false
           retention-days: 30
 
       - name: Create Release

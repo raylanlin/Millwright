@@ -27,12 +27,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.130-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.132-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
   <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white" alt="python" />
-  <img src="https://img.shields.io/badge/tests-191_JS_%2B_58_Python-brightgreen" alt="tests" />
+  <img src="https://img.shields.io/badge/tests-197_JS_%2B_63_Python-brightgreen" alt="tests" />
   <img src="https://img.shields.io/badge/license-Apache_2.0-orange" alt="license" />
 </p>
 
@@ -85,7 +85,7 @@ Millwright：
 - **Agent 工具循环。** 观察 → 推理 → 执行。模型串联多次工具调用，读取每次返回的结构化 JSON，出错能自愈而不是静默失败。
 - **视觉理解。** 可翻转、旋转、截屏，再做分析——既支持多模态主模型，也支持独立视觉模型。
 - **常驻执行引擎。** 常驻 Python 边车在一整个多步任务中复用同一条 COM 连接。
-- **开发者友好。** 191 个 TS/Node 单元测试，另有独立的 Python 测试套件（`pytest sidecar/tests`），类型化 IPC 边界，`SKIP_SW_CONNECT` 纯 UI 开发模式（无需 SolidWorks）。
+- **开发者友好。** 197 个 TS/Node 单元测试，另有独立的 Python 测试套件（`pytest sidecar/tests`），类型化 IPC 边界，`SKIP_SW_CONNECT` 纯 UI 开发模式（无需 SolidWorks）。
 
 ## 跨版本兼容
 
@@ -157,19 +157,21 @@ npm run dev
 
 ## 支持的 AI 服务商
 
-| 服务商         | 协议        | Base URL                                            | 推荐模型                                |
-| ----------- | --------- | --------------------------------------------------- | ----------------------------------- |
-| OpenAI      | OpenAI    | `https://api.openai.com/v1`                         | `gpt-6-astra`（GPT-6 Astra）         |
-| Anthropic   | Anthropic | `https://api.anthropic.com`                         | `claude-opus-5-5`（Opus 5.5，默认）/ `claude-fable-5-1`（Fable 5.1，最强） |
-| DeepSeek    | OpenAI 兼容 | `https://api.deepseek.com`                          | `deepseek-v4-pro`（强） / `deepseek-v4-flash`（快） |
-| Kimi / 月之暗面 | OpenAI 兼容 | `https://api.moonshot.cn/v1`                        | `kimi-k2.5`                         |
-| MiniMax     | OpenAI 兼容 | `https://api.minimaxi.com/v1`                       | `minimax-m3`（512K 上下文）         |
-| 智谱 (GLM)    | OpenAI 兼容 | `https://open.bigmodel.cn/api/paas/v4`               | `glm-4.6`                           |
-| 阿里百炼 (Qwen) | OpenAI 兼容 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3.7-max`                       |
-| 硅基流动        | OpenAI 兼容 | `https://api.siliconflow.cn/v1`                     | —（用户自填）                       |
-| Ollama（本地）  | OpenAI 兼容 | `http://localhost:11434/v1`                         | —（用户自填）                       |
+| 服务商 | OpenAI 兼容地址 | Anthropic 兼容地址 | 推荐模型 |
+| --- | --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | — | `gpt-6-astra`（GPT-6 Astra） |
+| Anthropic | — | `https://api.anthropic.com` | `claude-opus-5-5`（Opus 5.5，默认）/ `claude-fable-5-1`（Fable 5.1，最强） |
+| DeepSeek | `https://api.deepseek.com` | `https://api.deepseek.com/anthropic` | `deepseek-v4-pro`（强）/ `deepseek-flash`（V4.1 Flash，快） |
+| Kimi / 月之暗面 | `https://api.moonshot.cn/v1` | `https://api.moonshot.cn/anthropic` | `kimi-k3` |
+| MiniMax | `https://api.minimax.io/v1` | `https://api.minimax.io/anthropic` | `minimax-m3`（512K 上下文） |
+| 智谱 (GLM) | `https://open.bigmodel.cn/api/paas/v4` | `https://open.bigmodel.cn/api/anthropic` | `glm-4.6` |
+| 阿里百炼 (Qwen) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `https://dashscope.aliyuncs.com/apps/anthropic` | `qwen3.8-max` |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | — | —（用户自填） |
+| Ollama（本地） | `http://localhost:11434/v1` | `http://localhost:11434` | —（用户自填） |
 
-> 各家型号更新很快，请以服务商官方文档为准。Agent 工具调用需要模型支持 function calling；GPT-6 Astra、Claude Opus 5.5 / Fable 5.1、DeepSeek V4、Kimi K2、MiniMax M3、GLM-4.6 是一等公民。
+> 在 ⚙️ 设置里先选协议：服务商快捷按钮会填入该服务商**对应协议**的地址，模型下拉框只列出该服务商的模型（外加「自定义模型」）。切换协议时，如果该服务商两种协议都支持，会自动换成另一种协议的地址。
+
+> 各家型号更新很快，请以服务商官方文档为准。Agent 工具调用需要模型支持 function calling；GPT-6 Astra、Claude Opus 5.5 / Fable 5.1、DeepSeek V4 Pro / V4.1 Flash、Kimi K3、MiniMax M3、GLM-4.6 是一等公民。
 >
 > 新一代模型会拒绝老模型能接受的请求字段：GPT-6 Astra 要求 `max_completion_tokens`、不接受 `temperature`，并且在 `/chat/completions` 上不允许 `reasoning_effort` 与工具同时出现；Claude Opus 5.5 和 Fable 5.1 拒绝 `temperature` 和 `budget_tokens`，并且始终开启思考（深度用 `effort` 控制）。Millwright 按模型 ID 自动识别并发送正确的字段——设置里的「推理深度」会映射到各模型自己的控制参数上。OpenAI `gpt-5.x` / o 系列同样已自动识别。
 
@@ -245,7 +247,7 @@ SolidWorks
 
 - [x] **v0.1** — MVP：Electron 骨架、LLM 适配器、COM 桥接、首批工具
 - [x] **v0.2** — Python 边车、agent 工具循环、双引擎降级、视觉反馈、确认卡片，Apache-2.0 开源
-- [x] **v0.2.4 → v0.2.130** — 大量真机加固 ← *当前*：草图 → 特征 → 切除 → 视觉核验的完整闭环已在真机上端到端跑通
+- [x] **v0.2.4 → v0.2.132** — 大量真机加固 ← *当前*：草图 → 特征 → 切除 → 视觉核验的完整闭环已在真机上端到端跑通
 - [ ] **v0.3** — 流式工具调用、在模型面上画草图（而非仅基准面）、孔向导、钣金、工程图标注、剩余 `# VERIFY` 参数完成核验
 - [ ] **v1.0** — MCP server、多 CAD 支持
 

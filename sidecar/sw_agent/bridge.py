@@ -22,6 +22,7 @@ Key conventions:
 from __future__ import annotations
 
 import os
+import subprocess
 from typing import Any
 
 from sw_agent import typeinfo
@@ -78,7 +79,79 @@ def sw_get(obj, name: str, *args):
     is callable, call it; otherwise return it. Only for NO-ARG or fully-given-arg reads.
     """
     attr = getattr(obj, name)
+    # P133: a COM object (CDispatch / early-bound wrapper) is ALWAYS callable — __call__
+    # forwards to its default member. When getattr already handed back an object, the
+    # member was a zero-arg method late binding invoked as a property; calling the result
+    # again hit its DISPID_VALUE and failed (mass_properties: "CreateMassProperty/2
+    # unavailable" on a machine where both exist).
+    if not args and hasattr(attr, "_oleobj_"):
+        return attr
     return attr(*args) if callable(attr) else attr
+
+
+def _sw_pids() -> set[int] | None:
+    """P133: PIDs of running SLDWORKS.exe processes; None when they cannot be listed."""
+    if os.name != "nt":
+        return None
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, errors="replace", timeout=8, check=False,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+        ).stdout
+    except Exception:  # noqa: BLE001
+        return None
+    pids: set[int] = set()
+    for line in out.splitlines():
+        cols = [c.strip().strip('"') for c in line.split('","')]
+        if len(cols) > 1 and cols[1].isdigit():
+            pids.add(int(cols[1]))
+    return pids
+
+
+def _is_elevated() -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def ensure_visible(app, pids_before: set[int] | None) -> str | None:
+    """P133: make sure the SolidWorks we attached to is one the user can SEE.
+
+    `Dispatch("SldWorks.Application")` attaches to the running SolidWorks only when COM can
+    reach it. When it cannot — typically Millwright and SolidWorks running at different
+    privilege levels ("Run as administrator" on one of them; the ROT is per integrity
+    level) — COM silently STARTS A NEW, INVISIBLE SolidWorks and every tool works on that
+    one: the user watched an empty window while a whole part was built and "verified".
+    A visible instance → None. Otherwise show it and return a note for the user.
+    """
+    try:
+        if bool(app.Visible):
+            return None
+    except Exception:  # noqa: BLE001 — cannot tell; do not guess
+        return None
+    try:
+        app.Visible = True
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        app.UserControl = True   # keep it open for the user after we let go
+    except Exception:  # noqa: BLE001
+        pass
+    after = _sw_pids()
+    second = bool(pids_before) and after is not None and bool(after - pids_before)
+    if not second:
+        return ("SolidWorks 之前没有可见窗口，已启动/显示 SolidWorks；之后的建模都在这个窗口里进行。")
+    note = ("你已打开的 SolidWorks 无法被连接，系统因此新启动了一个 SolidWorks 实例（现已显示出来），"
+            "模型会建在这个新窗口里，而不是你原来的窗口。通常原因是两者权限级别不同——其中一个是"
+            "「以管理员身份运行」的。")
+    if _is_elevated():
+        note += "Millwright 当前正以管理员身份运行。"
+    return note + "要连接到你自己的窗口：关闭 Millwright 和新出现的 SolidWorks，然后以同样的方式（都不用管理员）重新打开两者。"
 
 
 def as_iface(obj, *ifaces):
@@ -142,6 +215,7 @@ class Context:
         self._model = None          # P122: flagged ActiveDoc cache (same underlying object → reuse)
         self._model_key = None
         self.scratch: dict[str, Any] = {}
+        self.connect_note: str | None = None   # P133: see ensure_visible
 
     # ---- Connection ----
     def _connect(self):
@@ -153,7 +227,10 @@ class Context:
             pass
         errors: list[str] = []
         raw = None
+        pids_before = _sw_pids()
         # P73: Dispatch covers ROT + class-factory in one call (SW is a singleton server)
+        # P133: … unless COM cannot reach the running one — then it starts a hidden second
+        # instance. ensure_visible() below catches that.
         try:
             raw = win32com.client.dynamic.Dispatch("SldWorks.Application")
         except Exception as e:  # noqa: BLE001
@@ -174,11 +251,14 @@ class Context:
         if BINDING == "early":
             try:
                 from win32com.client import gencache
-                return gencache.EnsureDispatch(raw)
+                app = gencache.EnsureDispatch(raw)
+                self.connect_note = ensure_visible(app, pids_before)
+                return app
             except Exception:  # noqa: BLE001 — makepy unavailable → late anyway
                 pass
         app = win32com.client.dynamic.Dispatch(getattr(raw, "_oleobj_", raw))
         typeinfo.flag_methods(app, "ISldWorks")
+        self.connect_note = ensure_visible(app, pids_before)
         return app
 
     @property
