@@ -8,7 +8,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { LLMConfig, LLMErrorInfo, ThemeName, SWStatus } from '../../shared/types';
-import { DEFAULT_URLS, MODEL_PRESETS, OPENAI_COMPATIBLE_PROVIDERS } from '../../shared/presets';
+import {
+  DEFAULT_URLS, applyProviderPreset, modelOptions, providerForURL, providersFor, switchProtocol,
+  type ProviderPreset,
+} from '../../shared/presets';
 import type { ThemeTokens } from '../themes';
 import { useLocale, useT } from '../i18n/LocaleContext';
 import { LOCALE_LABELS } from '../i18n/strings';
@@ -52,9 +55,11 @@ export function SettingsModal({
     setDraft(config);
   }, [config]);
 
-  // Dropdown options: if the current model is not in the preset list, show it as "custom"
-  const presets = MODEL_PRESETS[draft.protocol];
-  const modelIsPreset = presets.some((p) => p.value === draft.model);
+  // Dropdown options: the base URL's provider's models + "custom" (P132); a model not in
+  // that list shows as "custom"
+  const presets = modelOptions(draft.protocol, draft.baseURL);
+  const activeProvider = providerForURL(draft.baseURL);
+  const modelIsPreset = presets.some((p) => p.value !== 'custom' && p.value === draft.model);
   const selectValue = modelIsPreset ? draft.model : 'custom';
   const customModel = modelIsPreset ? '' : draft.model;
 
@@ -74,29 +79,18 @@ export function SettingsModal({
     });
   };
 
+  // P132: switching protocol keeps the provider when it serves both (DeepSeek's OpenAI URL
+  // becomes its /anthropic URL) and keeps the model if that provider lists it; otherwise
+  // the protocol's official endpoint and its recommended model.
   const handleProtocol = (p: 'anthropic' | 'openai') => {
-    // P131: pair the default URL with a model that endpoint actually serves. The first
-    // OpenAI-protocol preset is DeepSeek, so switching gave api.openai.com + deepseek-v4-pro.
-    const official = OPENAI_COMPATIBLE_PROVIDERS.find((x) => x.url === DEFAULT_URLS[p]);
-    setDraft((d) => ({
-      ...d,
-      protocol: p,
-      baseURL: DEFAULT_URLS[p],
-      model: official?.suggestedModel ?? MODEL_PRESETS[p][0].value,
-    }));
+    setDraft((d) => ({ ...d, protocol: p, ...switchProtocol(d, p) }));
     setTestStatus({ kind: 'idle' });
   };
 
-  // P131: a quick-fill button sets the whole provider, not just its URL — the suggested
-  // model and the per-provider context / output defaults were declared but never applied.
-  const applyProvider = (p: (typeof OPENAI_COMPATIBLE_PROVIDERS)[number]) => {
-    setDraft((d) => ({
-      ...d,
-      baseURL: p.url,
-      ...(p.suggestedModel ? { model: p.suggestedModel } : {}),
-      ...(p.contextWindow ? { contextWindow: p.contextWindow } : {}),
-      ...(p.maxTokens ? { maxTokens: p.maxTokens } : {}),
-    }));
+  // P131/P132: a quick-fill button sets the whole provider — the URL for the CURRENT
+  // protocol, one of its models, and its context / output defaults.
+  const applyProvider = (p: ProviderPreset) => {
+    setDraft((d) => ({ ...d, ...applyProviderPreset(p, d.protocol, d.model) }));
     setTestStatus({ kind: 'idle' });
   };
 
@@ -302,34 +296,33 @@ export function SettingsModal({
           placeholder={DEFAULT_URLS[draft.protocol]}
           style={{ ...fieldStyle, marginBottom: 4 }}
         />
-        {draft.protocol === 'openai' && (
-          <div style={{ marginBottom: 16 }}>
-            <p style={{ color: t.textMuted, fontSize: 11, margin: '4px 1px 6px' }}>
-              {tr('settings.quickFill')}
-            </p>
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-              {OPENAI_COMPATIBLE_PROVIDERS.map((p) => (
+        {/* P132: providers serving the selected protocol; each fills ITS URL for it */}
+        <div style={{ marginBottom: 16 }}>
+          <p style={{ color: t.textMuted, fontSize: 11, margin: '4px 1px 6px' }}>
+            {tr('settings.quickFill')}
+          </p>
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {providersFor(draft.protocol).map((p) => {
+              const active = activeProvider?.id === p.id;
+              return (
                 <button
-                  key={p.name}
+                  key={p.id}
                   onClick={() => applyProvider(p)}
+                  title={p.urls[draft.protocol]}
                   style={{
                     padding: '3px 8px', borderRadius: 4,
-                    border: `1px solid ${t.cardBorder}`,
-                    background: t.cardAlt, color: t.textSecondary,
+                    border: active ? `1px solid ${t.accent}` : `1px solid ${t.cardBorder}`,
+                    background: active ? t.accentSoft : t.cardAlt,
+                    color: active ? t.text : t.textSecondary,
                     fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
                   }}
                 >
                   {p.name}
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
-        )}
-        {draft.protocol === 'anthropic' && (
-          <p style={{ color: t.textMuted, fontSize: 11, margin: '2px 0 16px 1px' }}>
-            {tr('settings.anthropicDefault')}
-          </p>
-        )}
+        </div>
 
         {/* API Key */}
         <label style={labelStyle}>API Key</label>

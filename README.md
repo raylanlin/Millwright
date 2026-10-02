@@ -28,12 +28,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.130-blue" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.2.131-blue" alt="version" />
   <img src="https://img.shields.io/badge/electron-28-47848F?logo=electron" alt="electron" />
   <img src="https://img.shields.io/badge/react-18-61DAFB?logo=react" alt="react" />
   <img src="https://img.shields.io/badge/typescript-5.3-3178C6?logo=typescript" alt="typescript" />
   <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white" alt="python" />
-  <img src="https://img.shields.io/badge/tests-191_JS_%2B_58_Python-brightgreen" alt="tests" />
+  <img src="https://img.shields.io/badge/tests-197_JS_%2B_58_Python-brightgreen" alt="tests" />
   <img src="https://img.shields.io/badge/license-Apache_2.0-orange" alt="license" />
 </p>
 
@@ -86,7 +86,7 @@ Millwright:
 - **Agentic tool loop.** Observe → reason → act. The model chains multiple tool calls, reads structured JSON back from each one, and recovers from errors instead of failing silently.
 - **Visual understanding.** Reorient, rotate, screenshot, and analyze the model — via a multimodal main model or a dedicated vision model.
 - **Resident execution engine.** A persistent Python sidecar holds one COM connection open across an entire multi-step task.
-- **Developer-friendly.** 191 TypeScript/Node tests plus a Python suite (`pytest sidecar/tests`) for the sidecar, a typed IPC boundary, and a `SKIP_SW_CONNECT` mode for UI-only development without SolidWorks installed.
+- **Developer-friendly.** 197 TypeScript/Node tests plus a Python suite (`pytest sidecar/tests`) for the sidecar, a typed IPC boundary, and a `SKIP_SW_CONNECT` mode for UI-only development without SolidWorks installed.
 
 ## Cross-version compatibility
 
@@ -158,19 +158,21 @@ A `Millwright-*-x64.zip` is also published alongside the Setup installer for use
 
 ## Supported AI providers
 
-| Provider | Protocol | Base URL | Suggested model |
+| Provider | OpenAI-compatible URL | Anthropic-compatible URL | Suggested model |
 |---|---|---|---|
-| OpenAI | OpenAI | `https://api.openai.com/v1` | `gpt-6-astra` (GPT-6 Astra) |
-| Anthropic | Anthropic | `https://api.anthropic.com` | `claude-opus-5-5` (Opus 5.5, default) / `claude-fable-5-1` (Fable 5.1, most capable) |
-| DeepSeek | OpenAI-compatible | `https://api.deepseek.com` | `deepseek-v4-pro` |
-| Kimi / Moonshot | OpenAI-compatible | `https://api.moonshot.cn/v1` | `kimi-k3` |
-| MiniMax | OpenAI-compatible | `https://api.minimaxi.com/v1` | `minimax-m3` |
-| Alibaba Bailian (Qwen) | OpenAI-compatible | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-3.8max` |
-| Zhipu (GLM) | OpenAI-compatible | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.6` |
-| SiliconFlow | OpenAI-compatible | `https://api.siliconflow.cn/v1` | — |
-| Ollama (local) | OpenAI-compatible | `http://localhost:11434/v1` | — |
+| OpenAI | `https://api.openai.com/v1` | — | `gpt-6-astra` (GPT-6 Astra) |
+| Anthropic | — | `https://api.anthropic.com` | `claude-opus-5-5` (Opus 5.5, default) / `claude-fable-5-1` (Fable 5.1, most capable) |
+| DeepSeek | `https://api.deepseek.com` | `https://api.deepseek.com/anthropic` | `deepseek-v4-pro` (strong) / `deepseek-flash` (V4.1 Flash, fast) |
+| Kimi / Moonshot | `https://api.moonshot.cn/v1` | `https://api.moonshot.cn/anthropic` | `kimi-k3` |
+| MiniMax | `https://api.minimax.io/v1` | `https://api.minimax.io/anthropic` | `minimax-m3` |
+| Alibaba Bailian (Qwen) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `https://dashscope.aliyuncs.com/apps/anthropic` | `qwen3.8-max` |
+| Zhipu (GLM) | `https://open.bigmodel.cn/api/paas/v4` | `https://open.bigmodel.cn/api/anthropic` | `glm-4.6` |
+| SiliconFlow | `https://api.siliconflow.cn/v1` | — | — |
+| Ollama (local) | `http://localhost:11434/v1` | `http://localhost:11434` | — |
 
-> Model IDs move fast — check your provider's docs for the current lineup. Agentic tool calling requires a model that supports function calling; GPT-6 Astra, Claude Opus 5.5 / Fable 5.1, DeepSeek V4, Kimi K3, MiniMax M3, and GLM-4.6 are first-class targets.
+> In ⚙️ Settings, pick the protocol first: the provider quick-fill buttons then fill that provider's URL **for the selected protocol**, and the model list shows only that provider's models (plus *Custom model*). Switching protocol keeps the provider when it serves both.
+
+> Model IDs move fast — check your provider's docs for the current lineup. Agentic tool calling requires a model that supports function calling; GPT-6 Astra, Claude Opus 5.5 / Fable 5.1, DeepSeek V4 Pro / V4.1 Flash, Kimi K3, MiniMax M3, and GLM-4.6 are first-class targets.
 >
 > The newest models reject request fields that older ones accepted: GPT-6 Astra needs `max_completion_tokens`, takes no `temperature`, and refuses `reasoning_effort` alongside tools on `/chat/completions`; Claude Opus 5.5 and Fable 5.1 reject `temperature` and `budget_tokens` and always think (depth is set with `effort`). Millwright detects these models by ID and sends the right fields — the **Reasoning depth** setting maps onto each model's own controls.
 
@@ -246,7 +248,7 @@ Contributions welcome — see [CONTRIBUTING.md](docs/CONTRIBUTING.md). We especi
 
 - [x] **v0.1** — MVP: Electron shell, LLM adapters, COM bridge, first tool set
 - [x] **v0.2** — Python sidecar, agentic tool loop, dual-engine fallback, vision feedback, confirmation cards, Apache-2.0 open source
-- [x] **v0.2.4 → v0.2.130** — Extensive hardening against real SolidWorks installs ← *current*: the sketch → feature → cut → visual-verification loop now runs end to end on real hardware
+- [x] **v0.2.4 → v0.2.131** — Extensive hardening against real SolidWorks installs ← *current*: the sketch → feature → cut → visual-verification loop now runs end to end on real hardware
 - [ ] **v0.3** — Streaming tool calls, sketching on model faces (not just reference planes), hole wizard, sheet metal, drawing annotations, remaining `#VERIFY` parameters confirmed
 - [ ] **v1.0** — MCP server, multi-CAD support
 

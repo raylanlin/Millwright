@@ -6,6 +6,60 @@
 
 ## [Unreleased]
 
+## [0.2.131] - 2026-10-02
+
+### Changed (P132 — providers × protocols, installer on the run page)
+
+**Settings: providers now serve both protocols.** Most providers expose an
+OpenAI-compatible URL and an Anthropic-compatible one. DeepSeek, for example, serves
+`https://api.deepseek.com` and `https://api.deepseek.com/anthropic`.
+- **Quick-fill buttons, both protocols:** before, they only appeared under the OpenAI
+  protocol and always filled the OpenAI URL. They now appear under both protocols and fill
+  the URL **for the selected protocol**.
+- **Model list per provider:** the model list shows only the active provider's models plus
+  *Custom model*. Before, it listed every vendor's models under a protocol.
+- **Protocol switch:** switching protocol keeps the provider when it serves both, and
+  keeps the model if that provider lists it. Otherwise it falls back to the protocol's
+  official endpoint.
+- **Data:** presets are reorganised as `PROVIDERS` (per-protocol URLs, models, defaults).
+  New pure helpers `providerForURL` / `modelOptions` / `switchProtocol` /
+  `applyProviderPreset` are covered by tests. `MODEL_PRESETS` and
+  `OPENAI_COMPATIBLE_PROVIDERS` remain as derived lists.
+- **Anthropic-compatible URLs added:**
+  - DeepSeek `…/anthropic`
+  - Kimi `api.moonshot.cn/anthropic`
+  - MiniMax `api.minimax.io/anthropic`
+  - GLM `open.bigmodel.cn/api/anthropic`
+  - Qwen `dashscope.aliyuncs.com/apps/anthropic`
+  - Ollama `localhost:11434`
+
+**Model IDs**
+- **DeepSeek:** V4.1 Flash (2026-09-10) is `deepseek-flash`. DeepSeek retired
+  `deepseek-v4-flash`, which is now only routed over, so it is removed from the presets.
+  `deepseek-v4-pro` stays.
+- **Kimi:** `kimi-k3` is added and suggested.
+- **Qwen:** `qwen3.8-max` is added and suggested.
+
+**Build: the installer is on the run page.**
+- **What looked like "only a zip":** the Actions artifact was `release/win-unpacked/**`.
+  GitHub serves that as one zip which extracts to a bare app folder, so it was easy to read
+  as "the build has no installer". The Release itself did carry the Setup exe.
+- **Artifacts now:** they are the Setup installer and the zip, uploaded with
+  `archive: false`, so they download as the `.exe` / `.zip` themselves.
+- **Manual runs:** a manual **Run workflow** now packages and verifies too, and attaches
+  the installer to the run without creating a Release. Before, it only ran the checks.
+
+### Tests
+- **`tests/presets.test.mjs`:**
+  - every provider URL is valid
+  - suggested models are listed
+  - no retired DeepSeek id remains
+  - URL → provider resolution
+  - the per-provider model list
+  - protocol switching
+  - quick-fill by protocol
+- **Totals:** 197 JS + 58 Python tests.
+
 ## [0.2.130] - 2026-10-01
 
 ### Fixed (P131 — current models, and what P129/P130 broke)
