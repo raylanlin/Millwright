@@ -96,7 +96,7 @@ def _sw_pids() -> set[int] | None:
     try:
         out = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq SLDWORKS.exe", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, errors="replace", timeout=8,
+            capture_output=True, text=True, errors="replace", timeout=8, check=False,
             creationflags=0x08000000,  # CREATE_NO_WINDOW
         ).stdout
     except Exception:  # noqa: BLE001
